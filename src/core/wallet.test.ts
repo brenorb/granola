@@ -8,7 +8,7 @@ import {
 } from "./wallet.js";
 
 const proof = (amount: number, id: string, secret: string): StoredProof => ({
-  amount,
+  amount: String(amount),
   id,
   secret,
   C: `signature-${secret}`
@@ -41,41 +41,41 @@ describe("wallet domain", () => {
     expect(getWalletView(state)).toEqual({
       revision: 4,
       balances: [
-        { unit: "eur", amount: 3, mintCount: 1, proofCount: 1 },
-        { unit: "sat", amount: 7, mintCount: 2, proofCount: 3 },
-        { unit: "usd", amount: 8, mintCount: 1, proofCount: 1 }
+        { unit: "eur", amount: "3", mintCount: 1, proofCount: 1 },
+        { unit: "sat", amount: "7", mintCount: 2, proofCount: 3 },
+        { unit: "usd", amount: "8", mintCount: 1, proofCount: 1 }
       ],
       pockets: [
         {
           mintUrl: "https://mint-a.test",
           unit: "sat",
-          amount: 5,
+          amount: "5",
           proofCount: 2,
-          denominations: [1, 4],
+          denominations: ["1", "4"],
           keysetIds: ["sat-keyset"]
         },
         {
           mintUrl: "https://mint-b.test",
           unit: "sat",
-          amount: 2,
+          amount: "2",
           proofCount: 1,
-          denominations: [2],
+          denominations: ["2"],
           keysetIds: ["sat-keyset-b"]
         },
         {
           mintUrl: "https://mint-fiat.test",
           unit: "eur",
-          amount: 3,
+          amount: "3",
           proofCount: 1,
-          denominations: [3],
+          denominations: ["3"],
           keysetIds: ["eur-keyset"]
         },
         {
           mintUrl: "https://mint-fiat.test",
           unit: "usd",
-          amount: 8,
+          amount: "8",
           proofCount: 1,
-          denominations: [8],
+          denominations: ["8"],
           keysetIds: ["usd-keyset"]
         }
       ]
@@ -97,7 +97,7 @@ describe("wallet domain", () => {
     });
 
     expect(getWalletView(state).balances).toEqual([
-      { unit: "sat", amount: 8, mintCount: 1, proofCount: 1 }
+      { unit: "sat", amount: "8", mintCount: 1, proofCount: 1 }
     ]);
     expect(state.revision).toBe(1);
   });

@@ -1,5 +1,5 @@
 export interface StoredProof {
-  amount: number;
+  amount: string;
   id: string;
   secret: string;
   C: string;
@@ -20,7 +20,7 @@ export interface WalletState {
 
 export interface WalletBalanceView {
   unit: string;
-  amount: number;
+  amount: string;
   mintCount: number;
   proofCount: number;
 }
@@ -28,9 +28,9 @@ export interface WalletBalanceView {
 export interface WalletPocketView {
   mintUrl: string;
   unit: string;
-  amount: number;
+  amount: string;
   proofCount: number;
-  denominations: number[];
+  denominations: string[];
   keysetIds: string[];
 }
 
@@ -55,10 +55,15 @@ export function normalizeMintUrl(mintUrl: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-function validateProof(proof: StoredProof): void {
-  if (!Number.isSafeInteger(proof.amount) || proof.amount <= 0) {
-    throw new Error("Proof amount must be a positive safe integer");
+function asPositiveAmount(amount: string): bigint {
+  if (!/^[1-9]\d*$/.test(amount)) {
+    throw new Error("Proof amount must be a canonical positive integer string");
   }
+  return BigInt(amount);
+}
+
+function validateProof(proof: StoredProof): void {
+  asPositiveAmount(proof.amount);
   if (!proof.id || !proof.secret || !proof.C) {
     throw new Error("Proof is missing bearer-token fields");
   }
@@ -106,30 +111,45 @@ export function addProofs(
   };
 }
 
+function sumProofs(proofs: StoredProof[]): string {
+  return proofs
+    .reduce((sum, proof) => sum + asPositiveAmount(proof.amount), 0n)
+    .toString();
+}
+
 export function getWalletView(state: WalletState): WalletView {
   const pockets = state.pockets
     .map<WalletPocketView>((pocket) => ({
       mintUrl: pocket.mintUrl,
       unit: pocket.unit,
-      amount: pocket.proofs.reduce((sum, proof) => sum + proof.amount, 0),
+      amount: sumProofs(pocket.proofs),
       proofCount: pocket.proofs.length,
-      denominations: pocket.proofs.map((proof) => proof.amount).sort((a, b) => a - b),
+      denominations: pocket.proofs
+        .map((proof) => proof.amount)
+        .sort((a, b) => {
+          const left = BigInt(a);
+          const right = BigInt(b);
+          return left < right ? -1 : left > right ? 1 : 0;
+        }),
       keysetIds: [...new Set(pocket.proofs.map((proof) => proof.id))].sort()
     }))
     .sort((a, b) =>
       a.mintUrl.localeCompare(b.mintUrl) || a.unit.localeCompare(b.unit)
     );
 
-  const grouped = new Map<string, WalletBalanceView & { mints: Set<string> }>();
+  const grouped = new Map<
+    string,
+    Omit<WalletBalanceView, "amount"> & { amount: bigint; mints: Set<string> }
+  >();
   for (const pocket of pockets) {
     const balance = grouped.get(pocket.unit) ?? {
       unit: pocket.unit,
-      amount: 0,
+      amount: 0n,
       mintCount: 0,
       proofCount: 0,
       mints: new Set<string>()
     };
-    balance.amount += pocket.amount;
+    balance.amount += BigInt(pocket.amount);
     balance.proofCount += pocket.proofCount;
     balance.mints.add(pocket.mintUrl);
     balance.mintCount = balance.mints.size;
@@ -137,7 +157,10 @@ export function getWalletView(state: WalletState): WalletView {
   }
 
   const balances = [...grouped.values()]
-    .map(({ mints: _mints, ...balance }) => balance)
+    .map(({ mints: _mints, amount, ...balance }) => ({
+      ...balance,
+      amount: amount.toString()
+    }))
     .sort((a, b) => a.unit.localeCompare(b.unit));
 
   return { revision: state.revision, balances, pockets };
