@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://testnut.cashu.space https://nofee.testnut.cashu.space wss:; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <meta name="description" content="Granola — an experimental Cashu atomic swap workbench." />
+    <title>Granola / Cashu swap workbench</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="wordmark" href="./" aria-label="Granola home">GRANOLA<span>/00</span></a>
+      <div class="environment"><i></i> FAKE TESTNET ECASH</div>
+      <p id="profile-label">Wallet profile: …</p>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow">Cashu atomic swap workbench</p>
+        <h1 id="hero-title">Hold the proofs.<br /><em>Test the trade.</em></h1>
+        <p class="lede">A local bearer-token wallet built for humans and agents. No account, no server, no real money.</p>
+        <aside class="warning"><strong>Laboratory only.</strong> Testnut tokens are fake, unbacked, and may disappear. Anyone holding a backup token can spend it.</aside>
+      </section>
+
+      <section class="ledger" aria-labelledby="balances-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">01 / Wallet</p><h2 id="balances-title">Balances &amp; liabilities</h2></div>
+          <button id="refresh" class="quiet" type="button">Refresh</button>
+        </div>
+        <div id="dashboard"></div>
+      </section>
+
+      <div class="work-grid">
+        <section class="panel" aria-labelledby="mint-title">
+          <p class="eyebrow">02 / Acquire</p>
+          <h2 id="mint-title">Mint fake tokens</h2>
+          <form id="mint-form">
+            <label>Test mint
+              <select id="mint-url" name="mintUrl">
+                <option value="https://testnut.cashu.space">Testnut / fee test</option>
+                <option value="https://nofee.testnut.cashu.space">Testnut / no fee</option>
+              </select>
+            </label>
+            <div class="field-pair">
+              <label>Unit<select id="mint-unit" name="unit"><option value="sat">SAT</option><option value="usd">USD</option></select></label>
+              <label>Minor units<input name="amount" inputmode="numeric" pattern="[1-9][0-9]*" value="100" required /></label>
+            </div>
+            <p class="hint">SAT is satoshis. USD uses cents. The mint advertises the available units and limits.</p>
+            <button type="submit">Request &amp; claim quote</button>
+          </form>
+          <div id="quote" class="quote" hidden></div>
+        </section>
+
+        <section class="panel" aria-labelledby="receive-title">
+          <p class="eyebrow">03 / Import</p>
+          <h2 id="receive-title">Receive a token</h2>
+          <form id="receive-form">
+            <label>Cashu token<textarea id="token" name="token" rows="6" placeholder="cashuB…" required spellcheck="false"></textarea></label>
+            <div id="token-preview" class="preview" aria-live="polite">Paste a token to inspect its mint, unit, and amount before receiving.</div>
+            <label class="check"><input id="accept-mint" type="checkbox" /> I explicitly trust this unknown mint</label>
+            <button type="submit">Verify &amp; receive</button>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="custody-title">
+          <p class="eyebrow">04 / Custody</p>
+          <h2 id="custody-title">Back up or erase</h2>
+          <p>Your proofs live only in this browser profile’s IndexedDB. A backup contains spendable bearer tokens.</p>
+          <button id="backup" type="button">Download bearer backup</button>
+          <details>
+            <summary>Danger zone</summary>
+            <form id="clear-form">
+              <label>Type <code>DELETE TEST WALLET</code>
+                <input name="confirmation" autocomplete="off" />
+              </label>
+              <button class="danger" type="submit">Erase local wallet</button>
+            </form>
+          </details>
+        </section>
+
+        <section class="panel log-panel" aria-labelledby="log-title">
+          <p class="eyebrow">05 / Trace</p>
+          <h2 id="log-title">Local activity</h2>
+          <ol id="activity-log" aria-live="polite"></ol>
+          <p class="hint">Secrets, encoded tokens, and mint quote IDs are never written here.</p>
+        </section>
+      </div>
+
+      <section class="agent-strip" aria-labelledby="agent-title">
+        <p class="eyebrow">Agent interface</p>
+        <h2 id="agent-title">Same wallet, callable surface.</h2>
+        <p>Open developer tools and use <code>window.granola</code>. The documented API returns secret-free state unless you explicitly request a bearer backup.</p>
+        <a href="https://github.com/brenorb/granola/blob/main/docs/guides/agent-api.md">Read the API contract ↗</a>
+      </section>
+    </main>
+
+    <div id="status" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
