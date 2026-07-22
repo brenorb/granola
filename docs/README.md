@@ -7,6 +7,11 @@
 - [Interpretive expansion of the 2024 sequence](protocol/original-granola-sequence.md)
 - [Security invariants for the new proof of concept](protocol/security-invariants.md)
 
+## Testnet implementation
+
+- [Browser agent API](guides/agent-api.md)
+- [Testnet wallet notes](guides/testnet-wallet.md)
+
 ## Reading rule
 
 The historical material is evidence of intent, not evidence that atomicity or

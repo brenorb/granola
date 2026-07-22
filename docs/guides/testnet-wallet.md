@@ -1,0 +1,20 @@
+# Testnet wallet notes
+
+Granola’s browser wallet is a test harness, not a production wallet.
+
+- `https://testnut.cashu.space` is the default fake mint and advertises BOLT11
+  issuance for `sat` and `usd`.
+- `https://nofee.testnut.cashu.space` is the no-fee test alternative.
+- Tokens are unbacked and have no monetary value.
+- `eur` balances can be displayed and imported when a token uses that unit,
+  but neither configured faucet advertised EUR issuance during the live check.
+- A mint’s active keysets do not prove that a unit is mintable. Granola reads
+  the NUT-04 method/unit list and its minimum/maximum amounts.
+- Browser data is local. Clearing site data destroys any proofs not copied into
+  a bearer backup.
+- A crash after a mint accepts outputs but before IndexedDB saves them can lose
+  fake proofs. This prototype does not claim crash-safe issuance.
+
+Use `?wallet=maker` and `?wallet=taker` for two isolated actors. Do not open the
+same profile in browsers that lack Web Locks; cross-tab serialization depends
+on that API.
