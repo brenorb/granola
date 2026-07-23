@@ -1,5 +1,5 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
-import { OrderApi, type PublishOrderInput } from "./api/order-api.js";
+import { OrderApi, TEST_MARKET, type PublishOrderInput } from "./api/order-api.js";
 import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
 import { withOrderOutboxLock, withWalletLock } from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
@@ -84,7 +84,8 @@ async function publishOrderWithFunding(input: PublishOrderInput) {
     (await api.getState()).wallet,
     input.side,
     input.amount,
-    input.priceCentsPerBtc
+    input.priceCentsPerBtc,
+    TEST_MARKET
   );
   const publication = await orderApi.publishOrder(input);
   // Publishing creates the order's fresh maker key. Keep the shared page's

@@ -70,8 +70,7 @@ the exact public reserve projection, terms, and transcript.
 
 All later bearer-material messages use the two session keys. Session private
 keys are stored locally through the terminal settlement or refund horizon and
-may be destroyed only after recovery is no longer possible. The test prototype
-retains them until an explicit session cleanup.
+may be destroyed only after recovery is no longer possible.
 
 This limits cross-session exposure after key erasure. It is not a ratchet and
 does not provide forward secrecy or post-compromise security during a live

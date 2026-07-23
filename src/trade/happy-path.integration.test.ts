@@ -15,6 +15,7 @@ import type {
 } from "../cashu/trade-client.js";
 import type { ExpectedHtlcLock } from "../cashu/htlc.js";
 import type { WalletPocket, WalletState } from "../core/wallet.js";
+import type { ExactMarket } from "../order/model.js";
 import { createInboxList } from "../nostr/inbox.js";
 import type {
   DiscoveredTradeInbox
@@ -417,7 +418,7 @@ function effectEntropy(seed: number) {
 }
 
 describe("two-party coordinator happy path", () => {
-  it("settles exact SAT/USD legs and a signed public fill one action at a time", async () => {
+  async function settleHappyPath(selectedMarket: ExactMarket): Promise<void> {
     const makerOrderKey = secret(1);
     const makerPubkey = getPublicKey(makerOrderKey);
     const signer: OrderSigner = {
@@ -436,7 +437,9 @@ describe("two-party coordinator happy path", () => {
       orderService,
       () => NOW,
       () => ORDER_ID,
-      orderOutbox
+      orderOutbox,
+      undefined,
+      selectedMarket
     );
     const create = await orderApi.publishOrder({
       side: "sell",
@@ -446,7 +449,7 @@ describe("two-party coordinator happy path", () => {
     });
     await orderApi.publishNextStage(create.orderId);
     await orderApi.clearAcknowledgedOrderPublication(create.orderId);
-    const order = (await orderService.loadBook(TEST_MARKET, NOW)).book.asks[0]!;
+    const order = (await orderService.loadBook(selectedMarket, NOW)).book.asks[0]!;
 
     const transport = new MemoryTradeTransport();
     await transport.publishRegistration(
@@ -461,15 +464,15 @@ describe("two-party coordinator happy path", () => {
     const makerWallet = new WalletRepository(makerDriver);
     const takerWallet = new WalletRepository(takerDriver);
     await makerWallet.save(fundedWallet(
-      TEST_MARKET.baseMint,
-      TEST_MARKET.baseUnit,
+      selectedMarket.baseMint,
+      selectedMarket.baseUnit,
       "20",
       BASE_KEYSET,
       "maker"
     ));
     await takerWallet.save(fundedWallet(
-      TEST_MARKET.quoteMint,
-      TEST_MARKET.quoteUnit,
+      selectedMarket.quoteMint,
+      selectedMarket.quoteUnit,
       "1",
       QUOTE_KEYSET,
       "taker"
@@ -522,11 +525,11 @@ describe("two-party coordinator happy path", () => {
       quoteMintNow: NOW
     };
     const market = {
-      baseMint: TEST_MARKET.baseMint,
-      baseUnit: TEST_MARKET.baseUnit,
+      baseMint: selectedMarket.baseMint,
+      baseUnit: selectedMarket.baseUnit,
       baseKeyset: BASE_KEYSET,
-      quoteMint: TEST_MARKET.quoteMint,
-      quoteUnit: TEST_MARKET.quoteUnit,
+      quoteMint: selectedMarket.quoteMint,
+      quoteUnit: selectedMarket.quoteUnit,
       quoteKeyset: QUOTE_KEYSET
     };
     await takerSessions.save(await createTakerSession({
@@ -692,5 +695,18 @@ describe("two-party coordinator happy path", () => {
     ]) {
       expect(publicJson).not.toContain(secretValue);
     }
+  }
+
+  it("settles the configured two-mint SAT/USD market one action at a time", async () => {
+    await settleHappyPath(TEST_MARKET);
+  }, 60_000);
+
+  it("settles a one-mint market one action at a time", async () => {
+    await settleHappyPath({
+      baseMint: "https://one-mint.example",
+      baseUnit: "sat",
+      quoteMint: "https://one-mint.example",
+      quoteUnit: "usd"
+    });
   }, 60_000);
 });
