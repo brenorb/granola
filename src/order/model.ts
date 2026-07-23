@@ -179,7 +179,10 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   const amount = integer(input.amount, "Order amount");
   const price = canonicalPrice(input.price);
   if ((amount * BigInt(price.numerator)) % BigInt(price.denominator) !== 0n) {
-    throw new Error("Order amount and limit price must produce integer settlement amounts");
+    throw new Error(
+      `Order amount and limit price must produce integer settlement amounts. ` +
+      `Base amount must be a multiple of ${price.denominator}`
+    );
   }
 
   const execution = input.execution ?? "all_or_none";
@@ -249,7 +252,10 @@ function validateFillShape(state: OrderState, amount: bigint, remaining: bigint)
     }
   }
   if ((amount * BigInt(state.limit_price.numerator)) % BigInt(state.limit_price.denominator) !== 0n) {
-    throw new Error("Fill amount and limit price must produce an integer quote amount");
+    throw new Error(
+      `Fill amount and limit price must produce an integer quote amount. ` +
+      `Base fill amount must be a multiple of ${state.limit_price.denominator}`
+    );
   }
 }
 

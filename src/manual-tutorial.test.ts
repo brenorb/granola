@@ -26,5 +26,6 @@ describe("manual testnet swap tutorial", () => {
       "https://github.com/brenorb/granola/blob/main/docs/guides/manual-testnet-swap.md"
     );
     expect(html).toContain("Manual test tutorial");
+    expect(html).toContain('id="order-settlement-hint"');
   });
 });

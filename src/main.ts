@@ -6,7 +6,11 @@ import { profileFromLocation, storageNameForProfile } from "./browser/profile.js
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
-import { fiatPerBtcPrice } from "./order/human-price.js";
+import {
+  fiatPerBtcPrice,
+  settlementAmountGuidance,
+  settlementAmountRounding
+} from "./order/human-price.js";
 import type { OrderRecord } from "./order/model.js";
 import { NostrOrderService } from "./order/service.js";
 import { MakerIdentity } from "./nostr/identity.js";
@@ -75,6 +79,7 @@ const orderbook = byId("orderbook");
 const pendingPublications = byId("pending-publications");
 const trades = byId("trades");
 const status = byId("status");
+const orderSettlementHint = byId("order-settlement-hint");
 const activity = byId<HTMLOListElement>("activity-log");
 let tradeControllerPromise: Promise<BrowserTradeController> | undefined;
 
@@ -287,6 +292,88 @@ byId("enable-maker").addEventListener("click", () => {
 
 const executionInput = byId<HTMLSelectElement>("order-execution");
 const minimumFillInput = byId<HTMLInputElement>("minimum-fill");
+const orderForm = byId<HTMLFormElement>("order-form");
+function requiredOrderInput(name: string): HTMLInputElement {
+  const input = orderForm.querySelector<HTMLInputElement>(`input[name="${name}"]`);
+  if (input === null) throw new Error(`Missing order input ${name}`);
+  return input;
+}
+const orderAmountInput = requiredOrderInput("amount");
+const orderPriceInput = requiredOrderInput("fiatPrice");
+
+const defaultOrderSettlementHint = orderSettlementHint.textContent ?? "";
+function groupedInteger(value: string): string {
+  return BigInt(value).toLocaleString("en-US");
+}
+
+function decimalMinorUnits(numerator: string, denominator: string): string {
+  const whole = BigInt(numerator);
+  const divisor = BigInt(denominator);
+  const integerPart = whole / divisor;
+  let remainder = whole % divisor;
+  if (remainder === 0n) return integerPart.toString();
+  let fraction = "";
+  for (let index = 0; index < 4 && remainder !== 0n; index += 1) {
+    remainder *= 10n;
+    fraction += (remainder / divisor).toString();
+    remainder %= divisor;
+  }
+  return `${integerPart}.${fraction.replace(/0+$/, "")}${remainder !== 0n ? "…" : ""}`;
+}
+
+function usdCents(value: string): string {
+  const cents = BigInt(value);
+  const whole = cents / 100n;
+  const fraction = (cents % 100n).toString().padStart(2, "0");
+  return `$${whole.toString()}.${fraction}`;
+}
+
+function adjustmentMagnitude(value: string): string {
+  const delta = BigInt(value);
+  return groupedInteger((delta < 0n ? -delta : delta).toString());
+}
+
+function updateOrderSettlementHint(applyRounding = false): void {
+  orderAmountInput.setCustomValidity("");
+  orderSettlementHint.textContent = defaultOrderSettlementHint;
+  try {
+    const price = fiatPerBtcPrice(orderPriceInput.value);
+    const guidance = settlementAmountGuidance(orderAmountInput.value, price);
+    if (guidance === null) return;
+    const rounding = settlementAmountRounding(orderAmountInput.value, price);
+    if (rounding === null) return;
+    const currentQuote = decimalMinorUnits(
+      guidance.currentQuoteNumerator,
+      guidance.currentQuoteDenominator
+    );
+    const action = rounding.direction === "down" ? "round down" : "round up";
+    const resultingSize = `${groupedInteger(rounding.roundedAmount)} SAT → ` +
+      `${groupedInteger(rounding.quoteAmount)} cents (${usdCents(rounding.quoteAmount)})`;
+    const message = applyRounding
+      ? `Adjusted ${groupedInteger(rounding.originalAmount)} SAT ${action} by ` +
+        `${adjustmentMagnitude(rounding.deltaAmount)} SAT to ${resultingSize}. ` +
+        `The signed order now uses an integer settlement amount.`
+      : `At ${orderPriceInput.value} USD/BTC, ${groupedInteger(orderAmountInput.value)} SAT ` +
+        `produces ${currentQuote} USD cents, which is not whole. ` +
+        `I will ${action} to ${resultingSize} (multiples of ` +
+        `${groupedInteger(guidance.baseMultiple)} SAT) when this field is committed.`;
+    if (applyRounding) orderAmountInput.value = rounding.roundedAmount;
+    orderSettlementHint.textContent = message;
+  } catch {
+    // Native input patterns and the submit handler provide the authoritative error.
+  }
+}
+
+orderAmountInput.addEventListener("input", () => updateOrderSettlementHint());
+orderPriceInput.addEventListener("input", () => updateOrderSettlementHint());
+orderAmountInput.addEventListener("change", () => updateOrderSettlementHint(true));
+orderPriceInput.addEventListener("change", () => updateOrderSettlementHint(true));
+orderAmountInput.addEventListener("invalid", () => {
+  if (orderAmountInput.validationMessage.length > 0) {
+    report(orderAmountInput.validationMessage, true);
+  }
+});
+updateOrderSettlementHint();
 executionInput.addEventListener("change", () => {
   const partial = executionInput.value === "partial";
   minimumFillInput.disabled = !partial;
@@ -294,8 +381,9 @@ executionInput.addEventListener("change", () => {
   if (!partial) minimumFillInput.value = "";
 });
 
-byId<HTMLFormElement>("order-form").addEventListener("submit", (event) => {
+orderForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  updateOrderSettlementHint(true);
   const form = new FormData(event.currentTarget as HTMLFormElement);
   void (async () => {
     const side = String(form.get("side"));

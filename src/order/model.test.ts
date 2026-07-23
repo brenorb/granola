@@ -77,6 +77,18 @@ describe("Granola order model", () => {
     })).toThrow("integer settlement amounts");
 
     expect(() => createOrderState({
+      orderId: "99999999-9999-4999-8999-999999999999",
+      createdAt: 1,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "2000",
+      price: { numerator: "31", denominator: "625" }
+    })).toThrow("Base amount must be a multiple of 625");
+
+    expect(() => createOrderState({
       orderId: "44444444-4444-4444-8444-444444444444",
       createdAt: 1,
       side: "sell",
