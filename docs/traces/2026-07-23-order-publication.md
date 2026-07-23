@@ -24,7 +24,7 @@ The order event, service, outbox, and API tests demonstrate:
 5. a failed publication retries the same event ID;
 6. one successful relay receipt acknowledges the update; and
 7. book loading selects and verifies the current replaceable event without
-   reconstructing public history.
+   reconstructing the public event sequence.
 
 The two-party integration test additionally demonstrates that reserve and fill
 checkpoints bind private messages to projection IDs and revisions while local

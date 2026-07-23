@@ -31,7 +31,7 @@ the same address. Each replacement increments the state's canonical decimal
 The newest valid replaceable event is the order.
 
 This is a rewrite of protocol v1, not a second public protocol version. There
-is no compatibility mode and no public history fallback.
+is no compatibility mode and no event-sequence fallback.
 
 ## Canonical event
 
@@ -126,7 +126,7 @@ agree before the choreography advances.
 
 ## Local evidence
 
-Removing public history does not remove durable safety evidence. Encrypted
+Removing event-sequence replay does not remove durable safety evidence. Encrypted
 trade sessions retain swap checkpoints, idempotency keys, mint observations,
 settlement commitments, refund operations, accepted private transcript hashes,
 and the projection IDs and revisions relevant to that session.
