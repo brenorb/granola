@@ -15,6 +15,11 @@ export interface SettlementPlanInput {
   orderExpiresAt: number;
 }
 
+const DAY_SECONDS = 86_400;
+const SHORT_LOCK_SECONDS = 4 * DAY_SECONDS;
+const LONG_LOCK_SECONDS = 7 * DAY_SECONDS;
+const RESERVATION_SECONDS = 8 * DAY_SECONDS;
+
 function unixTime(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${label} must be a Unix timestamp`);
@@ -35,17 +40,17 @@ export function createSettlementPlan(input: SettlementPlanInput): SettlementPlan
   }
 
   const anchor = Math.max(local, base, quote);
-  const reservationExpiresAt = anchor + 1_800;
+  const reservationExpiresAt = anchor + RESERVATION_SECONDS;
   if (orderExpiresAt < reservationExpiresAt) {
     throw new Error("The order expires before the settlement recovery window");
   }
 
   return {
     anchor,
-    shortLocktime: anchor + 600,
-    makerClaimCutoff: anchor + 480,
-    longLocktime: anchor + 1_200,
-    takerClaimCutoff: anchor + 1_080,
+    shortLocktime: anchor + SHORT_LOCK_SECONDS,
+    makerClaimCutoff: anchor + SHORT_LOCK_SECONDS - 120,
+    longLocktime: anchor + LONG_LOCK_SECONDS,
+    takerClaimCutoff: anchor + LONG_LOCK_SECONDS - 120,
     reservationExpiresAt,
     refundGuardSeconds: 60
   };

@@ -1399,6 +1399,17 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     next.phase = rootPhase(choreography);
     if (message.type === "reserve_accept") {
       const body = message.body as AtomicSwapBody<"reserve_accept">;
+      const locktimeGap = body.long_locktime - body.short_locktime;
+      next.plan = {
+        anchor: body.short_locktime -
+          (locktimeGap === 3 * 86_400 ? 4 * 86_400 : 600),
+        shortLocktime: body.short_locktime,
+        makerClaimCutoff: body.maker_claim_cutoff,
+        longLocktime: body.long_locktime,
+        takerClaimCutoff: body.taker_claim_cutoff,
+        reservationExpiresAt: body.reservation_expires_at,
+        refundGuardSeconds: 60
+      };
       next.reserveTransitionId = body.reserve_transition_id;
       next.evidence.reserveTransitionId = body.reserve_transition_id;
       next.evidence.reservation.takerCommitment ??=

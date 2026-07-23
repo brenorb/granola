@@ -318,9 +318,10 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
   const long = timestamp(body.long_locktime, "Long locktime");
   const takerCutoff = timestamp(body.taker_claim_cutoff, "Taker claim cutoff");
   const reservationExpiry = timestamp(body.reservation_expires_at, "Reservation expiry");
+  const locktimeGap = long - short;
   if (
     makerCutoff !== short - 120 ||
-    long !== short + 600 ||
+    (locktimeGap !== 600 && locktimeGap !== 3 * 86_400) ||
     takerCutoff !== long - 120
   ) {
     throw new Error("Settlement deadline profile is invalid");

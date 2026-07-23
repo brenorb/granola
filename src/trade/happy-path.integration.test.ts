@@ -457,7 +457,7 @@ describe("two-party coordinator happy path", () => {
       side: "sell",
       amount: "20",
       price: { numerator: "1", denominator: "20" },
-      expiresAt: NOW + 3_600
+      expiresAt: NOW + 9 * 86_400
     });
     await orderApi.publishNextStage(create.orderId);
     await orderApi.clearAcknowledgedOrderPublication(create.orderId);
@@ -576,7 +576,11 @@ describe("two-party coordinator happy path", () => {
       order,
       proposal,
       market,
-      clocks
+      clocks: {
+        localNow: NOW + 1,
+        baseMintNow: NOW + 1,
+        quoteMintNow: NOW + 1
+      }
     }, sessionEntropy("maker")), null);
 
     let steps = 0;

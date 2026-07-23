@@ -87,7 +87,7 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
   const state = createOrderState({
     orderId,
     createdAt: now - 100,
-    expiresAt: now + 3_600,
+    expiresAt: now + 9 * 86_400,
     side: "sell",
     baseUnit: "sat",
     quoteUnit: "usd",

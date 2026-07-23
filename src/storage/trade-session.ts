@@ -476,7 +476,11 @@ function validateExpectedLock(value: unknown): void {
   exactKeys(deadlines, ["short", "long", "minimumGap"], "Expected HTLC deadlines");
   const short = safeTime(deadlines.short, "Expected HTLC short deadline");
   const long = safeTime(deadlines.long, "Expected HTLC long deadline");
-  if (deadlines.minimumGap !== 600 || long !== short + 600) {
+  const gap = long - short;
+  if (
+    (deadlines.minimumGap !== 600 && deadlines.minimumGap !== 3 * 86_400) ||
+    deadlines.minimumGap !== gap
+  ) {
     throw new Error("Expected HTLC deadlines are invalid");
   }
 }
@@ -1124,9 +1128,11 @@ function assertSession(value: unknown): asserts value is TradeSession {
     "anchor", "shortLocktime", "makerClaimCutoff", "longLocktime",
     "takerClaimCutoff", "reservationExpiresAt", "refundGuardSeconds"
   ]) safeTime(plan[field], `Settlement plan ${field}`);
+  const locktimeGap =
+    (plan.longLocktime as number) - (plan.shortLocktime as number);
   if (
     plan.makerClaimCutoff !== (plan.shortLocktime as number) - 120 ||
-    plan.longLocktime !== (plan.shortLocktime as number) + 600 ||
+    (locktimeGap !== 600 && locktimeGap !== 3 * 86_400) ||
     plan.takerClaimCutoff !== (plan.longLocktime as number) - 120 ||
     plan.refundGuardSeconds !== 60
   ) throw new Error("Settlement plan profile is invalid");

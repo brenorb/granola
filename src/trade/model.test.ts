@@ -13,14 +13,14 @@ describe("Granola settlement model", () => {
       localNow: 1_700_000_000,
       baseMintNow: 1_700_000_012,
       quoteMintNow: 1_699_999_990,
-      orderExpiresAt: 1_700_003_000
+      orderExpiresAt: 1_700_700_000
     })).toEqual({
       anchor: 1_700_000_012,
-      shortLocktime: 1_700_000_612,
-      makerClaimCutoff: 1_700_000_492,
-      longLocktime: 1_700_001_212,
-      takerClaimCutoff: 1_700_001_092,
-      reservationExpiresAt: 1_700_001_812,
+      shortLocktime: 1_700_345_612,
+      makerClaimCutoff: 1_700_345_492,
+      longLocktime: 1_700_604_812,
+      takerClaimCutoff: 1_700_604_692,
+      reservationExpiresAt: 1_700_691_212,
       refundGuardSeconds: 60
     });
   });
@@ -37,7 +37,7 @@ describe("Granola settlement model", () => {
       localNow: 100,
       baseMintNow: 100,
       quoteMintNow: 100,
-      orderExpiresAt: 1_899
+      orderExpiresAt: 691_299
     })).toThrow("order expires before");
   });
 

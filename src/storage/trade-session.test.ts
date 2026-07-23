@@ -389,7 +389,7 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
   const state = createOrderState({
     orderId,
     createdAt: 1_699_999_900,
-    expiresAt: 1_700_003_600,
+    expiresAt: 1_700_777_600,
     side: "sell",
     baseUnit: "sat",
     quoteUnit: "usd",
