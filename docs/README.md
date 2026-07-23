@@ -15,6 +15,9 @@
 ## Architecture decisions
 
 - [ADR 0001: Nostr events for the Granola order book](adr/0001-nostr-order-events.md)
+- [ADR 0002: Separate maker signing identity](adr/0002-maker-signing-identity.md)
+- [ADR 0003: Nostr private swap messages](adr/0003-nostr-private-swap-messages.md)
+- [ADR 0004: Two-mint settlement with staggered Cashu HTLCs](adr/0004-cashu-htlc-settlement.md)
 
 ## Reading rule
 
