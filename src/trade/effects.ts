@@ -260,7 +260,7 @@ function granolaTerms(session: TradeSession): GranolaTradeTerms {
     quote_keyset: session.terms.quoteKeyset,
     base_amount: session.terms.baseAmount,
     quote_amount: session.terms.quoteAmount,
-    limit_price: clone(session.terms.price)
+    price_cents_per_btc: session.terms.priceCentsPerBtc
   };
 }
 

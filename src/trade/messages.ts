@@ -44,7 +44,7 @@ export interface GranolaTradeTerms {
   quote_keyset: string;
   base_amount: string;
   quote_amount: string;
-  limit_price: { numerator: string; denominator: string };
+  price_cents_per_btc: string;
 }
 
 export interface GranolaTradeMessage {
@@ -271,7 +271,7 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   const terms = record(value, "Terms");
   exactKeys(terms, [
     "base_unit", "base_mint", "base_keyset", "quote_unit", "quote_mint",
-    "quote_keyset", "base_amount", "quote_amount", "limit_price"
+    "quote_keyset", "base_amount", "quote_amount", "price_cents_per_btc"
   ], "Terms");
   for (const field of ["base_unit", "quote_unit"] as const) {
     const unit = terms[field];
@@ -288,12 +288,13 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   }
   const base = positiveInteger(terms.base_amount, "base_amount");
   const quote = positiveInteger(terms.quote_amount, "quote_amount");
-  const price = record(terms.limit_price, "Limit price");
-  exactKeys(price, ["numerator", "denominator"], "Limit price");
-  const numerator = positiveInteger(price.numerator, "Price numerator");
-  const denominator = positiveInteger(price.denominator, "Price denominator");
-  if (base * numerator !== quote * denominator) {
-    throw new Error("Trade amounts do not equal the exact rational price");
+  const price = positiveInteger(terms.price_cents_per_btc, "price_cents_per_btc");
+  const expectedQuote = (base * price) / 100_000_000n;
+  if (expectedQuote === 0n) {
+    throw new Error("Trade quote amount must be at least one quote unit");
+  }
+  if (quote !== expectedQuote) {
+    throw new Error("Trade terms quote amount does not match truncated settlement");
   }
 }
 

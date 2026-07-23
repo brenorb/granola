@@ -8,6 +8,7 @@ import {
   expireOrder,
   fillOrder,
   marketId,
+  quoteAmountForSettlement,
   releaseOrder,
   reserveOrder,
   type OrderRecord
@@ -29,7 +30,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [testnut, nofee, nofee] },
       amount: "2000",
-      price: { numerator: "101", denominator: "2000" }
+      priceCentsPerBtc: "5050000"
     });
 
     expect(state.expires_at).toBe(1_702_592_000);
@@ -52,7 +53,7 @@ describe("Granola order model", () => {
       offered: { unit: "usd", mint: nofee },
       requested: { unit: "sat", acceptableMints: [testnut, nofee] },
       amount: "2000",
-      price: { numerator: "99", denominator: "2000" },
+      priceCentsPerBtc: "4950000",
       execution: "partial",
       minimumFillAmount: "1000"
     });
@@ -65,7 +66,22 @@ describe("Granola order model", () => {
     ]);
   });
 
-  it("rejects inexact prices and side/asset mismatches", () => {
+  it("preserves exact SAT amounts, truncates cents, and rejects zero quotes", () => {
+    const exactBase = createOrderState({
+      orderId: "99999999-9999-4999-8999-999999999999",
+      createdAt: 1,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "200",
+      priceCentsPerBtc: "4950000"
+    });
+    expect(exactBase.original_amount).toBe("200");
+    expect(exactBase.remaining_amount).toBe("200");
+    expect(quoteAmountForSettlement("200", exactBase.price_cents_per_btc)).toBe("9");
+
     expect(() => createOrderState({
       orderId: "33333333-3333-4333-8333-333333333333",
       createdAt: 1,
@@ -75,11 +91,11 @@ describe("Granola order model", () => {
       offered: { unit: "usd", mint: nofee },
       requested: { unit: "sat", acceptableMints: [testnut] },
       amount: "1",
-      price: { numerator: "1", denominator: "2" }
-    })).toThrow("integer settlement amounts");
+      priceCentsPerBtc: "50000000"
+    })).toThrow("at least one quote unit");
 
-    expect(() => createOrderState({
-      orderId: "99999999-9999-4999-8999-999999999999",
+    const truncated = createOrderState({
+      orderId: "77777777-7777-4777-8777-777777777777",
       createdAt: 1,
       side: "sell",
       baseUnit: "sat",
@@ -87,8 +103,10 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "2000",
-      price: { numerator: "31", denominator: "625" }
-    })).toThrow("Base amount must be a multiple of 625");
+      priceCentsPerBtc: "4960000"
+    });
+    expect(truncated.original_amount).toBe("2000");
+    expect(quoteAmountForSettlement("2000", truncated.price_cents_per_btc)).toBe("99");
 
     expect(() => createOrderState({
       orderId: "44444444-4444-4444-8444-444444444444",
@@ -99,7 +117,7 @@ describe("Granola order model", () => {
       offered: { unit: "usd", mint: nofee },
       requested: { unit: "sat", acceptableMints: [testnut] },
       amount: "2",
-      price: { numerator: "1", denominator: "2" }
+      priceCentsPerBtc: "50000000"
     })).toThrow("Sell orders must offer the base unit");
   });
 
@@ -113,7 +131,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "2",
-      price: { numerator: "1", denominator: "2" }
+      priceCentsPerBtc: "50000000"
     };
 
     expect(() => createOrderState({ ...valid, orderId: "decorated-id" }))
@@ -151,7 +169,7 @@ describe("Granola order model", () => {
           ? { unit: "usd", acceptableMints: [nofee] }
           : { unit: "sat", acceptableMints: [testnut] },
           amount: "2000",
-        price: { numerator, denominator: "2000" }
+        priceCentsPerBtc: (BigInt(numerator) * 50_000n).toString()
       })
     });
     const market = { baseUnit: "sat", baseMint: testnut, quoteUnit: "usd", quoteMint: nofee };
@@ -184,7 +202,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "20",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     });
 
     const reserved = reserveOrder(initial, {
@@ -229,7 +247,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "20",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     });
     const reserved = reserveOrder(initial, {
       reservationId: "99999999-9999-4999-8999-999999999999",
@@ -268,7 +286,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "20",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     });
     const reserved = reserveOrder(initial, {
       reservationId: "99999999-9999-4999-8999-999999999999",
@@ -321,7 +339,7 @@ describe("Granola order model", () => {
       offered: { unit: "sat", mint: testnut },
       requested: { unit: "usd", acceptableMints: [nofee] },
       amount: "20",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     });
     const reserved = reserveOrder(initial, {
       reservationId: "99999999-9999-4999-8999-999999999999",

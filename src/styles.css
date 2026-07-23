@@ -67,7 +67,6 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
 .orderbook-bids tr[data-best="bid"] { background: rgba(200,241,53,.3); }
 .orderbook-midpoint td { padding: .45rem .7rem; color: var(--paper); background: var(--ink); text-align: center; font-weight: 700; }
-.order-price-exact { display: block; margin-top: .2rem; color: #696c62; font-size: .58rem; }
 .order-entry { margin-top: 2rem; padding: 1.2rem; border: 1px solid var(--ink); background: rgba(245,241,229,.55); }
 .order-entry[open] summary { margin-bottom: 1.2rem; }
 .order-entry form { max-width: 58rem; }

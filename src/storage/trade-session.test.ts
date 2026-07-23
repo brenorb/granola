@@ -182,7 +182,7 @@ const session: TradeSession = {
     quoteUnit: "usd",
     quoteKeyset: "00deadbeefcafeff",
     quoteAmount: "1",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   },
   plan: {
     anchor: 1_700_000_000,
@@ -390,7 +390,7 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
       acceptableMints: ["https://nofee.testnut.cashu.space"]
     },
     amount: "20",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   });
   const record: OrderRecord = {
     address: orderAddress,

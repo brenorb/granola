@@ -45,7 +45,7 @@ const terms: GranolaTradeTerms = {
   quote_keyset: "00ba2e3e5779e035",
   base_amount: "1000",
   quote_amount: "20",
-  limit_price: { numerator: "1", denominator: "50" }
+  price_cents_per_btc: "2000000"
 };
 
 const ids = [

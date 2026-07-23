@@ -36,7 +36,7 @@ const terms: GranolaTradeTerms = {
   quote_keyset: "00ba2e3e5779e035",
   base_amount: "1000",
   quote_amount: "20",
-  limit_price: { numerator: "1", denominator: "50" }
+  price_cents_per_btc: "2000000"
 };
 
 async function proposal(overrides: Partial<GranolaTradeMessage> = {}): Promise<GranolaTradeMessage> {
@@ -87,6 +87,21 @@ function expected(message: GranolaTradeMessage, extra: Partial<Parameters<typeof
 }
 
 describe("strict Granola NIP-17 messages", () => {
+  it("binds the integer BTC price to the truncated quote amount", async () => {
+    await expect(termsHash({
+      ...terms,
+      base_amount: "200",
+      quote_amount: "9",
+      price_cents_per_btc: "4950000"
+    })).resolves.toMatch(/^[0-9a-f]{64}$/);
+    await expect(termsHash({
+      ...terms,
+      base_amount: "200",
+      quote_amount: "10",
+      price_cents_per_btc: "4950000"
+    })).rejects.toThrow("truncated settlement");
+  });
+
   it("authenticates an initially unknown taker only for a sequence-zero proposal", async () => {
     const message = await proposal();
     const rumor = await createTradeRumor(message, takerKey);

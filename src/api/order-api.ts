@@ -11,7 +11,6 @@ import {
   type ExactMarket,
   type FillOrderInput,
   type OrderState,
-  type RationalPrice,
   type ReserveOrderInput
 } from "../order/model.js";
 import {
@@ -70,7 +69,7 @@ export interface OrderServicePort {
 export interface PublishOrderInput {
   side: "buy" | "sell";
   amount: string;
-  price: RationalPrice;
+  priceCentsPerBtc: string;
   expiresAt?: number;
   execution?: "all_or_none" | "partial";
   minimumFillAmount?: string;
@@ -325,7 +324,7 @@ export class OrderApi {
       quoteUnit: TEST_MARKET.quoteUnit,
       ...orderAssets(input.side),
       amount: input.amount,
-      price: input.price,
+      priceCentsPerBtc: input.priceCentsPerBtc,
       ...(input.execution === undefined ? {} : { execution: input.execution }),
       ...(input.minimumFillAmount === undefined
         ? {}

@@ -66,7 +66,7 @@ function view(revision = 0): PublicTradeView {
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "20",
-      price: { numerator: "1", denominator: "50" }
+      priceCentsPerBtc: "2000000"
     },
     plan: {
       anchor: 1_800_000_000,

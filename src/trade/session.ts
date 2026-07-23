@@ -19,7 +19,7 @@ export interface TradeTerms {
   quoteUnit: string;
   quoteKeyset: string;
   quoteAmount: string;
-  price: { numerator: string; denominator: string };
+  priceCentsPerBtc: string;
 }
 
 export type PersistedMintState = "UNKNOWN" | "UNSPENT" | "PENDING" | "SPENT";

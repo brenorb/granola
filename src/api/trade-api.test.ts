@@ -94,7 +94,7 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
     offered: { unit: "sat", mint: baseMint },
     requested: { unit: "usd", acceptableMints: [quoteMint] },
     amount: "1000",
-    price: { numerator: "1", denominator: "50" }
+    priceCentsPerBtc: "2000000"
   });
   return {
     address: `30078:${maker}:granola:order:v1:${orderId}`,
@@ -118,7 +118,7 @@ async function proposal(current = order()): Promise<VerifiedInitialReservePropos
     quote_keyset: quoteKeyset,
     base_amount: "1000",
     quote_amount: "20",
-    limit_price: { numerator: "1", denominator: "50" }
+    price_cents_per_btc: "2000000"
   };
   const message: GranolaTradeMessage = {
     schema: "granola/dm/v1",

@@ -103,7 +103,7 @@ function harness(now = 1_700_000_000) {
 const createInput = {
   side: "sell" as const,
   amount: "100",
-  price: { numerator: "2", denominator: "1" }
+  priceCentsPerBtc: "200000000"
 };
 
 describe("OrderApi projections", () => {

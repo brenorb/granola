@@ -38,7 +38,7 @@ const { book, rejected } = await window.granola.getOrderBook();
 const publication = await window.granola.publishOrder({
   side: "sell",
   amount: "2000", // base SAT
-  price: { numerator: "101", denominator: "2000" }, // USD cents / SAT
+  priceCentsPerBtc: "5050000",
   execution: "all_or_none"
 });
 const pending = await window.granola.getPendingOrderPublications();

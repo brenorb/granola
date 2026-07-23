@@ -441,7 +441,7 @@ describe("two-party coordinator happy path", () => {
     const create = await orderApi.publishOrder({
       side: "sell",
       amount: "20",
-      price: { numerator: "1", denominator: "20" },
+      priceCentsPerBtc: "5000000",
       expiresAt: NOW + 9 * 86_400
     });
     await orderApi.publishNextStage(create.orderId);

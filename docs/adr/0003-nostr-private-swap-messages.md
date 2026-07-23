@@ -121,7 +121,7 @@ machine and must not weaken these common fields:
     "quote_keyset": "<keyset-id>",
     "base_amount": "1000",
     "quote_amount": "50",
-    "limit_price": { "numerator": "1", "denominator": "20" }
+    "price_cents_per_btc": "5000000"
   },
   "body": {}
 }
@@ -130,7 +130,9 @@ machine and must not weaken these common fields:
 Every message binds the schema and deployment, stable order address, exact
 current projection ID and revision, session and reservation IDs, sender and receiver, monotonic
 direction-specific sequence, expiry, predecessor, running transcript hash, both
-mint URLs and keyset IDs, units, integer amounts, and exact rational price.
+mint URLs and keyset IDs, units, integer amounts, and integer cents-per-BTC
+price. `quote_amount` is the deterministic truncated settlement defined by ADR
+0005.
 
 The proposal and acceptance include the complete canonical terms. Later messages
 include the same `terms_hash`. JSON is canonicalized with [RFC 8785] before it is
@@ -215,9 +217,9 @@ The receiver then validates in this order:
 6. Enforce all cross-layer clock rules below: rumor `created_at` against
    `sent_at`, local time, and encrypted expiry; seal and wrapper timestamps
    against the rumor; and outer expiration against encrypted expiry.
-7. Validate every Granola field, canonical encoding, deployment, order address
-   and head, terms hash, economic invariants, deadline, sequence, predecessor,
-   and transcript hash before changing state.
+7. Validate every Granola field, canonical encoding, deployment, order address,
+   current projection event ID and revision, terms hash, economic invariants,
+   deadline, sequence, predecessor, and transcript hash before changing state.
 8. Deduplicate the message ID, rumor ID, and seal ID. Return the same result for
    an exact replay; reject a changed result under an existing identifier.
 9. Treat two valid successors of one transcript hash as equivocation. Never pick
@@ -283,8 +285,8 @@ outer expiries remain live.
   An ACK references the message, rumor, and seal IDs plus the resulting
   transcript hash.
 - The maker publishes and reads back the public reserve projection before
-  sending `reserve_accept`. The acceptance references that exact new transition
-  and binds the maker's fresh settlement key.
+  sending `reserve_accept`. The acceptance references that
+  exact projection event ID and revision and binds the maker's fresh settlement key.
 - The taker verifies both the private acceptance and current signed public projection
   before making bearer material claimable.
 - A proposal alone never reserves an order. A reserved public projection alone does not

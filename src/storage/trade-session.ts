@@ -1094,13 +1094,10 @@ function assertSession(value: unknown): asserts value is TradeSession {
     typeof terms.baseAmount !== "string" ||
     !POSITIVE_INTEGER.test(terms.baseAmount) ||
     typeof terms.quoteAmount !== "string" ||
-    !POSITIVE_INTEGER.test(terms.quoteAmount)
+    !POSITIVE_INTEGER.test(terms.quoteAmount) ||
+    typeof terms.priceCentsPerBtc !== "string" ||
+    !POSITIVE_INTEGER.test(terms.priceCentsPerBtc)
   ) throw new Error("Trade terms are invalid");
-  const price = object(terms.price, "Trade price");
-  if (
-    typeof price.numerator !== "string" || !POSITIVE_INTEGER.test(price.numerator) ||
-    typeof price.denominator !== "string" || !POSITIVE_INTEGER.test(price.denominator)
-  ) throw new Error("Trade price is invalid");
 
   const plan = object(session.plan, "Settlement plan");
   for (const field of [

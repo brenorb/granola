@@ -393,7 +393,7 @@ describe("Nostr trade transport", () => {
       quote_keyset: "00ca2e3e5779e035",
       base_amount: "20",
       quote_amount: "1",
-      limit_price: { numerator: "1", denominator: "20" }
+      price_cents_per_btc: "5000000"
     };
     const message: GranolaTradeMessage = {
       schema: "granola/dm/v1",

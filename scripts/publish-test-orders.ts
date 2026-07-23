@@ -9,18 +9,17 @@ interface SeedOrder {
   label: string;
   side: "buy" | "sell";
   amount: string;
-  numerator: string;
-  denominator: string;
+  priceCentsPerBtc: string;
   usdPerBtc: string;
 }
 
 const seeds: SeedOrder[] = [
-  { label: "ask-50500", side: "sell", amount: "2000", numerator: "101", denominator: "2000", usdPerBtc: "50500.00" },
-  { label: "ask-51000", side: "sell", amount: "1000", numerator: "51", denominator: "1000", usdPerBtc: "51000.00" },
-  { label: "ask-52000", side: "sell", amount: "1000", numerator: "13", denominator: "250", usdPerBtc: "52000.00" },
-  { label: "bid-49500", side: "buy", amount: "2000", numerator: "99", denominator: "2000", usdPerBtc: "49500.00" },
-  { label: "bid-49000", side: "buy", amount: "1000", numerator: "49", denominator: "1000", usdPerBtc: "49000.00" },
-  { label: "bid-48000", side: "buy", amount: "1000", numerator: "12", denominator: "250", usdPerBtc: "48000.00" }
+  { label: "ask-50500", side: "sell", amount: "2000", priceCentsPerBtc: "5050000", usdPerBtc: "50500.00" },
+  { label: "ask-51000", side: "sell", amount: "1000", priceCentsPerBtc: "5100000", usdPerBtc: "51000.00" },
+  { label: "ask-52000", side: "sell", amount: "1000", priceCentsPerBtc: "5200000", usdPerBtc: "52000.00" },
+  { label: "bid-49500", side: "buy", amount: "2000", priceCentsPerBtc: "4950000", usdPerBtc: "49500.00" },
+  { label: "bid-49000", side: "buy", amount: "1000", priceCentsPerBtc: "4900000", usdPerBtc: "49000.00" },
+  { label: "bid-48000", side: "buy", amount: "1000", priceCentsPerBtc: "4800000", usdPerBtc: "48000.00" }
 ];
 
 function sleep(milliseconds: number): Promise<void> {
@@ -59,7 +58,7 @@ try {
     const result = await api.publishOrder({
       side: seed.side,
       amount: seed.amount,
-      price: { numerator: seed.numerator, denominator: seed.denominator },
+      priceCentsPerBtc: seed.priceCentsPerBtc,
       execution: "all_or_none"
     });
     const projectionReadback = await confirmedReadback(relayClient, servicePublicationEvent(

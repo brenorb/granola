@@ -33,7 +33,7 @@ function session(
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "1",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     },
     plan: {
       anchor: 1_800_000_000,

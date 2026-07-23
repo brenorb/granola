@@ -33,7 +33,7 @@ function open(): OrderState {
       acceptableMints: ["https://quote.example"]
     },
     amount: "100",
-    price: { numerator: "2", denominator: "1" }
+    priceCentsPerBtc: "200000000"
   });
 }
 

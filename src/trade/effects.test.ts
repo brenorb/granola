@@ -76,7 +76,7 @@ async function publishedFill(): Promise<PublishedOrderProjection> {
       acceptableMints: ["https://nofee.testnut.cashu.space"]
     },
     amount: "20",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   });
   const reserved = reserveOrder(initial, {
     reservationId: "11111111-1111-4111-8111-111111111111",
@@ -175,7 +175,7 @@ function baseSession(): TradeSession {
       quoteUnit: "usd",
       quoteKeyset: "quote-keyset",
       quoteAmount: "1",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     },
     plan: {
       anchor: NOW - 100,

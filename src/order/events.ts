@@ -103,7 +103,7 @@ function parseCanonicalState(value: unknown): OrderState {
     !input.offered ||
     !input.requested ||
     typeof input.original_amount !== "string" ||
-    !input.limit_price ||
+    typeof input.price_cents_per_btc !== "string" ||
     typeof input.minimum_fill_amount !== "string" ||
     (input.execution !== "all_or_none" && input.execution !== "partial")
   ) {
@@ -123,7 +123,7 @@ function parseCanonicalState(value: unknown): OrderState {
       acceptableMints: input.requested.acceptable_mints
     },
     amount: input.original_amount,
-    price: input.limit_price,
+    priceCentsPerBtc: input.price_cents_per_btc,
     execution: input.execution,
     minimumFillAmount: input.minimum_fill_amount
   });

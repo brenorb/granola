@@ -41,11 +41,11 @@ describe("Granola settlement model", () => {
     })).toThrow("order expires before");
   });
 
-  it("computes exact base and quote amounts without floating point", () => {
+  it("computes truncated integer quote amounts without floating point", () => {
     expect(settlementAmounts({
       remainingBaseAmount: "20",
       fillBaseAmount: "20",
-      price: { numerator: "1", denominator: "20" },
+      priceCentsPerBtc: "5000000",
       execution: "all_or_none",
       minimumFillAmount: "20"
     })).toEqual({ base: "20", quote: "1" });
@@ -53,18 +53,26 @@ describe("Granola settlement model", () => {
     expect(() => settlementAmounts({
       remainingBaseAmount: "20",
       fillBaseAmount: "19",
-      price: { numerator: "1", denominator: "20" },
+      priceCentsPerBtc: "5000000",
       execution: "all_or_none",
       minimumFillAmount: "20"
     })).toThrow("all-or-none");
 
-    expect(() => settlementAmounts({
+    expect(settlementAmounts({
       remainingBaseAmount: "20",
       fillBaseAmount: "10",
-      price: { numerator: "1", denominator: "20" },
+      priceCentsPerBtc: "15000000",
       execution: "partial",
       minimumFillAmount: "5"
-    })).toThrow("integer quote amount");
+    })).toEqual({ base: "10", quote: "1" });
+
+    expect(settlementAmounts({
+      remainingBaseAmount: "200",
+      fillBaseAmount: "200",
+      priceCentsPerBtc: "4950000",
+      execution: "all_or_none",
+      minimumFillAmount: "200"
+    })).toEqual({ base: "200", quote: "9" });
   });
 
   it("allows only the persisted happy-path sequence", () => {

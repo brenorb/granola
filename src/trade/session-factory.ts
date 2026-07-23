@@ -162,7 +162,7 @@ function amounts(order: OrderRecord, fillBaseAmount: string): { base: string; qu
   const result = settlementAmounts({
     remainingBaseAmount: order.state.remaining_amount,
     fillBaseAmount,
-    price: order.state.limit_price,
+    priceCentsPerBtc: order.state.price_cents_per_btc,
     execution: order.state.execution,
     minimumFillAmount: order.state.minimum_fill_amount
   });
@@ -240,7 +240,7 @@ function tradeTerms(
     quoteUnit: market.quoteUnit,
     quoteKeyset: market.quoteKeyset,
     quoteAmount: selected.quote,
-    price: { ...order.state.limit_price }
+    priceCentsPerBtc: order.state.price_cents_per_btc
   };
 }
 
@@ -429,8 +429,7 @@ export async function createMakerSession(
     terms.quote_keyset !== market.quoteKeyset ||
     terms.base_amount !== selected.base ||
     terms.quote_amount !== selected.quote ||
-    terms.limit_price.numerator !== input.order.state.limit_price.numerator ||
-    terms.limit_price.denominator !== input.order.state.limit_price.denominator
+    terms.price_cents_per_btc !== input.order.state.price_cents_per_btc
   ) throw new Error("Reserve proposal terms do not match the selected order market");
 
   const choreography = await advanceAtomicSwapChoreography(
