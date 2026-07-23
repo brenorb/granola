@@ -5,6 +5,7 @@ import {
   createTradeRumor,
   termsHash,
   unwrapInitialReserveProposal,
+  unwrapInitialReserveProposalForMaker,
   unwrapReserveAcceptance,
   unwrapTradeMessage,
   wrapTradeRumor,
@@ -114,6 +115,23 @@ describe("strict Granola NIP-17 messages", () => {
       expectedOrderHead: message.order_head,
       expectedTermsHash: message.terms_hash
     })).rejects.toThrow();
+  });
+
+  it("opens a maker order-key inbox proposal before its encrypted order fields are known", async () => {
+    const message = await proposal();
+    const rumor = await createTradeRumor(message, takerKey);
+    const wrapped = wrapTradeRumor(rumor, takerKey, wrapOptions(wrapperKeyA, 18));
+
+    const opened = await unwrapInitialReserveProposalForMaker(
+      wrapped.wrapper,
+      makerKey,
+      { now }
+    );
+
+    expect(opened.message.order_address).toBe(message.order_address);
+    expect(opened.message.order_head).toBe(message.order_head);
+    expect(opened.message.terms_hash).toBe(message.terms_hash);
+    expect(opened.message.recipient_pubkey).toBe(maker);
   });
 
   it("learns a maker-signed reserve head only from its bound acceptance body", async () => {

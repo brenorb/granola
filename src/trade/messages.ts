@@ -504,9 +504,17 @@ export async function transcriptHash(previousTranscriptHash: string | null, rumo
 async function unwrapTradeMessageInternal(
   outerValue: SignedNostrEvent,
   recipientSecretKey: Uint8Array,
-  options: Omit<UnwrapTradeMessageOptions, "expectedAuthorPubkey" | "expectedOrderHead"> & {
+  options: Omit<
+    UnwrapTradeMessageOptions,
+    | "expectedAuthorPubkey"
+    | "expectedOrderAddress"
+    | "expectedOrderHead"
+    | "expectedTermsHash"
+  > & {
     expectedAuthorPubkey?: string;
+    expectedOrderAddress?: string;
     expectedOrderHead?: string;
+    expectedTermsHash?: string;
   }
 ): Promise<OpenedTradeMessage> {
   safeTimestamp(options.now, "Current time");
@@ -577,11 +585,17 @@ async function unwrapTradeMessageInternal(
     message.author_pubkey !== options.expectedAuthorPubkey
   ) throw new Error("Unexpected message author");
   if (message.recipient_pubkey !== recipient) throw new Error("Unexpected message recipient");
-  if (message.order_address !== options.expectedOrderAddress) throw new Error("Unexpected order address");
+  if (
+    options.expectedOrderAddress !== undefined &&
+    message.order_address !== options.expectedOrderAddress
+  ) throw new Error("Unexpected order address");
   if (options.expectedOrderHead !== undefined && message.order_head !== options.expectedOrderHead) {
     throw new Error("Unexpected order head");
   }
-  if (message.terms_hash !== options.expectedTermsHash) throw new Error("Unexpected terms hash");
+  if (
+    options.expectedTermsHash !== undefined &&
+    message.terms_hash !== options.expectedTermsHash
+  ) throw new Error("Unexpected terms hash");
   if (outer.pubkey === message.author_pubkey) throw new Error("Outer one-time pubkey must differ from author");
   if (options.expectedType !== undefined && message.type !== options.expectedType) {
     throw new Error("Unexpected message type");
@@ -648,6 +662,39 @@ export async function unwrapInitialReserveProposal(
     expectedType: "reserve_propose",
     expectedSequence: "0"
   });
+  if (
+    opened.message.type !== "reserve_propose" ||
+    opened.message.sequence !== "0" ||
+    opened.message.previous_message_id !== null ||
+    opened.message.previous_transcript_hash !== null
+  ) {
+    throw new Error("Message is not an initial reservation proposal");
+  }
+  deepFreeze(opened);
+  verifiedInitialProposals.add(opened);
+  return opened as VerifiedInitialReserveProposal;
+}
+
+/**
+ * Opens the maker order key's initial rendezvous message before its encrypted
+ * order address, head, and terms hash are available to the subscriber. The
+ * returned proposal is still fully authenticated and self-validating; callers
+ * must bind it to the current verified public order before accepting it.
+ */
+export async function unwrapInitialReserveProposalForMaker(
+  outerValue: SignedNostrEvent,
+  recipientSecretKey: Uint8Array,
+  options: { now: number }
+): Promise<VerifiedInitialReserveProposal> {
+  const opened = await unwrapTradeMessageInternal(
+    outerValue,
+    recipientSecretKey,
+    {
+      now: options.now,
+      expectedType: "reserve_propose",
+      expectedSequence: "0"
+    }
+  );
   if (
     opened.message.type !== "reserve_propose" ||
     opened.message.sequence !== "0" ||
