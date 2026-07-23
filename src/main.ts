@@ -1,6 +1,6 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, type PublishOrderInput } from "./api/order-api.js";
-import { withWalletLock } from "./browser/lock.js";
+import { withOrderOutboxLock, withWalletLock } from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { CashuClient } from "./cashu/client.js";
 import { fiatPerBtcPrice } from "./order/human-price.js";
@@ -43,6 +43,8 @@ function byId<T extends HTMLElement>(id: string): T {
 const profile = profileFromLocation(window.location.href);
 const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
 const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
+const outboxLocked = <T>(action: () => Promise<T>): Promise<T> =>
+  withOrderOutboxLock(profile, action);
 const api = new GranolaApi(new WalletRepository(driver), new QuoteRepository(driver), new CashuClient());
 const makerIdentity = new MakerIdentity(driver, locked);
 const relayClient = new RelayClient();
@@ -51,7 +53,7 @@ const orderApi = new OrderApi(
   new NostrOrderService(makerIdentity, relayClient),
   () => Math.floor(Date.now() / 1000),
   () => crypto.randomUUID(),
-  new OrderOutboxRepository(driver)
+  new OrderOutboxRepository(driver, outboxLocked)
 );
 const dashboard = byId("dashboard");
 const orderbook = byId("orderbook");

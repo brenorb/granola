@@ -62,8 +62,17 @@ export interface OrderOutboxPort {
   remove(orderId: string): Promise<void>;
 }
 
+export type OrderOutboxExclusiveRunner = <T>(action: () => Promise<T>) => Promise<T>;
+
+const withoutCrossTabLock: OrderOutboxExclusiveRunner = async <T>(
+  action: () => Promise<T>
+): Promise<T> => action();
+
 export class OrderOutboxRepository implements OrderOutboxPort {
-  constructor(private readonly driver: StorageDriver) {}
+  constructor(
+    private readonly driver: StorageDriver,
+    private readonly runExclusive: OrderOutboxExclusiveRunner = withoutCrossTabLock
+  ) {}
 
   async list(): Promise<StagedOrderPublication[]> {
     const value = await this.driver.get(OUTBOX_KEY);
@@ -78,18 +87,22 @@ export class OrderOutboxRepository implements OrderOutboxPort {
 
   async save(publication: StagedOrderPublication): Promise<void> {
     assertOutbox([publication]);
-    const existing = await this.list();
-    const next = existing.filter((item) => item.state.order_id !== publication.state.order_id);
-    next.push(clone(publication));
-    assertOutbox(next);
-    await this.driver.set(OUTBOX_KEY, next);
+    await this.runExclusive(async () => {
+      const existing = await this.list();
+      const next = existing.filter((item) => item.state.order_id !== publication.state.order_id);
+      next.push(clone(publication));
+      assertOutbox(next);
+      await this.driver.set(OUTBOX_KEY, next);
+    });
   }
 
   async remove(orderId: string): Promise<void> {
-    const existing = await this.list();
-    await this.driver.set(
-      OUTBOX_KEY,
-      existing.filter((publication) => publication.state.order_id !== orderId)
-    );
+    await this.runExclusive(async () => {
+      const existing = await this.list();
+      await this.driver.set(
+        OUTBOX_KEY,
+        existing.filter((publication) => publication.state.order_id !== orderId)
+      );
+    });
   }
 }

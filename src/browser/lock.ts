@@ -17,3 +17,15 @@ export async function withWalletLock<T>(
     action
   ) as T;
 }
+
+export async function withOrderOutboxLock<T>(
+  profile: string,
+  action: () => Promise<T>,
+  locks: LockPort = navigator.locks
+): Promise<T> {
+  return await locks.request(
+    `granola-order-outbox-${profile}-write`,
+    { mode: "exclusive" },
+    action
+  ) as T;
+}

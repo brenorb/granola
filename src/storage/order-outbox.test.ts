@@ -13,9 +13,12 @@ import { OrderOutboxRepository } from "./order-outbox.js";
 const MAKER = "a".repeat(64);
 const SIG = "b".repeat(128);
 
-async function publication(): Promise<StagedOrderPublication> {
+async function publication(
+  orderId = "11111111-1111-4111-8111-111111111111",
+  eventMarker = "c"
+): Promise<StagedOrderPublication> {
   const state = createOrderState({
-    orderId: "11111111-1111-4111-8111-111111111111",
+    orderId,
     createdAt: 1_700_000_000,
     side: "sell",
     baseUnit: "sat",
@@ -27,13 +30,13 @@ async function publication(): Promise<StagedOrderPublication> {
   });
   const transition: NostrEvent = {
     ...createTransitionTemplate(state, MAKER, "operation-1"),
-    id: "c".repeat(64),
+    id: eventMarker.repeat(64),
     pubkey: MAKER,
     sig: SIG
   };
   const projection: NostrEvent = {
     ...await createProjectionTemplate(state, transition),
-    id: "d".repeat(64),
+    id: eventMarker === "c" ? "d".repeat(64) : "e".repeat(64),
     pubkey: MAKER,
     sig: SIG
   };
@@ -44,6 +47,15 @@ async function publication(): Promise<StagedOrderPublication> {
     transitionReceipts: [],
     projection,
     projectionReceipts: []
+  };
+}
+
+function serialExclusiveRunner() {
+  let tail = Promise.resolve();
+  return <T>(action: () => Promise<T>): Promise<T> => {
+    const result = tail.then(action, action);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
   };
 }
 
@@ -75,5 +87,38 @@ describe("order publication outbox", () => {
     await expect(new OrderOutboxRepository(driver).list()).rejects.toThrow(
       "Order outbox storage is corrupt"
     );
+  });
+
+  it("does not lose publications saved concurrently by separate tabs", async () => {
+    const driver = new MemoryStorageDriver();
+    const exclusive = serialExclusiveRunner();
+    const firstTab = new OrderOutboxRepository(driver, exclusive);
+    const secondTab = new OrderOutboxRepository(driver, exclusive);
+    const first = await publication();
+    const second = await publication("22222222-2222-4222-8222-222222222222", "f");
+
+    await Promise.all([firstTab.save(first), secondTab.save(second)]);
+
+    expect((await firstTab.list()).map((item) => item.state.order_id).sort()).toEqual([
+      first.state.order_id,
+      second.state.order_id
+    ]);
+  });
+
+  it("does not resurrect a removed publication while another tab saves", async () => {
+    const driver = new MemoryStorageDriver();
+    const exclusive = serialExclusiveRunner();
+    const firstTab = new OrderOutboxRepository(driver, exclusive);
+    const secondTab = new OrderOutboxRepository(driver, exclusive);
+    const removed = await publication();
+    const saved = await publication("22222222-2222-4222-8222-222222222222", "f");
+    await firstTab.save(removed);
+
+    await Promise.all([
+      firstTab.remove(removed.state.order_id),
+      secondTab.save(saved)
+    ]);
+
+    expect(await firstTab.list()).toEqual([saved]);
   });
 });
