@@ -316,14 +316,15 @@ Version 1 permits one live reservation per order. The default reservation is
   "amount": "1000",
   "accepted_at": 1777408120,
   "expires_at": 1777408240,
-  "proposal_event_id": "<signed-private-proposal-id>",
+  "proposal_event_id": "<sender-signed-kind-13-seal-id>",
   "taker_commitment": "<32-byte-lowercase-hex>"
 }
 ```
 
 The amount is positive and no greater than remaining; `accepted_at` equals the
 reserve transition's Nostr `created_at`; expiry is later than acceptance and no
-later than order expiry; proposal ID is a valid signed private message event;
+later than order expiry; proposal ID is the verified sender-signed kind `13`
+seal carrying the NIP-17 proposal;
 the commitment is opaque and does not reveal the taker. `reserved_amount` must
 equal `reservation.amount` when reservation is non-null and must be zero when
 it is null. Reservation does not reduce `remaining_amount`.
