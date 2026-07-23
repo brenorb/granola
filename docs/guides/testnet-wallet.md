@@ -14,9 +14,12 @@ Granola’s browser wallet is a test harness, not a production wallet.
   the NUT-04 method/unit list and its minimum/maximum amounts.
 - Browser data is local. Clearing site data destroys any proofs not copied into
   a bearer backup.
+- When Web Locks is unavailable, Granola uses a single-tab fallback so wallet
+  actions still work. Do not open the same wallet profile in another tab until
+  Web Locks is available; cross-tab serialization cannot be provided by the
+  fallback.
 - A crash after a mint accepts outputs but before IndexedDB saves them can lose
   fake proofs. This prototype does not claim crash-safe issuance.
 
-Use `?wallet=maker` and `?wallet=taker` for two isolated actors. Do not open the
-same profile in browsers that lack Web Locks; cross-tab serialization depends
-on that API.
+Use `?wallet=maker` and `?wallet=taker` for two isolated actors. Use a browser
+with Web Locks for workflows that open the same profile in multiple tabs.

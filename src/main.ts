@@ -1,7 +1,11 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, TEST_MARKET, type PublishOrderInput } from "./api/order-api.js";
 import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
-import { withOrderOutboxLock, withWalletLock } from "./browser/lock.js";
+import {
+  hasNativeWebLocks,
+  withOrderOutboxLock,
+  withWalletLock
+} from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { startInboxListeners } from "./browser/startup.js";
@@ -297,6 +301,11 @@ const granola: GranolaBrowserFacade = {
   enableMaker: async () => (await tradeController()).enableMaker()
 };
 window.granola = granola;
+
+if (!hasNativeWebLocks()) {
+  log("Web Locks API unavailable. Using single-tab mode; keep this wallet profile in one tab. Use HTTPS and a browser with Web Locks for multi-tab workflows.");
+  report("Web Locks unavailable: single-tab mode enabled. Do not open this wallet profile in another tab.");
+}
 
 let makerInboxStartPromise: Promise<void> | undefined;
 let makerInboxResyncQueued = false;

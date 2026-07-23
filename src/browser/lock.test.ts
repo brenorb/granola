@@ -24,6 +24,32 @@ describe("wallet mutation lock", () => {
       expect.any(Function)
     );
   });
+
+  it("serializes work in one page when Web Locks are unavailable", async () => {
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withWalletLock("fallback", async () => {
+      events.push("first-start");
+      await firstStarted;
+      events.push("first-end");
+      return "first";
+    }, undefined);
+    const second = withWalletLock("fallback", async () => {
+      events.push("second");
+      return "second";
+    }, undefined);
+
+    await Promise.resolve();
+    expect(events).toEqual(["first-start"]);
+    releaseFirst();
+    await expect(first).resolves.toBe("first");
+    await expect(second).resolves.toBe("second");
+    expect(events).toEqual(["first-start", "first-end", "second"]);
+  });
 });
 
 describe("order outbox mutation lock", () => {
