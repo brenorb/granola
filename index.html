@@ -70,14 +70,6 @@
                 <input name="days" type="number" min="1" max="30" value="30" required />
               </label>
             </div>
-            <div class="field-pair">
-              <label>Execution
-                <select id="order-execution" name="execution"><option value="all_or_none">All or none</option><option value="partial">Allow partial fill</option></select>
-              </label>
-              <label>Minimum fill (SAT)
-                <input id="minimum-fill" name="minimumFillAmount" inputmode="numeric" pattern="[1-9][0-9]*" disabled />
-              </label>
-            </div>
             <p id="order-settlement-hint" class="hint" aria-live="polite">Orders are public signed test data, not escrow. Prices are converted to an exact cents-per-SAT ratio before signing.</p>
             <button type="submit">Sign &amp; publish order</button>
           </form>

@@ -28,4 +28,9 @@ describe("manual testnet swap tutorial", () => {
     expect(html).toContain("Manual test tutorial");
     expect(html).toContain('id="order-settlement-hint"');
   });
+
+  it("keeps minimum fill out of the current order form", () => {
+    expect(html).not.toContain("Minimum fill");
+    expect(html).not.toContain('name="minimumFillAmount"');
+  });
 });

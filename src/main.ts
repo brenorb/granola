@@ -329,8 +329,6 @@ byId("enable-maker").addEventListener("click", () => {
     });
 });
 
-const executionInput = byId<HTMLSelectElement>("order-execution");
-const minimumFillInput = byId<HTMLInputElement>("minimum-fill");
 const orderForm = byId<HTMLFormElement>("order-form");
 const mintInput = byId<HTMLSelectElement>("mint-url");
 const mintUnitInput = byId<HTMLSelectElement>("mint-unit");
@@ -394,12 +392,6 @@ orderAmountInput.addEventListener("invalid", () => {
   }
 });
 updateOrderSettlementHint();
-executionInput.addEventListener("change", () => {
-  const partial = executionInput.value === "partial";
-  minimumFillInput.disabled = !partial;
-  minimumFillInput.required = partial;
-  if (!partial) minimumFillInput.value = "";
-});
 
 mintUnitInput.addEventListener("change", () => {
   mintInput.value = mintUnitInput.value === "usd"
@@ -413,12 +405,8 @@ orderForm.addEventListener("submit", (event) => {
   const form = new FormData(event.currentTarget as HTMLFormElement);
   void (async () => {
     const side = String(form.get("side"));
-    const execution = String(form.get("execution"));
     const days = Number(String(form.get("days")));
     if (side !== "buy" && side !== "sell") throw new Error("Unknown order side");
-    if (execution !== "all_or_none" && execution !== "partial") {
-      throw new Error("Unknown execution condition");
-    }
     if (!Number.isSafeInteger(days) || days < 1 || days > 30) {
       throw new Error("Order lifetime must be 1–30 days");
     }
@@ -427,10 +415,7 @@ orderForm.addEventListener("submit", (event) => {
       amount: String(form.get("amount")),
       priceCentsPerBtc: fiatPerBtcPrice(String(form.get("fiatPrice"))),
       expiresAt: Math.floor(Date.now() / 1000) + days * 86_400,
-      execution,
-      ...(execution === "partial"
-        ? { minimumFillAmount: String(form.get("minimumFillAmount")) }
-        : {})
+      execution: "all_or_none"
     };
     const publication = await granola.publishOrder(input);
     const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;

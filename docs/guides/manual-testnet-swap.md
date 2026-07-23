@@ -65,7 +65,7 @@ On the maker page, expand **Publish a test limit order** and enter:
 | Good for (days) | `30` |
 | Execution | `All or none` |
 
-Leave **Minimum fill (SAT)** disabled. Press **Sign & publish order**.
+The browser form publishes all-or-none orders. Press **Sign & publish order**.
 
 Publication is deliberately durable and staged. If **Pending relay publication**
 appears:
