@@ -1,3 +1,4 @@
+import { nip19 } from "nostr-tools";
 import { describe, expect, it } from "vitest";
 
 import type { PublicTradeView } from "../trade/session.js";
@@ -110,7 +111,8 @@ describe("trade session presentation", () => {
     expect(root.textContent).toContain("1 USD");
     expect(root.textContent).toContain("nofee.testnut.cashu.space");
     expect(root.querySelector("[data-advance-trade]")).toBeNull();
-    expect(root.innerHTML).not.toMatch(/private|preimage|token|proof/i);
+    expect(root.innerHTML).not.toContain("privateState");
+    expect(root.innerHTML).not.toContain("cashu-private-token");
   });
 
   it("keeps maker and taker sessions visibly distinct on the shared page", () => {
@@ -124,5 +126,53 @@ describe("trade session presentation", () => {
     expect(root.querySelectorAll("[data-trade-role='maker']")).toHaveLength(1);
     expect(root.textContent).toContain("Taker session");
     expect(root.textContent).toContain("Maker session");
+  });
+
+  it("opens the accepted DM count as a readable redacted transcript", () => {
+    const root = document.createElement("section");
+    const local = "cc".repeat(32);
+    renderTrades(root, [{
+      ...trade,
+      protocol: {
+        ...trade.protocol,
+        localNostrPubkey: local,
+        messages: [{
+          sequence: "0",
+          messageId: "01".repeat(32),
+          rumorId: "02".repeat(32),
+          transcriptHash: "03".repeat(32),
+          type: "reserve_propose",
+          authorPubkey: "aa".repeat(32),
+          recipientPubkey: local
+        }, {
+          sequence: "1",
+          messageId: "04".repeat(32),
+          rumorId: "05".repeat(32),
+          transcriptHash: "06".repeat(32),
+          type: "reserve_accept",
+          authorPubkey: local,
+          recipientPubkey: "aa".repeat(32)
+        }]
+      }
+    }]);
+
+    const trigger = root.querySelector<HTMLButtonElement>(".trade-dms-trigger");
+    const dialog = root.querySelector<HTMLDialogElement>(".trade-dm-dialog");
+    expect(trigger?.textContent).toContain("2 accepted");
+    expect(trigger?.getAttribute("aria-haspopup")).toBe("dialog");
+
+    trigger?.click();
+
+    expect(dialog?.hasAttribute("open")).toBe(true);
+    expect(dialog?.textContent).toContain("Reserve proposal");
+    expect(dialog?.textContent).toContain("Received by you");
+    expect(dialog?.textContent).toContain("Reservation accepted");
+    expect(dialog?.textContent).toContain("Sent by you");
+    expect(dialog?.textContent).toContain(nip19.npubEncode(local));
+    expect(dialog?.textContent).toContain("Spendable tokens");
+    expect(dialog?.textContent).not.toContain("cashu-private-token");
+
+    dialog?.querySelector<HTMLButtonElement>(".trade-dm-dialog__close")?.click();
+    expect(dialog?.hasAttribute("open")).toBe(false);
   });
 });
