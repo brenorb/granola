@@ -1,3 +1,5 @@
+import { getPublicKey } from "nostr-tools/pure";
+
 import type { PreparedTradeOperation } from "../cashu/trade-client.js";
 import type { ExpectedHtlcLock } from "../cashu/htlc.js";
 import type { RelayReceipt } from "../nostr/relay.js";
@@ -7,7 +9,8 @@ import type { AtomicSwapChoreography } from "./atomic-messages.js";
 import type {
   GranolaTradeMessage,
   SignedNostrEvent,
-  UnsignedRumor
+  UnsignedRumor,
+  TradeMessageType
 } from "./messages.js";
 import type { SettlementPlan, TradePhase } from "./model.js";
 
@@ -63,6 +66,10 @@ export interface AcceptedTradeMessage {
   messageId: string;
   rumorId: string;
   transcriptHash: string;
+  /** Public message metadata retained for the protocol trace. */
+  type?: TradeMessageType;
+  authorPubkey?: string;
+  recipientPubkey?: string;
 }
 
 export interface TradeTranscriptJournal {
@@ -215,14 +222,58 @@ export type PublicTradeEvidence = Omit<TradeEvidence, "reservation"> & {
   };
 };
 
+export interface PublicTradeMessageTrace {
+  sequence: string;
+  messageId: string;
+  rumorId: string;
+  transcriptHash: string;
+  type?: TradeMessageType;
+  authorPubkey?: string;
+  recipientPubkey?: string;
+}
+
+export interface PublicTradeProtocolTrace {
+  localNostrPubkey: string | null;
+  orderAuthorityPubkey: string;
+  counterpartyNostrPubkey: string | null;
+  inbox: {
+    status: TradeInboxJournal["status"];
+    registrationEventId: string | null;
+    relayCount: number;
+    acknowledgements: number;
+  };
+  messages: PublicTradeMessageTrace[];
+}
+
 export type PublicTradeView = Omit<
   TradeSession,
   "privateState" | "schema" | "evidence"
 > & {
   evidence: PublicTradeEvidence;
+  protocol: PublicTradeProtocolTrace;
 };
 
+function privateKeyBytes(value: string): Uint8Array | null {
+  if (!/^[0-9a-f]{64}$/.test(value)) return null;
+  return Uint8Array.from(value.match(/../g) ?? [], (part) => Number.parseInt(part, 16));
+}
+
+function localNostrPubkey(session: TradeSession): string | null {
+  const key = privateKeyBytes(session.privateState.nostrPrivateKey);
+  if (key === null) return null;
+  try {
+    return getPublicKey(key);
+  } finally {
+    key.fill(0);
+  }
+}
+
 export function publicTradeView(session: TradeSession): PublicTradeView {
+  const participants = session.privateState.transcript.choreography.participants;
+  const localPubkey = localNostrPubkey(session);
+  const counterpartyNostrPubkey = session.role === "maker"
+    ? participants.takerSessionPubkey ?? null
+    : participants.makerSessionPubkey ?? participants.makerOrderPubkey;
   return structuredClone({
     revision: session.revision,
     sessionId: session.sessionId,
@@ -242,6 +293,26 @@ export function publicTradeView(session: TradeSession): PublicTradeView {
     updatedAt: session.updatedAt,
     terms: session.terms,
     plan: session.plan,
+    protocol: {
+      localNostrPubkey: localPubkey,
+      orderAuthorityPubkey: session.evidence.makerPubkey,
+      counterpartyNostrPubkey,
+      inbox: {
+        status: session.privateState.inbox.status,
+        registrationEventId: session.privateState.inbox.event?.id ?? null,
+        relayCount: session.privateState.inbox.inboxRelays.length,
+        acknowledgements: session.privateState.inbox.receipts.filter(({ ok }) => ok).length
+      },
+      messages: session.privateState.transcript.accepted.map((message) => ({
+        sequence: message.sequence,
+        messageId: message.messageId,
+        rumorId: message.rumorId,
+        transcriptHash: message.transcriptHash,
+        ...(message.type === undefined ? {} : { type: message.type }),
+        ...(message.authorPubkey === undefined ? {} : { authorPubkey: message.authorPubkey }),
+        ...(message.recipientPubkey === undefined ? {} : { recipientPubkey: message.recipientPubkey })
+      }))
+    },
     evidence: {
       makerPubkey: session.evidence.makerPubkey,
       commitments: session.evidence.commitments,

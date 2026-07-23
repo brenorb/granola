@@ -1428,7 +1428,10 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           sequence: pending.message.sequence,
           messageId: pending.message.message_id,
           rumorId: pending.rumor.id,
-          transcriptHash: pending.transcriptHash
+          transcriptHash: pending.transcriptHash,
+          type: pending.message.type,
+          authorPubkey: pending.message.author_pubkey,
+          recipientPubkey: pending.message.recipient_pubkey
         }
       ]
     };
@@ -1499,7 +1502,10 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           sequence: outbox.message.sequence,
           messageId: outbox.message.message_id,
           rumorId: outbox.rumor.id,
-          transcriptHash: hash
+          transcriptHash: hash,
+          type: outbox.message.type,
+          authorPubkey: outbox.message.author_pubkey,
+          recipientPubkey: outbox.message.recipient_pubkey
         }
       ]
     };

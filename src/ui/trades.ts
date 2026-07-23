@@ -1,3 +1,5 @@
+import { nip19 } from "nostr-tools";
+
 import type { PublicTradeView } from "../trade/session.js";
 
 export interface TradeRenderOptions {
@@ -24,6 +26,20 @@ function liability(label: string, amount: string, unit: string, mint: string): H
   item.append(element("span", label));
   item.append(element("strong", `${amount} ${unit.toUpperCase()}`));
   item.append(element("small", new URL(mint).host));
+  return item;
+}
+
+function identity(label: string, value: string | null): HTMLElement {
+  const item = element("li");
+  item.append(element("span", label));
+  if (value === null) {
+    item.append(element("strong", "Waiting for authenticated session"));
+    return item;
+  }
+  const npub = nip19.npubEncode(value);
+  const rendered = element("strong", `${npub.slice(0, 12)}…${npub.slice(-8)}`);
+  rendered.title = npub;
+  item.append(rendered);
   return item;
 }
 
@@ -70,6 +86,16 @@ export function renderTrades(
       : "Waiting for verified mint state");
     progress.className = "trade-card__state";
     card.append(progress);
+
+    const protocol = element("ul");
+    protocol.className = "trade-protocol-summary";
+    protocol.append(identity("Local npub", trade.protocol.localNostrPubkey));
+    protocol.append(identity("Counterparty npub", trade.protocol.counterpartyNostrPubkey));
+    const messages = element("li");
+    messages.append(element("span", "DMs"));
+    messages.append(element("strong", `${trade.protocol.messages.length} accepted`));
+    protocol.append(messages);
+    card.append(protocol);
 
     const advance = element("button", "Advance safely");
     advance.type = "button";

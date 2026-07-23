@@ -12,6 +12,7 @@ import type {
   TradeSession,
   TradeTranscriptJournal
 } from "../trade/session.js";
+import { TRADE_MESSAGE_TYPES } from "../trade/messages.js";
 import { EncryptedStorageDriver } from "./encrypted-storage.js";
 import type { StorageDriver } from "./wallet-repository.js";
 
@@ -324,11 +325,22 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
   }
   const accepted = transcript.accepted.map((value, index) => {
     const entry = object(value, "Accepted trade transcript entry");
-    exactKeys(
+    exactAllowedKeys(
       entry,
       ["sequence", "messageId", "rumorId", "transcriptHash"],
+      ["type", "authorPubkey", "recipientPubkey"],
       "Accepted trade transcript entry"
     );
+    if (entry.type !== undefined &&
+      (typeof entry.type !== "string" || !TRADE_MESSAGE_TYPES.includes(entry.type as never))) {
+      throw new Error("Accepted trade message type is invalid");
+    }
+    for (const field of ["authorPubkey", "recipientPubkey"] as const) {
+      if (entry[field] !== undefined &&
+        (typeof entry[field] !== "string" || !HEX_32.test(entry[field] as string))) {
+        throw new Error("Accepted trade message participant is invalid");
+      }
+    }
     if (
       entry.sequence !== String(index) ||
       typeof entry.messageId !== "string" ||
@@ -338,12 +350,7 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
       typeof entry.transcriptHash !== "string" ||
       !HEX_32.test(entry.transcriptHash)
     ) throw new Error("Accepted trade transcript entry is invalid");
-    return entry as {
-      sequence: string;
-      messageId: string;
-      rumorId: string;
-      transcriptHash: string;
-    };
+    return entry as unknown as TradeTranscriptJournal["accepted"][number];
   });
   for (const [field, values] of [
     ["sequence", accepted.map(({ sequence }) => sequence)],
