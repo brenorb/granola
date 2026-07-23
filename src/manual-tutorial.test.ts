@@ -35,6 +35,12 @@ describe("manual testnet swap tutorial", () => {
     expect(html).not.toContain("Active order keys");
   });
 
+  it("places pending relay publications below the order form", () => {
+    expect(html.indexOf('id="pending-publications"')).toBeGreaterThan(
+      html.indexOf('class="order-entry"')
+    );
+  });
+
   it("keeps minimum fill out of the current order form", () => {
     expect(html).not.toContain("Minimum fill");
     expect(html).not.toContain('name="minimumFillAmount"');
