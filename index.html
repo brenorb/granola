@@ -169,6 +169,15 @@
     </main>
 
     <div id="status" role="status" aria-live="polite"></div>
+    <script>
+      if (
+        window.location.protocol === "http:" &&
+        window.location.hostname !== "localhost" &&
+        window.location.hostname !== "127.0.0.1"
+      ) {
+        window.location.replace(`https://${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`);
+      }
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
