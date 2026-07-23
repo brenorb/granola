@@ -278,6 +278,56 @@ describe("strict HTLC lock validation", () => {
   });
 
   it.each([
+    ["quote asset in the maker-offer long-lock slot", "quote", "long"],
+    ["base asset in the taker-payment short-lock slot", "base", "short"]
+  ] as const)("accepts the %s", (_name, leg, deadline) => {
+    const material = createHtlcMaterial();
+    const input = validation(material.hash);
+    const locktime = input.expected.deadlines[deadline];
+    input.envelope.binding.direction = leg;
+    input.expected.binding.direction = leg;
+    input.expected.leg = leg;
+    input.expected.locktime = locktime;
+    input.expected.refundHorizon = locktime + 60;
+    for (const item of input.envelope.proofs) {
+      item.secret = createHTLCsecret(material.hash, [
+        ["locktime", String(locktime)],
+        ["refund", refundPubkey],
+        ["pubkeys", receiverPubkey]
+      ]);
+    }
+    input.states = input.envelope.proofs.map((item) =>
+      state(item, CheckStateEnum.UNSPENT)
+    );
+
+    expect(validateHtlcLock(input)).toMatchObject({
+      amount: "10",
+      proofCount: 2
+    });
+  });
+
+  it("rejects a locktime outside both accepted settlement deadlines", () => {
+    const material = createHtlcMaterial();
+    const input = validation(material.hash);
+    input.expected.locktime = 1900;
+    input.expected.refundHorizon = 1960;
+    for (const item of input.envelope.proofs) {
+      item.secret = createHTLCsecret(material.hash, [
+        ["locktime", "1900"],
+        ["refund", refundPubkey],
+        ["pubkeys", receiverPubkey]
+      ]);
+    }
+    input.states = input.envelope.proofs.map((item) =>
+      state(item, CheckStateEnum.UNSPENT)
+    );
+
+    expect(() => validateHtlcLock(input)).toThrow(
+      "Cashu HTLC invariant failed: leg-deadline"
+    );
+  });
+
+  it.each([
     ["wrong mint", (input: HtlcValidationInput) => (input.envelope.mintUrl = "https://other.invalid")],
     [
       "insecure remote mint",

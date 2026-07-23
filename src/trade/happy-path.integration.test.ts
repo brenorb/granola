@@ -418,7 +418,10 @@ function effectEntropy(seed: number) {
 }
 
 describe("two-party coordinator happy path", () => {
-  async function settleHappyPath(selectedMarket: ExactMarket): Promise<void> {
+  async function settleHappyPath(
+    selectedMarket: ExactMarket,
+    side: "buy" | "sell" = "sell"
+  ): Promise<void> {
     const makerOrderKey = secret(1);
     const makerPubkey = getPublicKey(makerOrderKey);
     const signer: OrderSigner = {
@@ -442,12 +445,13 @@ describe("two-party coordinator happy path", () => {
       selectedMarket
     );
     const create = await orderApi.publishOrder({
-      side: "sell",
+      side,
       amount: "20",
       priceCentsPerBtc: "5000000",
       expiresAt: NOW + 9 * 86_400
     });
-    const order = (await orderService.loadBook(selectedMarket, NOW)).book.asks[0]!;
+    const book = (await orderService.loadBook(selectedMarket, NOW)).book;
+    const order = side === "sell" ? book.asks[0]! : book.bids[0]!;
 
     const transport = new MemoryTradeTransport();
     await transport.publishRegistration(
@@ -462,17 +466,17 @@ describe("two-party coordinator happy path", () => {
     const makerWallet = new WalletRepository(makerDriver);
     const takerWallet = new WalletRepository(takerDriver);
     await makerWallet.save(fundedWallet(
-      selectedMarket.baseMint,
-      selectedMarket.baseUnit,
-      "20",
-      BASE_KEYSET,
+      side === "sell" ? selectedMarket.baseMint : selectedMarket.quoteMint,
+      side === "sell" ? selectedMarket.baseUnit : selectedMarket.quoteUnit,
+      side === "sell" ? "20" : "1",
+      side === "sell" ? BASE_KEYSET : QUOTE_KEYSET,
       "maker"
     ));
     await takerWallet.save(fundedWallet(
-      selectedMarket.quoteMint,
-      selectedMarket.quoteUnit,
-      "1",
-      QUOTE_KEYSET,
+      side === "sell" ? selectedMarket.quoteMint : selectedMarket.baseMint,
+      side === "sell" ? selectedMarket.quoteUnit : selectedMarket.baseUnit,
+      side === "sell" ? "1" : "20",
+      side === "sell" ? QUOTE_KEYSET : BASE_KEYSET,
       "taker"
     ));
 
@@ -569,6 +573,17 @@ describe("two-party coordinator happy path", () => {
         quoteMintNow: NOW + 1
       }
     }, sessionEntropy("maker")), null);
+    expect((await makerSessions.get(SESSION_ID))?.orderSide).toBe(side);
+    expect((await makerWallet.load()).pockets).toEqual([
+      expect.objectContaining({
+        mintUrl: side === "sell"
+          ? selectedMarket.baseMint
+          : selectedMarket.quoteMint,
+        unit: side === "sell"
+          ? selectedMarket.baseUnit
+          : selectedMarket.quoteUnit
+      })
+    ]);
 
     let steps = 0;
     while (steps++ < 200) {
@@ -686,8 +701,8 @@ describe("two-party coordinator happy path", () => {
       makerSession.privateState.nostrPrivateKey,
       makerSession.privateState.cashuPrivateKey,
       makerSession.privateState.refundPrivateKey,
-      makerSession.privateState.legs.base.token!,
-      takerSession.privateState.legs.quote.token!,
+      makerSession.privateState.legs[side === "sell" ? "base" : "quote"].token!,
+      takerSession.privateState.legs[side === "sell" ? "quote" : "base"].token!,
       "maker-funding-proof",
       "taker-funding-proof"
     ]) {
@@ -697,6 +712,10 @@ describe("two-party coordinator happy path", () => {
 
   it("settles the configured two-mint SAT/USD market one action at a time", async () => {
     await settleHappyPath(TEST_MARKET);
+  }, 60_000);
+
+  it("settles a buy-side order with the market legs reversed", async () => {
+    await settleHappyPath(TEST_MARKET, "buy");
   }, 60_000);
 
   it("settles a one-mint market one action at a time", async () => {

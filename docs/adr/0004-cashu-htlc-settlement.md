@@ -36,6 +36,13 @@ For a maker selling base for quote:
    public `filled` projection. The reservation remains public until fill or
    confirmed recovery.
 
+The wire choreography names these positions `base_lock` and `quote_lock`, but
+they are protocol slots: maker offer first with `T_long`, then taker payment
+with `T_short`. For a buy-side maker the market assets reverse—quote occupies
+the long-lock maker-offer slot and base occupies the short-lock taker-payment
+slot. Cashu validation binds the exact accepted deadline without inferring the
+protocol slot from the market asset name.
+
 For the testnet demonstration, after confirming each participating mint clock is within 30 seconds of local time, use:
 
 - `anchor = max(local clock, participating mint clocks)`;
