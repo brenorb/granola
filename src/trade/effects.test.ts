@@ -652,7 +652,7 @@ describe("GranolaCoordinatorEffects", () => {
     const { effects, orderApi, orderOutbox } = harness();
     const current = stagedOrderSession();
     const stagedEntry = {
-      schema: "granola/order-outbox/v2",
+      schema: "granola/order-outbox/v3",
       status: "staged",
       intent: {
         operation: "reserve",
@@ -717,7 +717,7 @@ describe("GranolaCoordinatorEffects", () => {
     const projection = event(30078, "b2");
     projection.created_at = NOW + 1;
     const stagedEntry = {
-      schema: "granola/order-outbox/v2",
+      schema: "granola/order-outbox/v3",
       status: "staged",
       intent: {
         operation: "reserve",

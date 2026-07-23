@@ -8,7 +8,10 @@ import type {
 } from "../order/service.js";
 import type { StorageDriver } from "./wallet-repository.js";
 
-const OUTBOX_KEY = "granola.order-outbox.v2";
+// v2 stored transition + projection artifacts. The projection-only format is
+// intentionally isolated because old records cannot be safely interpreted or
+// resumed by the current protocol.
+const OUTBOX_KEY = "granola.order-outbox.v3";
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 
@@ -28,7 +31,7 @@ export interface OrderPublicationIntent {
 }
 
 export interface OrderOutboxEntry {
-  schema: "granola/order-outbox/v2";
+  schema: "granola/order-outbox/v3";
   status: OrderPublicationStatus;
   intent: OrderPublicationIntent;
   publication: StagedOrderPublication;
@@ -172,7 +175,7 @@ function assertEntry(
   }
   const entry = value as Record<string, unknown>;
   if (
-    entry.schema !== "granola/order-outbox/v2" ||
+    entry.schema !== "granola/order-outbox/v3" ||
     !["staged", "acknowledged", "committed"].includes(String(entry.status))
   ) {
     throw new Error("Order outbox storage is corrupt");
@@ -328,7 +331,7 @@ export class OrderOutboxRepository implements OrderOutboxPort {
         if (existing.status !== "committed") throw new OrderOutboxConflictError();
       }
       const entry: OrderOutboxEntry = {
-        schema: "granola/order-outbox/v2",
+        schema: "granola/order-outbox/v3",
         status: "staged",
         intent: clone(intent),
         publication: await stage()

@@ -32,6 +32,7 @@ interface GranolaBrowserFacade {
   receiveToken: BrowserGranolaApi["receiveToken"];
   createBackup: BrowserGranolaApi["createBackup"];
   clearWallet: BrowserGranolaApi["clearWallet"];
+  resetProfile: (confirmation: string) => Promise<void>;
   getMakerPublicKeys: OrderApi["getMakerPublicKeys"];
   getOrderBook: OrderApi["getOrderBook"];
   publishOrder: OrderApi["publishOrder"];
@@ -248,6 +249,12 @@ const granola: GranolaBrowserFacade = {
   receiveToken: (token) => locked(() => api.receiveToken(token)),
   createBackup: () => locked(() => api.createBackup()),
   clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation)),
+  resetProfile: async (confirmation) => {
+    if (confirmation !== "RESET GRANOLA PROFILE") {
+      throw new Error("Type RESET GRANOLA PROFILE to erase this profile");
+    }
+    await driver.resetDatabase();
+  },
   getMakerPublicKeys: orderApi.getMakerPublicKeys.bind(orderApi),
   getOrderBook: orderApi.getOrderBook.bind(orderApi),
   publishOrder: publishOrderWithFunding,
@@ -508,6 +515,14 @@ byId<HTMLFormElement>("clear-form").addEventListener("submit", (event) => {
   const form = event.currentTarget as HTMLFormElement;
   void granola.clearWallet(String(new FormData(form).get("confirmation")))
     .then(async () => { form.reset(); await refresh(); log("Erased this profile’s local wallet"); report("Local wallet erased"); })
+    .catch((error: unknown) => report(messageOf(error), true));
+});
+
+byId<HTMLFormElement>("reset-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  void granola.resetProfile(String(new FormData(form).get("confirmation")))
+    .then(() => window.location.reload())
     .catch((error: unknown) => report(messageOf(error), true));
 });
 

@@ -135,4 +135,13 @@ export class IndexedDbStorageDriver implements StorageDriver {
   async delete(key: string): Promise<void> {
     await this.request("readwrite", (store) => store.delete(key));
   }
+
+  async resetDatabase(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.databaseName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB delete failed"));
+      request.onblocked = () => reject(new Error("IndexedDB reset is blocked by another open profile tab"));
+    });
+  }
 }

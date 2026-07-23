@@ -176,8 +176,16 @@ describe("OrderOutboxRepository", () => {
         receipts: []
       }
     }];
-    driver.data.set("granola.order-outbox.v2", corrupt);
+    driver.data.set("granola.order-outbox.v3", corrupt);
 
     await expect(repository.list()).rejects.toThrow(/corrupt/i);
+  });
+
+  it("does not read records from the retired transition-based outbox", async () => {
+    const driver = new MemoryDriver();
+    driver.data.set("granola.order-outbox.v2", [{ schema: "granola/order-outbox/v2" }]);
+    const repository = new OrderOutboxRepository(driver, undefined, () => true);
+
+    await expect(repository.list()).resolves.toEqual([]);
   });
 });

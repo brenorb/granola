@@ -235,7 +235,7 @@ export class NostrOrderService {
       this.verify
     );
     if (
-      entry.schema !== "granola/order-outbox/v2" ||
+      entry.schema !== "granola/order-outbox/v3" ||
       entry.publication.schema !== "granola/order-publication/v1" ||
       projection.address !== entry.intent.address ||
       projection.eventId !== entry.publication.projection.id ||

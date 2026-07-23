@@ -87,7 +87,7 @@ function entry(
   operation: OrderOutboxEntry["intent"]["operation"] = "create"
 ): OrderOutboxEntry {
   return {
-    schema: "granola/order-outbox/v2",
+    schema: "granola/order-outbox/v3",
     status: "staged",
     intent: {
       operation,
