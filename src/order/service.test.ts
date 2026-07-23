@@ -61,12 +61,14 @@ class FakeRelay implements OrderRelayPort {
   events: NostrEvent[] = [];
   transitions?: NostrEvent[];
   failTransition = false;
+  failProjection = false;
 
   async publish(event: NostrEvent) {
     this.published.push(event);
+    const fail = event.kind === 78 ? this.failTransition : this.failProjection;
     return [
       { relay: "wss://one.example", ok: true, message: "stored" },
-      { relay: "wss://two.example", ok: !this.failTransition, message: this.failTransition ? "blocked" : "stored" },
+      { relay: "wss://two.example", ok: !fail, message: fail ? "blocked" : "stored" },
       { relay: "wss://three.example", ok: true, message: "stored" }
     ];
   }
@@ -84,7 +86,7 @@ describe("Nostr order service", () => {
   it("publishes the signed transition before its signed current projection", async () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
-    const service = new NostrOrderService(signer, relay, () => "operation-1");
+    const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
 
     const publication = await service.publish(order());
 
@@ -99,11 +101,47 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     relay.failTransition = true;
-    const service = new NostrOrderService(signer, relay, () => "operation-1", 3);
+    const service = new NostrOrderService(signer, relay, () => "operation-1", 3, () => true);
 
-    await expect(service.publish(order())).rejects.toBeInstanceOf(PublicationQuorumError);
+    let failure: PublicationQuorumError | undefined;
+    try {
+      await service.publish(order());
+    } catch (error) {
+      if (error instanceof PublicationQuorumError) failure = error;
+    }
+    expect(failure).toBeInstanceOf(PublicationQuorumError);
+    expect(failure?.publication.transition.id).toBe("a".repeat(64));
+    expect(failure?.publication.projection.id).toBe("d".repeat(64));
     expect(relay.published.map((event) => event.kind)).toEqual([78]);
-    expect(signer.signed).toHaveLength(1);
+    expect(signer.signed).toHaveLength(2);
+
+    relay.failTransition = false;
+    const retried = await service.publishStaged(failure!.publication);
+    expect(retried.transition.id).toBe("a".repeat(64));
+    expect(retried.projection.id).toBe("d".repeat(64));
+    expect(relay.published.map((event) => event.kind)).toEqual([78, 78, 30078]);
+  });
+
+  it("retries a failed projection without replacing its accepted transition", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    relay.failProjection = true;
+    const service = new NostrOrderService(signer, relay, () => "operation-1", 3, () => true);
+
+    let failure: PublicationQuorumError | undefined;
+    try {
+      await service.publish(order());
+    } catch (error) {
+      if (error instanceof PublicationQuorumError) failure = error;
+    }
+    expect(failure?.stage).toBe("projection");
+    expect(relay.published.map((event) => event.kind)).toEqual([78, 30078]);
+
+    relay.failProjection = false;
+    const retried = await service.publishStaged(failure!.publication);
+    expect(retried.transition.id).toBe(failure!.publication.transition.id);
+    expect(retried.projection.id).toBe(failure!.publication.projection.id);
+    expect(relay.published.map((event) => event.kind)).toEqual([78, 30078, 30078]);
   });
 
   it("builds the book only from verified, canonical projections", async () => {

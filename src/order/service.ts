@@ -29,12 +29,16 @@ export interface OrderRelayPort {
   queryTransitions(addresses: string[]): Promise<NostrEvent[]>;
 }
 
-export interface OrderPublication {
+export interface StagedOrderPublication {
+  schema: "granola/order-publication/v1";
+  state: OrderState;
   transition: NostrEvent;
   transitionReceipts: RelayReceipt[];
   projection: NostrEvent;
   projectionReceipts: RelayReceipt[];
 }
+
+export type OrderPublication = StagedOrderPublication;
 
 export interface LoadedOrderBook {
   book: OrderBook;
@@ -44,9 +48,12 @@ export interface LoadedOrderBook {
 export class PublicationQuorumError extends Error {
   constructor(
     readonly stage: "transition" | "projection",
-    readonly receipts: RelayReceipt[],
+    readonly publication: StagedOrderPublication,
     readonly required: number
   ) {
+    const receipts = stage === "transition"
+      ? publication.transitionReceipts
+      : publication.projectionReceipts;
     const accepted = receipts.filter((receipt) => receipt.ok).length;
     super(`${stage} reached ${accepted}/${required} required relay acknowledgements`);
     this.name = "PublicationQuorumError";
@@ -57,14 +64,17 @@ function assertMaker(event: NostrEvent, expected: string): void {
   if (event.pubkey !== expected) throw new Error("Signer returned the wrong maker public key");
 }
 
-function requireQuorum(
-  stage: "transition" | "projection",
-  receipts: RelayReceipt[],
-  required: number
-): void {
-  if (receipts.filter((receipt) => receipt.ok).length < required) {
-    throw new PublicationQuorumError(stage, receipts, required);
+function hasQuorum(receipts: RelayReceipt[], required: number): boolean {
+  return receipts.filter((receipt) => receipt.ok).length >= required;
+}
+
+function mergeReceipts(previous: RelayReceipt[], current: RelayReceipt[]): RelayReceipt[] {
+  const byRelay = new Map(previous.map((receipt) => [receipt.relay, receipt]));
+  for (const receipt of current) {
+    const existing = byRelay.get(receipt.relay);
+    if (!existing?.ok || receipt.ok) byRelay.set(receipt.relay, receipt);
   }
+  return [...byRelay.values()];
 }
 
 export class NostrOrderService {
@@ -80,23 +90,70 @@ export class NostrOrderService {
     }
   }
 
-  async publish(state: OrderState): Promise<OrderPublication> {
+  async stage(state: OrderState): Promise<StagedOrderPublication> {
     const maker = await this.signer.publicKey();
     const transition = await this.signer.sign(
       createTransitionTemplate(state, maker, this.operationId())
     );
     assertMaker(transition, maker);
-    const transitionReceipts = await this.relays.publish(transition);
-    requireQuorum("transition", transitionReceipts, this.quorum);
-
     const projection = await this.signer.sign(
       await createProjectionTemplate(state, transition)
     );
     assertMaker(projection, maker);
-    const projectionReceipts = await this.relays.publish(projection);
-    requireQuorum("projection", projectionReceipts, this.quorum);
+    return {
+      schema: "granola/order-publication/v1",
+      state,
+      transition,
+      transitionReceipts: [],
+      projection,
+      projectionReceipts: []
+    };
+  }
 
-    return { transition, transitionReceipts, projection, projectionReceipts };
+  async publishStaged(staged: StagedOrderPublication): Promise<OrderPublication> {
+    const transitionRecord = parseCreateTransitionEvent(staged.transition, this.verify);
+    const projectionRecord = await parseProjectionEvent(staged.projection, this.verify);
+    if (
+      staged.schema !== "granola/order-publication/v1" ||
+      transitionRecord.eventId !== staged.projection.tags.find((tag) => tag[0] === "e")?.[1] ||
+      transitionRecord.makerPubkey !== projectionRecord.makerPubkey ||
+      JSON.stringify(transitionRecord.state) !== JSON.stringify(staged.state) ||
+      JSON.stringify(projectionRecord.state) !== JSON.stringify(staged.state)
+    ) {
+      throw new Error("Staged order publication is inconsistent");
+    }
+
+    let publication: StagedOrderPublication = structuredClone(staged);
+    if (!hasQuorum(publication.transitionReceipts, this.quorum)) {
+      publication = {
+        ...publication,
+        transitionReceipts: mergeReceipts(
+          publication.transitionReceipts,
+          await this.relays.publish(publication.transition)
+        )
+      };
+    }
+    if (!hasQuorum(publication.transitionReceipts, this.quorum)) {
+      throw new PublicationQuorumError("transition", publication, this.quorum);
+    }
+
+    if (!hasQuorum(publication.projectionReceipts, this.quorum)) {
+      publication = {
+        ...publication,
+        projectionReceipts: mergeReceipts(
+          publication.projectionReceipts,
+          await this.relays.publish(publication.projection)
+        )
+      };
+    }
+    if (!hasQuorum(publication.projectionReceipts, this.quorum)) {
+      throw new PublicationQuorumError("projection", publication, this.quorum);
+    }
+    return publication;
+  }
+
+  async publish(state: OrderState): Promise<OrderPublication> {
+    return this.publishStaged(await this.stage(state));
   }
 
   async loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook> {

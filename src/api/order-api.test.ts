@@ -23,6 +23,8 @@ class FakeOrders implements OrderServicePort {
     };
     const projection = { ...transition, kind: 30078, id: "d".repeat(64) };
     return {
+      schema: "granola/order-publication/v1",
+      state,
       transition,
       projection,
       transitionReceipts: [{ relay: "wss://one.example", ok: true, message: "stored" }],
