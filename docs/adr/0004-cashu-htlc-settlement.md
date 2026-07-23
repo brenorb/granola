@@ -1,4 +1,4 @@
-# ADR 0004: Two-mint settlement with staggered Cashu HTLCs
+# ADR 0004: One- or two-mint settlement with staggered Cashu HTLCs
 
 - Status: accepted for the testnet prototype
 - Date: 2026-07-23
@@ -6,15 +6,22 @@
 
 ## Context
 
-Granola swaps ecash issued by two independent Cashu mints. A maker offering the base asset must not learn the requested quote asset without enabling the taker to claim the base asset. Either party also needs a bounded recovery path when its counterparty disappears.
+Granola swaps ecash issued by one or two Cashu mints. Two mints are the
+general inter-mint case, while one mint is also valid when both legs use the
+same issuer. A maker offering the base asset must not learn the requested
+quote asset without enabling the taker to claim the base asset. Either party
+also needs a bounded recovery path when its counterparty disappears.
 
-Cashu NUT-14 HTLC spending conditions bind a proof to a SHA-256 hash and can additionally require a receiver public key. A refund public key becomes usable after a locktime. NUT-07 reports proof state and, after a spend, its witness. Both selected test mints currently advertise NUT-07, NUT-11, NUT-12, and NUT-14, but the protocol verifies capabilities immediately before every trade.
+Cashu NUT-14 HTLC spending conditions bind a proof to a SHA-256 hash and can additionally require a receiver public key. A refund public key becomes usable after a locktime. NUT-07 reports proof state and, after a spend, its witness. Each selected test mint currently advertises NUT-07, NUT-11, NUT-12, and NUT-14, but the protocol verifies capabilities immediately before every trade.
 
-This is atomic only under explicit assumptions: both mints enforce the advertised NUTs honestly, retain the spend witness, have sufficiently aligned clocks, and remain reachable across the settlement and refund windows. It does not remove mint risk or guarantee unconditional fairness.
+This is atomic only under explicit assumptions: each participating mint enforces the advertised NUTs honestly, retains the spend witness, has a sufficiently aligned clock, and remains reachable across the settlement and refund windows. It does not remove mint risk or guarantee unconditional fairness.
 
 ## Decision
 
-Use two receiver-bound NUT-14 HTLC legs with one fresh 32-byte preimage and SHA-256 hash per reservation.
+Use receiver-bound NUT-14 HTLC legs with one fresh 32-byte preimage and SHA-256
+hash per reservation. The base and quote legs may use the same mint or two
+distinct mints; when two mints are selected, each mint is preflighted and
+observed independently.
 
 For a maker selling base for quote:
 
@@ -29,9 +36,9 @@ For a maker selling base for quote:
    public `filled` projection. The reservation remains public until fill or
    confirmed recovery.
 
-For the testnet demonstration, after confirming each mint clock is within 30 seconds of local time, use:
+For the testnet demonstration, after confirming each participating mint clock is within 30 seconds of local time, use:
 
-- `anchor = max(local clock, both mint clocks)`;
+- `anchor = max(local clock, participating mint clocks)`;
 - `T_short = anchor + 4 days`;
 - maker claim cutoff `= T_short - 120 seconds`;
 - `T_long = anchor + 7 days`;
@@ -121,9 +128,12 @@ A peer can lie, replay a notice, or send it before the mint accepts a spend. NUT
 
 It leaks settlement material more broadly than necessary and creates avoidable races. The taker learns it from the quote mint witness.
 
-### Use one mint for both assets in the demonstration
+### Use one mint for both assets
 
-That would test units but not the cross-mint failure boundary Granola is meant to address. The demonstration uses SAT at `https://testnut.cashu.space` and USD at `https://nofee.testnut.cashu.space`.
+This is a supported topology. It exercises atomic settlement and recovery
+without exercising the additional inter-mint failure boundary. The
+demonstration currently uses SAT at `https://testnut.cashu.space` and USD at
+`https://nofee.testnut.cashu.space`, which is the two-mint topology.
 
 ## Consequences
 

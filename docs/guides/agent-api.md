@@ -83,7 +83,7 @@ bearer instruments. Do not log, paste, publish, or commit its return value.
 `enableMaker()` publishes the profile's authenticated order-key inbox
 registration and keeps its NIP-17 subscription open for the life of the page.
 Call it on the maker page before a taker starts. `takeOrder()` accepts only a
-verified current sell projection for the fixed SAT/USD issuer pair. Its
+verified current sell projection for the configured SAT/USD issuer pair. Its
 lowercase UUIDv4 `requestId` is an idempotency key: reuse that exact ID,
 address, projection ID, revision, and fill amount if the caller did not receive
 the first result.

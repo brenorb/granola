@@ -3,11 +3,13 @@
 These invariants define what the testnet proof of concept must demonstrate.
 They are acceptance criteria, not claims about the current implementation.
 
-1. **Two trust domains.** An inter-mint test uses two distinct mint URLs and
-   keysets. Two wallets at one mint do not prove Granola.
+1. **Mint topology.** A settlement may use one mint or two. An inter-mint test
+   uses two distinct mint URLs and keysets; two wallets at one mint do not
+   prove the inter-mint case.
 2. **Term binding.** Signatures and private messages bind protocol version,
-   network, order ID, session ID, both mint/keyset identities, units, amounts,
-   exact price representation, expiry, and the prior transcript hash.
+   network, order ID, session ID, the mint/keyset identity for each settlement
+   leg, units, amounts, exact price representation, expiry, and the prior
+   transcript hash.
 3. **What-you-see-is-what-you-sign.** The wallet never signs terms different
    from the final human/agent-readable confirmation.
 4. **Validate before commit.** A participant validates mint, unit, amount,

@@ -1,8 +1,9 @@
 # Granola
 
-Granola is an experimental protocol for peer-to-peer atomic swaps between
-Cashu ecash issued by different mints. Nostr provides discovery and private
-coordination; Cashu mints provide issuance and settlement.
+Granola is an experimental protocol for peer-to-peer atomic swaps of Cashu
+ecash issued by one or two mints. Two mints are the general inter-mint case;
+one mint is also valid. Nostr provides discovery and private coordination;
+Cashu mints provide issuance and settlement.
 
 This repository starts from the 2024 SatsHack design, but does not treat that
 prototype as a production-ready protocol. The recovered design, unresolved

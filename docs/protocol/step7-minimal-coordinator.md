@@ -70,7 +70,8 @@ Legacy prototype sessions retain their originally signed shorter profile.
 9. Maker independently observes both spends, publishes the fill projection at
    the same `d` tag, and sends `settlement_ack` bound to that event ID and revision.
 10. Taker accepts the exact settlement acknowledgement. Both public views become
-    filled only when the authoritative fill and the two mint observations agree.
+    filled only when the authoritative fill and the relevant participating-mint
+    observations agree.
 
 ## Existing timeout and refund boundary
 

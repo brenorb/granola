@@ -90,7 +90,6 @@ function canonicalMarket(input: SessionMarketSelection): SessionMarketSelection 
   if (baseMint !== input.baseMint || quoteMint !== input.quoteMint) {
     throw new Error("Session market mint URLs must be canonical");
   }
-  if (baseMint === quoteMint) throw new Error("Base and quote mints must be independent");
   for (const [label, unit] of [["Base", input.baseUnit], ["Quote", input.quoteUnit]] as const) {
     if (!UNIT.test(unit)) throw new Error(`${label} unit is not canonical`);
   }
@@ -322,7 +321,7 @@ function baseSession(input: {
       settlementTranscriptHash: null,
       inbox: {
         status: "unregistered",
-        quorum: 2,
+        quorum: 1,
         event: null,
         discoveryRelays: [],
         inboxRelays: [],

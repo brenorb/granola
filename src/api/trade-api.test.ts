@@ -366,7 +366,7 @@ describe("trade start API", () => {
       .not.toContain(session.privateState.nostrPrivateKey);
   });
 
-  it("starts a taker session only after exact two-mint preflight and quote balance", async () => {
+  it("starts a taker session only after exact market preflight and quote balance", async () => {
     let selectedMarket: SessionMarketSelection | undefined;
     const capturingFactory: TradeSessionFactoryPort = {
       ...factory(),

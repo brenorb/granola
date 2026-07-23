@@ -215,7 +215,7 @@ describe("trade session factory", () => {
         settlementTranscriptHash: null,
         inbox: {
           status: "unregistered",
-          quorum: 2,
+          quorum: 1,
           event: null,
           discoveryRelays: [],
           inboxRelays: [],
@@ -262,7 +262,7 @@ describe("trade session factory", () => {
         settlementTranscriptHash: null,
         inbox: {
           status: "unregistered",
-          quorum: 2,
+          quorum: 1,
           event: null,
           discoveryRelays: [],
           inboxRelays: [],
@@ -509,6 +509,35 @@ describe("trade session factory", () => {
       fillBaseAmount: "1000",
       clocks
     }, negated)).rejects.toThrow(/independent/i);
+  });
+
+  it("allows both settlement legs to use one mint", async () => {
+    const oneMint = { ...market, quoteMint: market.baseMint };
+    const oneMintOrder = record({
+      state: createOrderState({
+        orderId,
+        createdAt: now - 100,
+        expiresAt: now + 9 * 86_400,
+        side: "sell",
+        baseUnit: "sat",
+        quoteUnit: "usd",
+        offered: { unit: "sat", mint: baseMint },
+        requested: { unit: "usd", acceptableMints: [baseMint] },
+        amount: "1000",
+        priceCentsPerBtc: "2000000"
+      })
+    });
+    const session = await createTakerSession({
+      order: oneMintOrder,
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
+      market: oneMint,
+      fillBaseAmount: "1000",
+      clocks
+    }, entropy());
+
+    expect(session.terms.baseMint).toBe(oneMint.baseMint);
+    expect(session.terms.quoteMint).toBe(oneMint.quoteMint);
   });
 
   it.each([
