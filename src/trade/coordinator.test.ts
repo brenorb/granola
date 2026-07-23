@@ -449,4 +449,67 @@ describe("durable trade coordinator shell", () => {
       .rejects.toThrow(/session identity/i);
     expect(repository.save).not.toHaveBeenCalled();
   });
+
+  it("fingerprints network preparation with persisted lock terms and wallet input commitment", async () => {
+    const current = session();
+    current.privateState.transcript.choreography.phase = "awaiting_base_lock";
+    current.privateState.settlementTranscriptHash = "ab".repeat(32);
+    current.privateState.htlcHash = "cd".repeat(32);
+    current.privateState.legs.base.expected = {
+      mintUrl: current.terms.baseMint,
+      unit: current.terms.baseUnit,
+      binding: {
+        protocolVersion: "1",
+        network: "cashu-testnet-v1",
+        orderId: "22222222-2222-4222-8222-222222222222",
+        reservationId: current.reservationId,
+        sessionId: current.sessionId,
+        direction: "base",
+        transcriptHash: current.privateState.settlementTranscriptHash
+      },
+      amount: current.terms.baseAmount,
+      hash: current.privateState.htlcHash,
+      receiverPubkey: `02${"01".repeat(32)}`,
+      refundPubkey: `03${"02".repeat(32)}`,
+      locktime: current.plan.longLocktime,
+      leg: "base",
+      refundHorizon: current.plan.longLocktime + current.plan.refundGuardSeconds,
+      deadlines: {
+        short: current.plan.shortLocktime,
+        long: current.plan.longLocktime,
+        minimumGap: current.plan.longLocktime - current.plan.shortLocktime
+      }
+    };
+    const repository = new MemorySessionRepository(current);
+    const externalFingerprintMaterial = vi.fn(async () => ({
+      walletRevision: 4,
+      inputCommitment: "ef".repeat(32)
+    }));
+    const performExternal = vi.fn(async (input) => ({
+      ...clone(input.session),
+      revision: input.revision + 1,
+      updatedAt: input.now
+    }));
+    const coordinator = new TradeCoordinator({
+      repository,
+      effects: port({
+        classify: () => "external",
+        externalFingerprintMaterial,
+        performExternal
+      }),
+      now: () => 1_800_000_100
+    });
+
+    await coordinator.advance(current.sessionId);
+
+    expect(externalFingerprintMaterial).toHaveBeenCalledWith(
+      { kind: "prepare_base_lock" },
+      expect.objectContaining({ revision: 0 })
+    );
+    expect(performExternal).toHaveBeenCalledWith(expect.objectContaining({
+      action: { kind: "prepare_base_lock" },
+      revision: 0,
+      fingerprint: expect.stringMatching(/^prepare_base_lock:/)
+    }));
+  });
 });

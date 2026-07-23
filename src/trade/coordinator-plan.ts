@@ -34,6 +34,7 @@ export type CoordinatorAction =
   | { kind: "stage_fill_request" }
   | { kind: "observe_base" }
   | { kind: "stage_order_fill" }
+  | { kind: "verify_order_fill" }
   | { kind: "stage_order_release" }
   | { kind: "stage_settlement_ack" }
   | { kind: "prepare_quote_refund" }
@@ -92,13 +93,21 @@ function exactCommittedFill(session: TradeSession): boolean {
     hasCommittedPublication(session, "fill", session.fillTransitionId);
 }
 
+function exactVerifiedTakerFill(session: TradeSession): boolean {
+  return session.fillTransitionId !== null &&
+    session.evidence.fillTransitionId === session.fillTransitionId;
+}
+
 function exactCommittedRelease(session: TradeSession): boolean {
   return hasCommittedPublication(session, "release");
 }
 
 function terminal(session: TradeSession): boolean {
   if (session.privateState.transcript.choreography.phase === "settled") {
-    return bothLegsSpent(session) && exactCommittedFill(session);
+    const authoritativeFill = session.role === "maker"
+      ? exactCommittedFill(session)
+      : exactVerifiedTakerFill(session);
+    return bothLegsSpent(session) && authoritativeFill;
   }
   if (session.phase === "released") return exactCommittedRelease(session);
   if (session.phase === "frozen") {
@@ -323,6 +332,12 @@ export function nextCoordinatorAction(
     }
   }
 
+  if (
+    session.privateState.transcript.choreography.phase === "settled" &&
+    session.role === "taker" &&
+    session.fillTransitionId !== null &&
+    session.evidence.fillTransitionId === null
+  ) return { kind: "verify_order_fill" };
   if (terminal(session)) return { kind: "none" };
   if (session.privateState.transcript.choreography.phase === "settled") {
     return { kind: "enter_recovery" };

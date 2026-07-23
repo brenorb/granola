@@ -12,12 +12,16 @@ import type {
   TradeSession,
   TradeTranscriptJournal
 } from "../trade/session.js";
+import { EncryptedStorageDriver } from "./encrypted-storage.js";
 import type { StorageDriver } from "./wallet-repository.js";
 
 const TRADE_SESSIONS_KEY = "granola.trade-sessions.v2";
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const ORDER_ADDRESS = new RegExp(
+  `^30078:[0-9a-f]{64}:granola:order:v1:${UUID_V4.source.slice(1, -1)}$`
+);
 const CANONICAL_INTEGER = /^(0|[1-9]\d*)$/;
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
 const KEYSET = /^[0-9a-f]{16,66}$/;
@@ -1175,7 +1179,25 @@ function assertSession(value: unknown): asserts value is TradeSession {
   if (evidence.reserveTransitionId !== session.reserveTransitionId) {
     throw new Error("Reserve transition evidence disagrees with the session");
   }
-  if (evidence.fillTransitionId !== session.fillTransitionId) {
+  const fillPrivateState = object(session.privateState, "Trade private state");
+  const fillTranscript = object(
+    fillPrivateState.transcript,
+    "Trade transcript"
+  );
+  const fillChoreography = object(
+    fillTranscript.choreography,
+    "Trade choreography"
+  );
+  const awaitingTakerFillVerification =
+    session.role === "taker" &&
+    session.phase === "filled" &&
+    session.fillTransitionId !== null &&
+    evidence.fillTransitionId === null &&
+    fillChoreography.phase === "settled";
+  if (
+    evidence.fillTransitionId !== session.fillTransitionId &&
+    !awaitingTakerFillVerification
+  ) {
     throw new Error("Fill transition evidence disagrees with the session");
   }
   const evidenceLegs = object(evidence.legs, "Trade evidence legs");
@@ -1324,11 +1346,31 @@ function assertSession(value: unknown): asserts value is TradeSession {
     } catch {
       throw new Error("Trade outbox rumor content is invalid");
     }
+    const messageBody = object(
+      outbox.message.body,
+      "Trade outbox message body"
+    );
+    const isMakerReserveAcceptance =
+      session.role === "maker" &&
+      outbox.message.type === "reserve_accept";
+    const expectedOutboxAuthor = isMakerReserveAcceptance
+      ? evidence.makerPubkey
+      : localNostrPubkey;
+    if (isMakerReserveAcceptance && (
+      outbox.message.recipient_pubkey !==
+        transcript.choreography.participants.takerSessionPubkey ||
+      messageBody.maker_session_pubkey !== localNostrPubkey ||
+      messageBody.taker_session_pubkey !== outbox.message.recipient_pubkey ||
+      messageBody.reserve_transition_id !== session.reserveTransitionId ||
+      session.reserveTransitionId === null
+    )) {
+      throw new Error("Maker reserve acceptance does not bind the exact session handoff");
+    }
     if (
       canonicalJson(decoded) !== canonicalJson(outbox.message) ||
       outbox.rumor.pubkey !== outbox.seal.pubkey ||
       outbox.rumor.pubkey !== outbox.message.author_pubkey ||
-      outbox.message.author_pubkey !== localNostrPubkey ||
+      outbox.message.author_pubkey !== expectedOutboxAuthor ||
       outbox.rumor.created_at !== outbox.message.sent_at ||
       outbox.message.session_id !== session.sessionId ||
       outbox.message.reservation_id !== session.reservationId ||
@@ -1405,6 +1447,105 @@ function assertSessions(value: unknown): asserts value is TradeSession[] {
     if (seen.has(session.sessionId)) throw new Error("Trade session storage has duplicate IDs");
     seen.add(session.sessionId);
   }
+}
+
+export interface TakerStartIntent {
+  requestId: string;
+  address: string;
+  expectedHeadId: string;
+  fillBaseAmount: string;
+}
+
+interface StoredTakerStartBinding extends TakerStartIntent {
+  sessionId: string;
+}
+
+interface TradeSessionStore {
+  schema: "granola/trade-session-store/v1";
+  sessions: TradeSession[];
+  takerStarts: StoredTakerStartBinding[];
+}
+
+function assertTakerStartIntent(
+  value: unknown,
+  label: string,
+  withSessionId: boolean
+): asserts value is StoredTakerStartBinding {
+  const intent = object(value, label);
+  exactKeys(intent, [
+    "requestId",
+    "address",
+    "expectedHeadId",
+    "fillBaseAmount",
+    ...(withSessionId ? ["sessionId"] : [])
+  ], label);
+  if (
+    typeof intent.requestId !== "string" ||
+    !UUID_V4.test(intent.requestId) ||
+    typeof intent.address !== "string" ||
+    !ORDER_ADDRESS.test(intent.address) ||
+    typeof intent.expectedHeadId !== "string" ||
+    !HEX_32.test(intent.expectedHeadId) ||
+    typeof intent.fillBaseAmount !== "string" ||
+    !POSITIVE_INTEGER.test(intent.fillBaseAmount) ||
+    (withSessionId && (
+      typeof intent.sessionId !== "string" ||
+      !HEX_32.test(intent.sessionId)
+    ))
+  ) throw new Error(`${label} is invalid`);
+}
+
+function sameTakerStartIntent(
+  left: TakerStartIntent,
+  right: TakerStartIntent
+): boolean {
+  return left.requestId === right.requestId &&
+    left.address === right.address &&
+    left.expectedHeadId === right.expectedHeadId &&
+    left.fillBaseAmount === right.fillBaseAmount;
+}
+
+function assertTradeSessionStore(value: unknown): asserts value is TradeSessionStore {
+  const store = object(value, "Trade session store");
+  exactKeys(store, ["schema", "sessions", "takerStarts"], "Trade session store");
+  if (store.schema !== "granola/trade-session-store/v1") {
+    throw new Error("Trade session store schema is invalid");
+  }
+  assertSessions(store.sessions);
+  if (!Array.isArray(store.takerStarts)) {
+    throw new Error("Trade session start bindings are invalid");
+  }
+  const sessions = new Map(
+    (store.sessions as TradeSession[]).map((item) => [item.sessionId, item])
+  );
+  const requestIds = new Set<string>();
+  const boundSessions = new Set<string>();
+  for (const value of store.takerStarts) {
+    assertTakerStartIntent(value, "Taker start binding", true);
+    const binding = value as StoredTakerStartBinding;
+    const session = sessions.get(binding.sessionId);
+    if (
+      requestIds.has(binding.requestId) ||
+      boundSessions.has(binding.sessionId) ||
+      session === undefined ||
+      session.role !== "taker" ||
+      session.orderAddress !== binding.address ||
+      session.offeredOrderHead !== binding.expectedHeadId ||
+      session.terms.baseAmount !== binding.fillBaseAmount
+    ) {
+      throw new Error("Taker start binding is conflicting or orphaned");
+    }
+    requestIds.add(binding.requestId);
+    boundSessions.add(binding.sessionId);
+  }
+}
+
+function emptyTradeSessionStore(): TradeSessionStore {
+  return {
+    schema: "granola/trade-session-store/v1",
+    sessions: [],
+    takerStarts: []
+  };
 }
 
 const INBOX_STATUS_RANK: Record<TradeInboxJournal["status"], number> = {
@@ -1566,31 +1707,172 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
 
 export type TradeSessionExclusiveRunner = <T>(action: () => Promise<T>) => Promise<T>;
 
-const withoutCrossTabLock: TradeSessionExclusiveRunner = async <T>(
+const localLockTails = new Map<string, Promise<void>>();
+
+async function withLocalLock<T>(
+  name: string,
   action: () => Promise<T>
-): Promise<T> => action();
+): Promise<T> {
+  const previous = localLockTails.get(name) ?? Promise.resolve();
+  let release = (): void => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  localLockTails.set(name, current);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (localLockTails.get(name) === current) localLockTails.delete(name);
+  }
+}
+
+async function withSharedLock<T>(
+  name: string,
+  action: () => Promise<T>
+): Promise<T> {
+  const locks = globalThis.navigator?.locks;
+  if (locks !== undefined) {
+    return await locks.request(
+      name,
+      { mode: "exclusive" },
+      async () => action()
+    );
+  }
+  return withLocalLock(name, action);
+}
+
+const withDefaultTradeSessionLock: TradeSessionExclusiveRunner = async <T>(
+  action: () => Promise<T>
+): Promise<T> => withSharedLock(
+  "granola-trade-sessions-storage-write",
+  action
+);
+
+const withDefaultTradeEncryptionLock: TradeSessionExclusiveRunner = async <T>(
+  action: () => Promise<T>
+): Promise<T> => withSharedLock(
+  "granola-trade-sessions-encryption-key-write",
+  action
+);
 
 export class TradeSessionRepository {
+  private readonly driver: StorageDriver;
+  private readonly legacyDriver: StorageDriver | null;
+  private readonly runExclusive: TradeSessionExclusiveRunner;
+
   constructor(
-    private readonly driver: StorageDriver,
-    private readonly runExclusive: TradeSessionExclusiveRunner = withoutCrossTabLock
-  ) {}
+    driver: StorageDriver,
+    runExclusive: TradeSessionExclusiveRunner = withDefaultTradeSessionLock
+  ) {
+    this.legacyDriver = driver instanceof EncryptedStorageDriver ? null : driver;
+    this.driver = driver instanceof EncryptedStorageDriver
+      ? driver
+      : new EncryptedStorageDriver(
+        driver,
+        "granola-trade-sessions",
+        withDefaultTradeEncryptionLock
+      );
+    this.runExclusive = runExclusive;
+  }
+
+  private async loadStore(): Promise<TradeSessionStore> {
+    const encrypted = await this.driver.get(TRADE_SESSIONS_KEY);
+    const stored = encrypted ?? (
+      this.legacyDriver === null
+        ? undefined
+        : await this.legacyDriver.get(TRADE_SESSIONS_KEY)
+    );
+    if (stored === undefined || stored === null) return emptyTradeSessionStore();
+    if (Array.isArray(stored)) {
+      assertSessions(stored);
+      return {
+        schema: "granola/trade-session-store/v1",
+        sessions: clone(stored),
+        takerStarts: []
+      };
+    }
+    assertTradeSessionStore(stored);
+    return clone(stored);
+  }
 
   async list(): Promise<TradeSession[]> {
-    const stored = await this.driver.get(TRADE_SESSIONS_KEY);
-    if (stored === undefined || stored === null) return [];
-    assertSessions(stored);
-    return clone(stored);
+    return (await this.loadStore()).sessions;
   }
 
   async get(sessionId: string): Promise<TradeSession | undefined> {
     return (await this.list()).find((session) => session.sessionId === sessionId);
   }
 
+  async getTakerForRequest(
+    intent: TakerStartIntent
+  ): Promise<TradeSession | undefined> {
+    assertTakerStartIntent(intent, "Taker start intent", false);
+    const store = await this.loadStore();
+    const binding = store.takerStarts.find(
+      (item) => item.requestId === intent.requestId
+    );
+    if (binding === undefined) return undefined;
+    if (!sameTakerStartIntent(binding, intent)) {
+      throw new Error("Taker request ID conflicts with another start intent");
+    }
+    return clone(store.sessions.find(
+      (session) => session.sessionId === binding.sessionId
+    )!);
+  }
+
+  async createTakerForRequest(
+    intent: TakerStartIntent,
+    session: TradeSession
+  ): Promise<TradeSession> {
+    assertTakerStartIntent(intent, "Taker start intent", false);
+    assertSession(session);
+    if (
+      session.revision !== 0 ||
+      session.role !== "taker"
+    ) {
+      throw new Error("Taker start requires a revision-zero taker session");
+    }
+    return this.runExclusive(async () => {
+      const store = await this.loadStore();
+      const binding = store.takerStarts.find(
+        (item) => item.requestId === intent.requestId
+      );
+      if (binding !== undefined) {
+        if (!sameTakerStartIntent(binding, intent)) {
+          throw new Error("Taker request ID conflicts with another start intent");
+        }
+        return clone(store.sessions.find(
+          (item) => item.sessionId === binding.sessionId
+        )!);
+      }
+      if (
+        session.orderAddress !== intent.address ||
+        session.offeredOrderHead !== intent.expectedHeadId ||
+        session.terms.baseAmount !== intent.fillBaseAmount
+      ) {
+        throw new Error("Taker start session does not match its exact intent");
+      }
+      if (store.sessions.some((item) => item.sessionId === session.sessionId)) {
+        throw new Error("Taker start session identity already exists");
+      }
+      store.sessions.push(clone(session));
+      store.takerStarts.push({
+        ...clone(intent),
+        sessionId: session.sessionId
+      });
+      assertTradeSessionStore(store);
+      await this.driver.set(TRADE_SESSIONS_KEY, store);
+      return clone(session);
+    });
+  }
+
   async save(session: TradeSession, expectedRevision: number | null): Promise<void> {
     assertSession(session);
     await this.runExclusive(async () => {
-      const sessions = await this.list();
+      const store = await this.loadStore();
+      const sessions = store.sessions;
       const index = sessions.findIndex((item) => item.sessionId === session.sessionId);
       const current = sessions[index];
       if (!current) {
@@ -1612,8 +1894,8 @@ export class TradeSessionRepository {
         assertMonotonicUpdate(current, session);
         sessions[index] = clone(session);
       }
-      assertSessions(sessions);
-      await this.driver.set(TRADE_SESSIONS_KEY, sessions);
+      assertTradeSessionStore(store);
+      await this.driver.set(TRADE_SESSIONS_KEY, store);
     });
   }
 }

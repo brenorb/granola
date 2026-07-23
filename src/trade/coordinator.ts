@@ -32,6 +32,10 @@ export interface CoordinatorEffectPort {
     action: CoordinatorAction,
     session: TradeSession
   ): CoordinatorExecutionKind;
+  externalFingerprintMaterial?(
+    action: CoordinatorAction,
+    session: TradeSession
+  ): Promise<unknown>;
   applyLocal(input: CoordinatorStepInput): Promise<TradeSession>;
   performExternal(input: CoordinatorExternalEffectInput): Promise<TradeSession>;
 }
@@ -232,6 +236,108 @@ function externalArtifact(
         previousObservation: privateLeg.observations.at(-1) ?? null
       };
     }
+    case "prepare_base_lock":
+    case "prepare_quote_lock":
+    case "prepare_base_claim":
+    case "prepare_quote_claim":
+    case "prepare_base_refund":
+    case "prepare_quote_refund": {
+      const leg = action.kind.includes("base") ? "base" : "quote";
+      const privateLeg = session.privateState.legs[leg];
+      const expected = privateLeg.expected;
+      if (
+        session.privateState.htlcHash === null ||
+        session.privateState.settlementTranscriptHash === null ||
+        (expected !== null && (
+          expected.leg !== leg ||
+          expected.binding.sessionId !== session.sessionId ||
+          expected.binding.reservationId !== session.reservationId ||
+          expected.binding.transcriptHash !==
+            session.privateState.settlementTranscriptHash
+        ))
+      ) checkpointError(action);
+      return {
+        leg,
+        terms: {
+          mintUrl: leg === "base" ? session.terms.baseMint : session.terms.quoteMint,
+          unit: leg === "base" ? session.terms.baseUnit : session.terms.quoteUnit,
+          keysetId: leg === "base"
+            ? session.terms.baseKeyset
+            : session.terms.quoteKeyset,
+          amount: leg === "base" ? session.terms.baseAmount : session.terms.quoteAmount
+        },
+        expected,
+        tokenCommitment: session.evidence.legs[leg].tokenCommitment
+      };
+    }
+    case "stage_order_reserve":
+    case "stage_order_fill":
+    case "stage_order_release":
+      return {
+        operation: action.kind.replace("stage_order_", ""),
+        orderAddress: session.orderAddress,
+        orderHead: session.reserveTransitionId ?? session.offeredOrderHead,
+        reservationId: session.reservationId,
+        terms: session.terms,
+        settlementTranscriptHash: session.privateState.settlementTranscriptHash,
+        reservationEvidence: session.evidence.reservation,
+        legs: session.evidence.legs
+      };
+    case "verify_order_fill":
+      if (
+        session.role !== "taker" ||
+        session.fillTransitionId === null ||
+        session.evidence.fillTransitionId !== null ||
+        session.privateState.transcript.choreography.phase !== "settled"
+      ) checkpointError(action);
+      return {
+        orderAddress: session.orderAddress,
+        reservationId: session.reservationId,
+        reserveTransitionId: session.reserveTransitionId,
+        fillTransitionId: session.fillTransitionId,
+        transcript: {
+          lastMessageId: session.privateState.transcript.lastMessageId,
+          lastTranscriptHash: session.privateState.transcript.lastTranscriptHash,
+          accepted: session.privateState.transcript.accepted
+        }
+      };
+    case "commit_order_publication":
+    case "clear_order_publication":
+      if (publication === null) checkpointError(action);
+      return {
+        operation: publication.operation,
+        orderId: publication.orderId,
+        transitionId: publication.transition.id,
+        projectionId: publication.projection.id,
+        status: publication.status
+      };
+    case "stage_reserve_propose":
+    case "stage_reserve_accept":
+    case "stage_session_ack":
+    case "stage_base_lock":
+    case "stage_base_lock_ack":
+    case "stage_quote_lock":
+    case "stage_quote_lock_ack":
+    case "stage_claim_notice":
+    case "stage_fill_request":
+    case "stage_settlement_ack":
+      if (outbox !== null || session.privateState.pendingIncoming !== null) {
+        checkpointError(action);
+      }
+      return {
+        role: session.role,
+        orderHead: session.reserveTransitionId ?? session.offeredOrderHead,
+        terms: session.terms,
+        plan: session.plan,
+        publicEvidence: session.evidence,
+        transcript: session.privateState.transcript
+      };
+    case "validate_incoming":
+      if (
+        session.privateState.pendingIncoming === null ||
+        session.privateState.pendingIncoming.validation.status !== "unvalidated"
+      ) checkpointError(action);
+      return session.privateState.pendingIncoming;
     default:
       return checkpointError(action);
   }
@@ -239,12 +345,15 @@ function externalArtifact(
 
 async function externalFingerprint(
   action: CoordinatorAction,
-  session: TradeSession
+  session: TradeSession,
+  portMaterial: unknown = null
 ): Promise<string> {
   const artifact = externalArtifact(action, session);
   const digest = await sha256(canonicalJson({
     action: action.kind,
     sessionId: session.sessionId,
+    revision: session.revision,
+    portMaterial,
     artifact
   }));
   return `${action.kind}:${digest}`;
@@ -356,7 +465,14 @@ export class TradeCoordinator {
             session: clone(current),
             revision: current.revision,
             now,
-            fingerprint: await externalFingerprint(action, current)
+            fingerprint: await externalFingerprint(
+              action,
+              current,
+              await this.effects.externalFingerprintMaterial?.(
+                action,
+                clone(current)
+              ) ?? null
+            )
           }
         };
       }
@@ -387,7 +503,14 @@ export class TradeCoordinator {
       if (currentAction.kind !== snapshot.action.kind) {
         throw new Error("Coordinator external action identity changed");
       }
-      const currentFingerprint = await externalFingerprint(currentAction, current);
+      const currentFingerprint = await externalFingerprint(
+        currentAction,
+        current,
+        await this.effects.externalFingerprintMaterial?.(
+          currentAction,
+          clone(current)
+        ) ?? null
+      );
       if (currentFingerprint !== snapshot.fingerprint) {
         throw new Error("Coordinator external action fingerprint changed");
       }

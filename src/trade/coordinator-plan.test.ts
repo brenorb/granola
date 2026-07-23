@@ -616,4 +616,35 @@ describe("atomic swap coordinator action planning", () => {
     current.privateState.cashuOperation = null;
     expect(nextCoordinatorAction(current, eligible + 2).kind).toBe("none");
   });
+
+  it("keeps an exactly filled authoritative settlement terminal", () => {
+    const current = session("maker", "settled");
+    markSpent(current, "base");
+    markSpent(current, "quote", 1_800_000_101);
+    setCommittedPublication(current, "fill", "cc".repeat(32));
+
+    expect(nextCoordinatorAction(current, 1_800_000_102).kind).toBe("none");
+
+    current.privateState.legs.quote.observations = [];
+    expect(nextCoordinatorAction(current, 1_800_000_102).kind)
+      .toBe("enter_recovery");
+  });
+
+  it("requires a taker to verify the maker fill before settlement is terminal", () => {
+    const current = session("taker", "settled");
+    current.phase = "filled";
+    current.fillTransitionId = "cc".repeat(32);
+    markSpent(current, "base");
+    markSpent(current, "quote", 1_800_000_101);
+
+    expect(nextCoordinatorAction(current, 1_800_000_102).kind)
+      .toBe("verify_order_fill");
+
+    current.evidence.fillTransitionId = current.fillTransitionId;
+    expect(nextCoordinatorAction(current, 1_800_000_102).kind).toBe("none");
+
+    current.evidence.fillTransitionId = "dd".repeat(32);
+    expect(nextCoordinatorAction(current, 1_800_000_102).kind)
+      .toBe("enter_recovery");
+  });
 });

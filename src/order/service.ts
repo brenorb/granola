@@ -14,6 +14,7 @@ import {
 } from "./events.js";
 import {
   buildOrderBook,
+  eligibleMarketIds,
   fillOrder,
   marketId,
   releaseOrder,
@@ -50,6 +51,13 @@ export interface StagedOrderPublication {
 export interface LoadedOrderBook {
   book: OrderBook;
   rejected: number;
+}
+
+export interface PublishedOrderHead {
+  headEventId: string;
+  predecessor: NostrEvent;
+  transition: NostrEvent;
+  projection: NostrEvent;
 }
 
 function assertMaker(event: NostrEvent, expected: string): void {
@@ -396,6 +404,65 @@ export class NostrOrderService {
     if (visited.size !== parsed.size) throw new Error("Order transition chain is incomplete");
     if (current.event.id !== expectedHeadId) throw new Error("Expected transition is not the current head");
     return structuredClone(current.event);
+  }
+
+  async loadPublishedHead(
+    address: string,
+    expectedHeadId: string
+  ): Promise<PublishedOrderHead> {
+    const transition = await this.loadCurrentTransition(address, expectedHeadId);
+    const transitionRecord = await parseTransitionEvent(transition, this.verify);
+    if (transitionRecord.previous === null) {
+      throw new Error("Published order head has no predecessor");
+    }
+
+    const predecessors = new Map<string, NostrEvent>();
+    for (const event of await this.relays.queryTransitions([address])) {
+      if (event.id !== transitionRecord.previous) continue;
+      try {
+        const record = await parseTransitionEvent(event, this.verify);
+        if (record.address === address) predecessors.set(event.id, event);
+      } catch {
+        // Invalid relay data cannot prove the exact predecessor.
+      }
+    }
+    const predecessor = predecessors.get(transitionRecord.previous);
+    if (!predecessor) {
+      throw new Error("Published order head predecessor is absent");
+    }
+
+    const projections = new Map<string, NostrEvent>();
+    const projectionEvents = (
+      await Promise.all(
+        (await eligibleMarketIds(transitionRecord.state))
+          .map((market) => this.relays.queryProjections(market, 0))
+      )
+    ).flat();
+    for (const event of projectionEvents) {
+      try {
+        const record = await parseProjectionEvent(event, this.verify);
+        if (
+          record.address === address &&
+          record.headEventId === expectedHeadId &&
+          record.makerPubkey === transitionRecord.makerPubkey &&
+          sameState(record.state, transitionRecord.state) &&
+          event.created_at === transition.created_at
+        ) {
+          projections.set(event.id, event);
+        }
+      } catch {
+        // Invalid or unrelated projections cannot establish publication.
+      }
+    }
+    if (projections.size !== 1) {
+      throw new Error("Published order head requires one exact current projection");
+    }
+    return {
+      headEventId: expectedHeadId,
+      predecessor: structuredClone(predecessor),
+      transition: structuredClone(transition),
+      projection: structuredClone([...projections.values()][0]!)
+    };
   }
 
   async loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook> {

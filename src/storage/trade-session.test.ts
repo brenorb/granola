@@ -2,11 +2,18 @@ import { createHTLCHash } from "@cashu/cashu-ts";
 import { finalizeEvent, getEventHash, getPublicKey } from "nostr-tools";
 import { describe, expect, it } from "vitest";
 
+import { createOrderState, type OrderRecord } from "../order/model.js";
 import { publicTradeView, type TradeSession } from "../trade/session.js";
 import type { GranolaTradeMessage } from "../trade/messages.js";
+import {
+  createTakerSession,
+  type SessionFactoryEntropy
+} from "../trade/session-factory.js";
+import { EncryptedStorageDriver } from "./encrypted-storage.js";
 import { MemoryStorageDriver } from "./wallet-repository.js";
 import {
   TradeSessionRepository,
+  type TakerStartIntent,
   type TradeSessionExclusiveRunner
 } from "./trade-session.js";
 
@@ -365,7 +372,161 @@ const session: TradeSession = {
   }
 };
 
+function takerEntropy(id = "12".repeat(32)): SessionFactoryEntropy {
+  return {
+    sessionId: () => id,
+    reservationId: () => "88888888-8888-4888-8888-888888888888",
+    privateKey: (purpose) => ({
+      nostr: "06".repeat(32),
+      cashu: "07".repeat(32),
+      refund: "08".repeat(32)
+    })[purpose],
+    htlcMaterial: () => createHTLCHash("09".repeat(32))
+  };
+}
+
+async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
+  const state = createOrderState({
+    orderId,
+    createdAt: 1_699_999_900,
+    expiresAt: 1_700_003_600,
+    side: "sell",
+    baseUnit: "sat",
+    quoteUnit: "usd",
+    offered: { unit: "sat", mint: "https://testnut.cashu.space" },
+    requested: {
+      unit: "usd",
+      acceptableMints: ["https://nofee.testnut.cashu.space"]
+    },
+    amount: "20",
+    price: { numerator: "1", denominator: "20" }
+  });
+  const record: OrderRecord = {
+    address: orderAddress,
+    eventId: "32".repeat(32),
+    headEventId: offeredOrderHead,
+    makerPubkey: maker,
+    verified: true,
+    state
+  };
+  return createTakerSession({
+    order: record,
+    expectedOrderHead: offeredOrderHead,
+    market: {
+      baseMint: state.offered.mint,
+      baseUnit: state.base_unit,
+      baseKeyset: "00deadbeefcafeee",
+      quoteMint: state.requested.acceptable_mints[0]!,
+      quoteUnit: state.quote_unit,
+      quoteKeyset: "00deadbeefcafeff"
+    },
+    fillBaseAmount: "20",
+    clocks: {
+      localNow: 1_700_000_000,
+      baseMintNow: 1_700_000_000,
+      quoteMintNow: 1_700_000_000
+    }
+  }, takerEntropy(id));
+}
+
+const takerStartIntent: TakerStartIntent = {
+  requestId: "99999999-9999-4999-8999-999999999999",
+  address: orderAddress,
+  expectedHeadId: offeredOrderHead,
+  fillBaseAmount: "20"
+};
+
 describe("trade session v2 repository", () => {
+  it("atomically persists and reloads an encrypted exact taker request binding", async () => {
+    const raw = new MemoryStorageDriver();
+    const repository = new TradeSessionRepository(raw);
+    const candidate = await revisionZeroTaker();
+
+    const created = await repository.createTakerForRequest(
+      takerStartIntent,
+      candidate
+    );
+    const reloaded = new TradeSessionRepository(raw);
+
+    expect(created).toEqual(candidate);
+    expect(await reloaded.getTakerForRequest(takerStartIntent))
+      .toEqual(candidate);
+    expect(await reloaded.list()).toEqual([candidate]);
+    const decrypted = await new EncryptedStorageDriver(
+      raw,
+      "granola-trade-sessions"
+    ).get("granola.trade-sessions.v2");
+    expect(decrypted).toEqual({
+      schema: "granola/trade-session-store/v1",
+      sessions: [candidate],
+      takerStarts: [{
+        ...takerStartIntent,
+        sessionId: candidate.sessionId
+      }]
+    });
+    const rawText = JSON.stringify(
+      await raw.get(
+        "granola-trade-sessions.data.granola.trade-sessions.v2"
+      )
+    );
+    expect(rawText).not.toContain(takerStartIntent.requestId);
+    expect(rawText).not.toContain(candidate.privateState.nostrPrivateKey);
+  });
+
+  it("returns exact retries and rejects conflicting reuse of a durable request ID", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    const first = await revisionZeroTaker();
+    const retryCandidate = await revisionZeroTaker("13".repeat(32));
+
+    await repository.createTakerForRequest(takerStartIntent, first);
+    await expect(repository.createTakerForRequest(
+      takerStartIntent,
+      retryCandidate
+    )).resolves.toEqual(first);
+    await expect(repository.getTakerForRequest({
+      ...takerStartIntent,
+      fillBaseAmount: "19"
+    })).rejects.toThrow(/request ID conflicts/i);
+    await expect(repository.createTakerForRequest({
+      ...takerStartIntent,
+      fillBaseAmount: "19"
+    }, retryCandidate)).rejects.toThrow(/request ID conflicts/i);
+    expect(await repository.list()).toEqual([first]);
+  });
+
+  it("converges a true async request race under the shared storage lock", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    const left = await revisionZeroTaker("14".repeat(32));
+    const right = await revisionZeroTaker("15".repeat(32));
+
+    const [first, second] = await Promise.all([
+      repository.createTakerForRequest(takerStartIntent, left),
+      repository.createTakerForRequest(takerStartIntent, right)
+    ]);
+
+    expect(first.sessionId).toBe(second.sessionId);
+    expect(await repository.list()).toHaveLength(1);
+    expect(await repository.getTakerForRequest(takerStartIntent))
+      .toEqual(first);
+  });
+
+  it("rejects unknown or bearer fields in the exact request-binding store", async () => {
+    const driver = new MemoryStorageDriver();
+    const candidate = await revisionZeroTaker();
+    await driver.set("granola.trade-sessions.v2", {
+      schema: "granola/trade-session-store/v1",
+      sessions: [candidate],
+      takerStarts: [{
+        ...takerStartIntent,
+        sessionId: candidate.sessionId,
+        bearer: "must-not-be-stored"
+      }]
+    });
+
+    await expect(new TradeSessionRepository(driver).list())
+      .rejects.toThrow(/unknown fields/i);
+  });
+
   it("durably round-trips the complete crash-recovery journal", async () => {
     const repository = new TradeSessionRepository(new MemoryStorageDriver());
 
@@ -374,6 +535,24 @@ describe("trade session v2 repository", () => {
 
     expect(restored).toEqual(session);
     expect(restored).not.toBe(session);
+  });
+
+  it("round-trips a taker settlement while its announced fill awaits relay verification", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    const awaitingVerification = structuredClone(session);
+    awaitingVerification.role = "taker";
+    awaitingVerification.phase = "filled";
+    awaitingVerification.fillTransitionId = "aa".repeat(32);
+    awaitingVerification.evidence.fillTransitionId = null;
+    awaitingVerification.pendingOrderPublication = null;
+    awaitingVerification.privateState.outbox = null;
+    awaitingVerification.privateState.cashuOperation = null;
+    awaitingVerification.privateState.transcript.choreography.phase = "settled";
+
+    await repository.save(awaitingVerification, null);
+
+    expect(await repository.get(awaitingVerification.sessionId))
+      .toEqual(awaitingVerification);
   });
 
   it("round-trips SPENT evidence only when it is bound to a matching private observation", async () => {
@@ -658,6 +837,69 @@ describe("trade session v2 repository", () => {
     retargetedOutbox.privateState.outbox!.recipientInboxListId = "09".repeat(32);
     await expect(outboxRepository.save(retargetedOutbox, 0))
       .rejects.toThrow(/outbox.*retry artifact.*changed/i);
+  });
+
+  it("allows only the maker order key to sign the reserve acceptance handoff", async () => {
+    const reserveAccept = structuredClone(session);
+    reserveAccept.privateState.transcript.choreography.participants.takerSessionPubkey =
+      reserveAccept.privateState.outbox!.message.recipient_pubkey;
+    const message: GranolaTradeMessage = {
+      ...reserveAccept.privateState.outbox!.message,
+      type: "reserve_accept",
+      author_pubkey: maker,
+      body: {
+        schema: "granola/atomic-swap-body/v1",
+        taker_session_pubkey:
+          reserveAccept.privateState.outbox!.message.recipient_pubkey,
+        maker_session_pubkey: sessionPubkey,
+        reserve_transition_id: transition.id
+      }
+    };
+    const rumorTemplate = {
+      ...reserveAccept.privateState.outbox!.rumor,
+      pubkey: maker,
+      content: JSON.stringify(message)
+    };
+    const makerRumor = { ...rumorTemplate, id: getEventHash(rumorTemplate) };
+    const makerSeal = structuredClone(finalizeEvent({
+      kind: 13,
+      created_at: message.sent_at,
+      tags: [],
+      content: "encrypted-order-key-reserve-accept"
+    }, makerSecret));
+    reserveAccept.privateState.outbox = {
+      ...reserveAccept.privateState.outbox!,
+      message,
+      rumor: makerRumor,
+      seal: makerSeal
+    };
+
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    await expect(repository.save(reserveAccept, null)).resolves.toBeUndefined();
+
+    for (const mutate of [
+      (candidate: TradeSession) => {
+        candidate.privateState.outbox!.message.type = "base_lock";
+      },
+      (candidate: TradeSession) => {
+        candidate.privateState.outbox!.message.body = {
+          ...candidate.privateState.outbox!.message.body,
+          maker_session_pubkey: remotePubkey
+        };
+      },
+      (candidate: TradeSession) => {
+        candidate.privateState.outbox!.message.body = {
+          ...candidate.privateState.outbox!.message.body,
+          reserve_transition_id: offeredOrderHead
+        };
+      }
+    ]) {
+      const corrupt = structuredClone(reserveAccept);
+      mutate(corrupt);
+      const driver = new MemoryStorageDriver();
+      await driver.set("granola.trade-sessions.v2", [corrupt]);
+      await expect(new TradeSessionRepository(driver).list()).rejects.toThrow();
+    }
   });
 
   it("serializes different session IDs under one shared-array storage lock", async () => {

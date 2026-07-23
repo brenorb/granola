@@ -20,6 +20,12 @@ import {
   type VerifiedInboxLiveProbeResult
 } from "./inbox.js";
 
+export interface DiscoveredTradeInbox {
+  event: NostrEvent;
+  eventId: string;
+  relays: string[];
+}
+
 export class NostrTradeTransport {
   private readonly discoveryRelays: readonly string[];
   private readonly inboxRelays: readonly string[];
@@ -109,7 +115,10 @@ export class NostrTradeTransport {
     }
   }
 
-  async discover(authorPubkey: string, requesterSecretKey: Uint8Array): Promise<string[]> {
+  async discoverInbox(
+    authorPubkey: string,
+    requesterSecretKey: Uint8Array
+  ): Promise<DiscoveredTradeInbox> {
     const keySnapshot = Uint8Array.from(requesterSecretKey);
     try {
       const now = this.now();
@@ -128,11 +137,19 @@ export class NostrTradeTransport {
           return [];
         }
       }));
-      const selected = selectInboxList(observations.flat(), authorPubkey, now, 2).relays;
-      return [...this.assertFreshProbeEvidence(selected, now)];
+      const selected = selectInboxList(observations.flat(), authorPubkey, now, 2);
+      return {
+        event: snapshotNostrEvent(selected.event),
+        eventId: selected.event.id,
+        relays: [...this.assertFreshProbeEvidence(selected.relays, now)]
+      };
     } finally {
       keySnapshot.fill(0);
     }
+  }
+
+  async discover(authorPubkey: string, requesterSecretKey: Uint8Array): Promise<string[]> {
+    return (await this.discoverInbox(authorPubkey, requesterSecretKey)).relays;
   }
 
   async send(

@@ -362,10 +362,12 @@ describe("Nostr trade transport", () => {
     const staged = transport.createRegistration(recipientKey);
     const persisted = structuredClone(staged);
     const registration = await transport.publishRegistration(persisted, recipientKey);
+    const exact = await transport.discoverInbox(getPublicKey(recipientKey), key(2));
     const selected = await transport.discover(getPublicKey(recipientKey), key(2));
 
     expect(registration.event).toEqual(persisted);
     expect(registration.confirmed).toHaveLength(3);
+    expect(exact).toEqual({ event: persisted, eventId: persisted.id, relays: inboxes });
     expect(selected).toEqual(inboxes);
   });
 
