@@ -11,10 +11,11 @@ import {
 const maker = "a".repeat(64);
 const transitionId = "b".repeat(64);
 const signature = "c".repeat(128);
+const orderId = "11111111-1111-4111-8111-111111111111";
 
 function askState() {
   return createOrderState({
-    orderId: "order-1",
+    orderId,
     createdAt: 1_700_000_000,
     side: "sell",
     baseUnit: "sat",
@@ -37,8 +38,8 @@ describe("Granola Nostr order events", () => {
       kind: 78,
       created_at: state.created_at,
       tags: expect.arrayContaining([
-        ["d", "granola:order-transition:v1:order-1"],
-        ["a", `30078:${maker}:granola:order:v1:order-1`],
+        ["d", `granola:order-transition:v1:${orderId}`],
+        ["a", `30078:${maker}:granola:order:v1:${orderId}`],
         ["op", "create"]
       ])
     });
@@ -46,7 +47,7 @@ describe("Granola Nostr order events", () => {
       schema: "granola/order-transition/v1",
       operation_id: "operation-1",
       previous: null,
-      state: { order_id: "order-1" }
+      state: { order_id: orderId }
     });
 
     const signedTransition: NostrEvent = {
@@ -58,7 +59,7 @@ describe("Granola Nostr order events", () => {
     const projection = await createProjectionTemplate(state, signedTransition);
     expect(projection.kind).toBe(30078);
     expect(projection.tags).toEqual(expect.arrayContaining([
-      ["d", "granola:order:v1:order-1"],
+      ["d", `granola:order:v1:${orderId}`],
       ["e", transitionId],
       ["expiration", String(state.expires_at + 604_800)],
       ["m", "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"]
@@ -80,11 +81,11 @@ describe("Granola Nostr order events", () => {
     const record = await parseProjectionEvent(event, () => true);
 
     expect(record).toMatchObject({
-      address: `30078:${maker}:granola:order:v1:order-1`,
+      address: `30078:${maker}:granola:order:v1:${orderId}`,
       eventId: event.id,
       makerPubkey: maker,
       verified: true,
-      state: { order_id: "order-1", status: "open" }
+      state: { order_id: orderId, status: "open" }
     });
     expect(JSON.stringify(record)).not.toContain(signature);
   });

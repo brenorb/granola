@@ -11,6 +11,10 @@ const market = {
   quoteUnit: "usd",
   quoteMint
 };
+const askHigh = "11111111-1111-4111-8111-111111111111";
+const bidLow = "22222222-2222-4222-8222-222222222222";
+const askLow = "33333333-3333-4333-8333-333333333333";
+const bidHigh = "44444444-4444-4444-8444-444444444444";
 
 function record(
   orderId: string,
@@ -46,10 +50,10 @@ function record(
 describe("order-book presentation", () => {
   it("renders asks above the midpoint, bids below, and identifies the inside market", async () => {
     const book = await buildOrderBook([
-      record("ask-52000", "sell", "104"),
-      record("bid-48000", "buy", "96"),
-      record("ask-50500", "sell", "101"),
-      record("bid-49500", "buy", "99")
+      record(askHigh, "sell", "104"),
+      record(bidLow, "buy", "96"),
+      record(askLow, "sell", "101"),
+      record(bidHigh, "buy", "99")
     ], market, 1_700_000_100);
     const root = document.createElement("section");
 
@@ -60,30 +64,30 @@ describe("order-book presentation", () => {
     expect(
       [...root.querySelectorAll<HTMLElement>("[data-order-id], [data-book-midpoint]")]
         .map((node) => node.dataset.orderId ?? "midpoint")
-    ).toEqual(["ask-52000", "ask-50500", "midpoint", "bid-49500", "bid-48000"]);
+    ).toEqual([askHigh, askLow, "midpoint", bidHigh, bidLow]);
 
-    expect(root.querySelector('[data-order-id="ask-50500"]')?.getAttribute("data-best"))
+    expect(root.querySelector(`[data-order-id="${askLow}"]`)?.getAttribute("data-best"))
       .toBe("ask");
-    expect(root.querySelector('[data-order-id="bid-49500"]')?.getAttribute("data-best"))
+    expect(root.querySelector(`[data-order-id="${bidHigh}"]`)?.getAttribute("data-best"))
       .toBe("bid");
     expect(root.querySelector('[data-summary="best-ask"]')?.textContent).toContain("50,500.00");
     expect(root.querySelector('[data-summary="best-bid"]')?.textContent).toContain("49,500.00");
     expect(root.querySelector('[data-summary="spread"]')?.textContent).toContain("1,000.00");
     expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-exact-spread"))
       .toBe("1/1000");
-    expect(root.querySelector('[data-order-id="ask-50500"] [data-price]')
+    expect(root.querySelector(`[data-order-id="${askLow}"] [data-price]`)
       ?.getAttribute("data-exact-price")).toBe("101/2000");
 
     expect(root.querySelectorAll('th[scope="row"]')).toHaveLength(4);
-    expect(root.querySelector('[data-order-id="ask-50500"]')?.textContent).toContain("Best ask");
-    expect(root.querySelector('[data-order-id="bid-49500"]')?.textContent).toContain("Best bid");
+    expect(root.querySelector(`[data-order-id="${askLow}"]`)?.textContent).toContain("Best ask");
+    expect(root.querySelector(`[data-order-id="${bidHigh}"]`)?.textContent).toContain("Best bid");
   });
 
   it("preserves a sub-safe-integer spread as an exact rational", async () => {
     const denominator = "9007199254740992";
     const book = await buildOrderBook([
-      record("tiny-ask", "sell", "9007199254740993", denominator, denominator),
-      record("unit-bid", "buy", "1", "1", denominator)
+      record("55555555-5555-4555-8555-555555555555", "sell", "9007199254740993", denominator, denominator),
+      record("66666666-6666-4666-8666-666666666666", "buy", "1", "1", denominator)
     ], market, 1_700_000_100);
     const root = document.createElement("section");
 
@@ -91,7 +95,7 @@ describe("order-book presentation", () => {
 
     expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-exact-spread"))
       .toBe("1/9007199254740992");
-    expect(root.querySelector('[data-order-id="tiny-ask"] [data-price]')
+    expect(root.querySelector('[data-order-id="55555555-5555-4555-8555-555555555555"] [data-price]')
       ?.getAttribute("data-exact-price")).toBe("9007199254740993/9007199254740992");
   });
 

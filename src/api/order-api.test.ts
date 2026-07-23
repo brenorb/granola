@@ -5,6 +5,7 @@ import type { OrderState } from "../order/model.js";
 import { OrderApi, TEST_MARKET, type OrderServicePort } from "./order-api.js";
 
 const MAKER = "a".repeat(64);
+const ORDER_ID = "11111111-1111-4111-8111-111111111111";
 
 class FakeOrders implements OrderServicePort {
   state?: OrderState;
@@ -44,7 +45,7 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       orders,
       () => 1_700_000_000,
-      () => "order-1"
+      () => ORDER_ID
     );
 
     const result = await api.publishOrder({
@@ -60,7 +61,7 @@ describe("order browser API", () => {
     });
     expect(orders.state?.expires_at).toBe(1_702_592_000);
     expect(result).toEqual({
-      orderId: "order-1",
+      orderId: ORDER_ID,
       makerPubkey: MAKER,
       transitionId: "b".repeat(64),
       projectionId: "d".repeat(64),
@@ -76,7 +77,7 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       orders,
       () => 1_700_000_000,
-      () => "order-2"
+      () => "22222222-2222-4222-8222-222222222222"
     );
 
     await api.publishOrder({
@@ -97,7 +98,7 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       new FakeOrders(),
       () => 1_700_000_000,
-      () => "order-1"
+      () => ORDER_ID
     );
 
     await expect(api.getMakerIdentity()).resolves.toEqual({ publicKey: MAKER });

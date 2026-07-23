@@ -12,6 +12,7 @@ import {
 const MAKER = "b".repeat(64);
 const SAT_MINT = "https://testnut.cashu.space";
 const USD_MINT = "https://nofee.testnut.cashu.space";
+const ORDER_ID = "11111111-1111-4111-8111-111111111111";
 const MARKET: ExactMarket = {
   baseUnit: "sat",
   baseMint: SAT_MINT,
@@ -21,7 +22,7 @@ const MARKET: ExactMarket = {
 
 function order() {
   return createOrderState({
-    orderId: "test-order",
+    orderId: ORDER_ID,
     createdAt: 1_700_000_000,
     expiresAt: 1_800_000_000,
     side: "sell",
@@ -111,7 +112,7 @@ describe("Nostr order service", () => {
 
     const result = await service.loadBook(MARKET, 1_700_000_100);
 
-    expect(result.book.asks.map((entry) => entry.state.order_id)).toEqual(["test-order"]);
+    expect(result.book.asks.map((entry) => entry.state.order_id)).toEqual([ORDER_ID]);
     expect(result.book.topAsk?.verified).toBe(true);
     expect(result.rejected).toBe(1);
   });

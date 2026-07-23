@@ -47,9 +47,7 @@ try {
   for (const seed of seeds) {
     const identity = new MakerIdentity(new MemoryStorageDriver());
     const service = new NostrOrderService(identity, relayClient);
-    const api = new OrderApi(identity, service, undefined, () =>
-      `seed-20260723-${seed.label}-${crypto.randomUUID()}`
-    );
+    const api = new OrderApi(identity, service, undefined, () => crypto.randomUUID());
     const result = await api.publishOrder({
       side: seed.side,
       amount: seed.amount,

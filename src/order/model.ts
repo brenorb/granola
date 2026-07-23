@@ -96,6 +96,8 @@ export interface OrderBook {
   topBid?: OrderRecord;
 }
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 function canonicalUnit(value: string): string {
   const unit = value.trim().toLowerCase();
   if (!/^[a-z][a-z0-9_-]{0,31}$/.test(unit)) {
@@ -126,6 +128,12 @@ function canonicalPrice(price: RationalPrice): RationalPrice {
 }
 
 export function createOrderState(input: CreateOrderInput): OrderState {
+  if (input.side !== "buy" && input.side !== "sell") {
+    throw new Error("Order side must be buy or sell");
+  }
+  if (!UUID_V4.test(input.orderId)) {
+    throw new Error("Order ID must be a UUID v4");
+  }
   const baseUnit = canonicalUnit(input.baseUnit);
   const quoteUnit = canonicalUnit(input.quoteUnit);
   const offeredUnit = canonicalUnit(input.offered.unit);
@@ -137,7 +145,6 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   if (input.side === "buy" && (offeredUnit !== quoteUnit || requestedUnit !== baseUnit)) {
     throw new Error("Buy orders must offer the quote unit and request the base unit");
   }
-  if (!input.orderId.trim()) throw new Error("Order ID is required");
   if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
     throw new Error("Creation time must be a Unix timestamp");
   }
@@ -153,6 +160,9 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   }
 
   const execution = input.execution ?? "all_or_none";
+  if (execution !== "all_or_none" && execution !== "partial") {
+    throw new Error("Execution condition must be all_or_none or partial");
+  }
   const minimum = input.minimumFillAmount ?? (execution === "all_or_none" ? input.amount : "");
   const minimumValue = integer(minimum, "Minimum fill amount");
   if (minimumValue > amount) throw new Error("Minimum fill cannot exceed order amount");
@@ -167,7 +177,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
 
   return {
     schema: "granola/order/v1",
-    order_id: input.orderId.trim(),
+    order_id: input.orderId,
     revision: "0",
     created_at: input.createdAt,
     expires_at: expiresAt,

@@ -10,11 +10,13 @@ import {
 
 const testnut = "https://testnut.cashu.space";
 const nofee = "https://nofee.testnut.cashu.space";
+const askOne = "11111111-1111-4111-8111-111111111111";
+const bidOne = "22222222-2222-4222-8222-222222222222";
 
 describe("Granola order model", () => {
   it("creates a canonical ask with explicit 30-day expiry and indexed markets", async () => {
     const state = createOrderState({
-      orderId: "ask-1",
+      orderId: askOne,
       createdAt: 1_700_000_000,
       side: "sell",
       baseUnit: "sat",
@@ -37,7 +39,7 @@ describe("Granola order model", () => {
 
   it("models a bid without reversing offered/requested mint cardinality", async () => {
     const state = createOrderState({
-      orderId: "bid-1",
+      orderId: bidOne,
       createdAt: 1_700_000_000,
       side: "buy",
       baseUnit: "sat",
@@ -60,7 +62,7 @@ describe("Granola order model", () => {
 
   it("rejects inexact prices and side/asset mismatches", () => {
     expect(() => createOrderState({
-      orderId: "bad-price",
+      orderId: "33333333-3333-4333-8333-333333333333",
       createdAt: 1,
       side: "buy",
       baseUnit: "sat",
@@ -72,7 +74,7 @@ describe("Granola order model", () => {
     })).toThrow("integer settlement amounts");
 
     expect(() => createOrderState({
-      orderId: "bad-side",
+      orderId: "44444444-4444-4444-8444-444444444444",
       createdAt: 1,
       side: "sell",
       baseUnit: "sat",
@@ -84,7 +86,35 @@ describe("Granola order model", () => {
     })).toThrow("Sell orders must offer the base unit");
   });
 
+  it("rejects non-UUID IDs and runtime enum bypasses", () => {
+    const valid = {
+      orderId: "11111111-1111-4111-8111-111111111111",
+      createdAt: 1,
+      side: "sell" as const,
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "2",
+      price: { numerator: "1", denominator: "2" }
+    };
+
+    expect(() => createOrderState({ ...valid, orderId: "decorated-id" }))
+      .toThrow("Order ID must be a UUID");
+    expect(() => createOrderState({ ...valid, side: "market" as "sell" }))
+      .toThrow("Order side");
+    expect(() => createOrderState({
+      ...valid,
+      execution: "immediate" as "partial",
+      minimumFillAmount: "1"
+    })).toThrow("Execution condition");
+  });
+
   it("sorts an issuer-specific book and makes the top bid and ask explicit", async () => {
+    const askHigh = "55555555-5555-4555-8555-555555555555";
+    const bidLow = "66666666-6666-4666-8666-666666666666";
+    const askLow = "77777777-7777-4777-8777-777777777777";
+    const bidHigh = "88888888-8888-4888-8888-888888888888";
     const record = (orderId: string, side: "buy" | "sell", numerator: string): OrderRecord => ({
       address: `30078:maker:${orderId}`,
       eventId: `${orderId}-event`,
@@ -109,18 +139,18 @@ describe("Granola order model", () => {
     });
     const market = { baseUnit: "sat", baseMint: testnut, quoteUnit: "usd", quoteMint: nofee };
     const records = [
-      record("ask-51000", "sell", "102"),
-      record("bid-49000", "buy", "98"),
-      record("ask-50500", "sell", "101"),
-      record("bid-49500", "buy", "99")
+      record(askHigh, "sell", "102"),
+      record(bidLow, "buy", "98"),
+      record(askLow, "sell", "101"),
+      record(bidHigh, "buy", "99")
     ];
 
     const book = await buildOrderBook(records, market, 1_700_000_100);
 
-    expect(book.asks.map((order) => order.state.order_id)).toEqual(["ask-50500", "ask-51000"]);
-    expect(book.bids.map((order) => order.state.order_id)).toEqual(["bid-49500", "bid-49000"]);
-    expect(book.topAsk?.state.order_id).toBe("ask-50500");
-    expect(book.topBid?.state.order_id).toBe("bid-49500");
+    expect(book.asks.map((order) => order.state.order_id)).toEqual([askLow, askHigh]);
+    expect(book.bids.map((order) => order.state.order_id)).toEqual([bidHigh, bidLow]);
+    expect(book.topAsk?.state.order_id).toBe(askLow);
+    expect(book.topBid?.state.order_id).toBe(bidHigh);
     await expect(marketId(market)).resolves.toBe(
       "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"
     );
