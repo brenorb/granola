@@ -21,12 +21,16 @@ export const TRADE_MESSAGE_TYPES = [
   "reserve_reject",
   "session_ack",
   "base_lock",
+  "base_lock_ack",
   "quote_lock",
+  "quote_lock_ack",
   "claim_notice",
   "ack",
   "abort",
   "fill_request",
-  "settlement_ack"
+  "settlement_ack",
+  "refund",
+  "error"
 ] as const;
 
 export type TradeMessageType = (typeof TRADE_MESSAGE_TYPES)[number];
