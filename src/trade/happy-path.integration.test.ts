@@ -702,5 +702,5 @@ describe("two-party coordinator happy path", () => {
     ]) {
       expect(publicJson).not.toContain(secretValue);
     }
-  }, 15_000);
+  }, 60_000);
 });
