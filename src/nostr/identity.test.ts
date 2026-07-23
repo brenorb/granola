@@ -68,4 +68,21 @@ describe("maker identity", () => {
 
     expect(await identity.publicKey()).not.toBe(before);
   });
+
+  it("scopes private-key use to an internal callback and wipes the borrowed bytes", async () => {
+    const identity = new MakerIdentity(
+      new MemoryStorageDriver(),
+      async (action) => action(),
+      () => FIXED_SECRET
+    );
+
+    const borrowed = await identity.useSecretKey(async (secret) => {
+      expect(secret).not.toBe(FIXED_SECRET);
+      expect(secret.some((byte) => byte !== 0)).toBe(true);
+      return secret;
+    });
+
+    expect([...borrowed]).toEqual(new Array(32).fill(0));
+    expect(await identity.publicKey()).toMatch(/^[0-9a-f]{64}$/);
+  });
 });

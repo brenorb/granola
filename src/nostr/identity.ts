@@ -63,12 +63,12 @@ export class MakerIdentity {
       };
       parseStored(stored);
       await this.driver.set(IDENTITY_KEY, stored);
-      return secretKey;
+      return hexToBytes(stored.secret_key);
     });
   }
 
   async publicKey(): Promise<string> {
-    return getPublicKey(await this.secretKey());
+    return this.useSecretKey(async (secretKey) => getPublicKey(secretKey));
   }
 
   async sign(template: EventTemplate): Promise<Event> {
@@ -78,7 +78,18 @@ export class MakerIdentity {
       tags: template.tags.map((tag) => [...tag]),
       content: template.content
     };
-    return finalizeEvent(freshTemplate, await this.secretKey());
+    return this.useSecretKey(async (secretKey) => finalizeEvent(freshTemplate, secretKey));
+  }
+
+  async useSecretKey<T>(action: (secretKey: Uint8Array) => Promise<T>): Promise<T> {
+    const stored = await this.secretKey();
+    const borrowed = stored.slice();
+    stored.fill(0);
+    try {
+      return await action(borrowed);
+    } finally {
+      borrowed.fill(0);
+    }
   }
 
   async destroy(): Promise<void> {
