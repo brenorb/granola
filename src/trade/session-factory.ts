@@ -255,6 +255,13 @@ function emptyEvidence(order: OrderRecord, market: SessionMarketSelection): Trad
     makerPubkey: order.makerPubkey,
     commitments: [],
     mintStates: [],
+    reserveTransitionId: null,
+    fillTransitionId: null,
+    reservation: {
+      proposalSealId: null,
+      takerCommitment: null,
+      abortSeal: null
+    },
     legs: {
       base: leg(market.baseKeyset),
       quote: leg(market.quoteKeyset)
@@ -273,6 +280,7 @@ function baseSession(input: {
   transcript: TradeTranscriptJournal;
   evidence: TradeEvidence;
   preimage: string | null;
+  htlcHash: string | null;
   createdAt: number;
 }): TradeSession {
   if (!HEX_32.test(input.sessionId)) throw new Error("Session ID is invalid");
@@ -299,8 +307,21 @@ function baseSession(input: {
       cashuPrivateKey: input.keys.cashuPrivateKey,
       refundPrivateKey: input.keys.refundPrivateKey,
       preimage: input.preimage,
+      htlcHash: input.htlcHash,
       settlementTranscriptHash: null,
-      inbox: { listEventId: null, registeredAt: null, relays: [] },
+      inbox: {
+        status: "unregistered",
+        quorum: 2,
+        event: null,
+        discoveryRelays: [],
+        inboxRelays: [],
+        receipts: [],
+        readbacks: [],
+        stagedAt: null,
+        acknowledgedAt: null,
+        registeredAt: null
+      },
+      pendingIncoming: null,
       transcript: input.transcript,
       outbox: null,
       cashuOperation: null,
@@ -345,11 +366,11 @@ export async function createTakerSession(
       lastRumorId: null,
       lastMessageId: null,
       lastTranscriptHash: null,
-      acceptedRumorIds: [],
-      acceptedMessageIds: []
+      accepted: []
     },
     evidence: emptyEvidence(input.order, market),
     preimage: null,
+    htlcHash: null,
     createdAt: input.clocks.localNow
   });
 }
@@ -440,6 +461,7 @@ export async function createMakerSession(
   }
   const evidence = emptyEvidence(input.order, market);
   evidence.commitments = [material.hash];
+  evidence.reservation.proposalSealId = input.proposal.seal.id;
   return baseSession({
     role: "maker",
     order: input.order,
@@ -454,11 +476,16 @@ export async function createMakerSession(
       lastRumorId: input.proposal.rumor.id,
       lastMessageId: message.message_id,
       lastTranscriptHash: input.proposal.transcriptHash,
-      acceptedRumorIds: [input.proposal.rumor.id],
-      acceptedMessageIds: [message.message_id]
+      accepted: [{
+        sequence: "0",
+        messageId: message.message_id,
+        rumorId: input.proposal.rumor.id,
+        transcriptHash: input.proposal.transcriptHash
+      }]
     },
     evidence,
     preimage: material.preimage,
+    htlcHash: material.hash,
     createdAt: input.clocks.localNow
   });
 }

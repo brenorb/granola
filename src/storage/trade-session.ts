@@ -1,6 +1,12 @@
+import { verifyHTLCHash } from "@cashu/cashu-ts";
+import { getEventHash, getPublicKey, verifyEvent } from "nostr-tools";
+
+import type { NostrEvent } from "../order/events.js";
 import type {
   CashuOperationJournal,
   PrivateLegJournal,
+  TradeInboxJournal,
+  TradePendingIncomingJournal,
   TradeLegEvidence,
   TradeOutboxJournal,
   TradeSession,
@@ -39,6 +45,32 @@ function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  label: string
+): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...required].sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((key, index) => key !== expected[index])
+  ) throw new Error(`${label} contains missing or unknown fields`);
+}
+
+function exactAllowedKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string
+): void {
+  const allowed = new Set([...required, ...optional]);
+  if (
+    required.some((key) => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some((key) => !allowed.has(key))
+  ) throw new Error(`${label} contains missing or unknown fields`);
+}
+
 function safeTime(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     throw new Error(`${label} is invalid`);
@@ -50,6 +82,10 @@ function optionalHex(value: unknown, label: string): void {
   if (value !== null && (typeof value !== "string" || !HEX_32.test(value))) {
     throw new Error(`${label} is invalid`);
   }
+}
+
+function hexBytes(value: string): Uint8Array {
+  return Uint8Array.from(value.match(/../g) ?? [], (part) => Number.parseInt(part, 16));
 }
 
 function uniqueStrings(
@@ -95,9 +131,17 @@ function validateEvent(
   signed = true
 ): void {
   const event = object(value, label);
+  exactKeys(
+    event,
+    signed
+      ? ["id", "pubkey", "created_at", "kind", "tags", "content", "sig"]
+      : ["id", "pubkey", "created_at", "kind", "tags", "content"],
+    label
+  );
   if (
     event.kind !== expectedKind ||
     !Number.isSafeInteger(event.created_at) ||
+    (event.created_at as number) < 0 ||
     typeof event.content !== "string" ||
     !Array.isArray(event.tags) ||
     event.tags.some((tag) =>
@@ -109,10 +153,101 @@ function validateEvent(
     !HEX_32.test(event.pubkey) ||
     (signed && (typeof event.sig !== "string" || !HEX_64.test(event.sig)))
   ) throw new Error(`${label} is invalid`);
+  if (signed) {
+    const snapshot: NostrEvent = {
+      id: event.id as string,
+      pubkey: event.pubkey as string,
+      created_at: event.created_at as number,
+      kind: event.kind as number,
+      tags: (event.tags as string[][]).map((tag) => [...tag]),
+      content: event.content as string,
+      sig: event.sig as string
+    };
+    if (!verifyEvent(snapshot)) {
+      throw new Error(`${label} signature is invalid`);
+    }
+  } else if (getEventHash(event as never) !== event.id) {
+    throw new Error(`${label} ID is invalid`);
+  }
+}
+
+function validateRelayList(value: unknown, label: string, allowEmpty: boolean): string[] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+    throw new Error(`${label} is invalid`);
+  }
+  const relays = value.map((value) => {
+    if (typeof value !== "string") throw new Error(`${label} is invalid`);
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error(`${label} is invalid`);
+    }
+    if (
+      parsed.protocol !== "wss:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) throw new Error(`${label} is invalid`);
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    const normalized = parsed.toString().replace(/\/$/, "");
+    if (normalized !== value) throw new Error(`${label} is invalid`);
+    return normalized;
+  });
+  if (new Set(relays).size !== relays.length || relays.length > 3) {
+    throw new Error(`${label} is invalid`);
+  }
+  return relays;
+}
+
+function validateReceipts(
+  value: unknown,
+  relays: readonly string[],
+  label: string
+): Array<{ relay: string; ok: boolean; message: string }> {
+  if (!Array.isArray(value)) throw new Error(`${label} is invalid`);
+  const receipts = value.map((receipt) => {
+    const item = object(receipt, label);
+    exactKeys(item, ["relay", "ok", "message"], label);
+    if (
+      typeof item.relay !== "string" ||
+      !relays.includes(item.relay) ||
+      typeof item.ok !== "boolean" ||
+      typeof item.message !== "string"
+    ) throw new Error(`${label} is invalid`);
+    return item as { relay: string; ok: boolean; message: string };
+  });
+  if (new Set(receipts.map(({ relay }) => relay)).size !== receipts.length) {
+    throw new Error(`${label} is invalid`);
+  }
+  return receipts;
 }
 
 function validateChoreography(value: unknown): void {
   const choreography = object(value, "Trade choreography");
+  exactAllowedKeys(
+    choreography,
+    ["phase", "participants", "refundedLegs"],
+    [
+      "sessionId",
+      "reservationId",
+      "orderAddress",
+      "orderHead",
+      "termsHash",
+      "terms",
+      "lastMessageId",
+      "settlementHash",
+      "reserveTransitionId",
+      "shortLocktime",
+      "longLocktime",
+      "baseTokenCommitment",
+      "baseValidationCommitment",
+      "quoteTokenCommitment",
+      "quoteValidationCommitment"
+    ],
+    "Trade choreography"
+  );
   if (
     typeof choreography.phase !== "string" ||
     !CHOREOGRAPHY_PHASES.has(choreography.phase) ||
@@ -121,6 +256,19 @@ function validateChoreography(value: unknown): void {
     new Set(choreography.refundedLegs).size !== choreography.refundedLegs.length
   ) throw new Error("Trade choreography is invalid");
   const participants = object(choreography.participants, "Trade participants");
+  exactAllowedKeys(
+    participants,
+    ["makerOrderPubkey"],
+    [
+      "makerSessionPubkey",
+      "takerSessionPubkey",
+      "makerCashuPubkey",
+      "makerRefundPubkey",
+      "takerCashuPubkey",
+      "takerRefundPubkey"
+    ],
+    "Trade participants"
+  );
   if (
     typeof participants.makerOrderPubkey !== "string" ||
     !HEX_32.test(participants.makerOrderPubkey)
@@ -131,10 +279,30 @@ function validateChoreography(value: unknown): void {
       throw new Error("Trade participants are invalid");
     }
   }
+  for (const field of [
+    "makerCashuPubkey",
+    "makerRefundPubkey",
+    "takerCashuPubkey",
+    "takerRefundPubkey"
+  ] as const) {
+    if (
+      participants[field] !== undefined &&
+      (typeof participants[field] !== "string" ||
+        !/^(02|03)[0-9a-f]{64}$/.test(participants[field] as string))
+    ) throw new Error("Trade participants are invalid");
+  }
 }
 
 function validateTranscript(value: unknown): asserts value is TradeTranscriptJournal {
   const transcript = object(value, "Trade transcript");
+  exactKeys(transcript, [
+    "choreography",
+    "nextSequence",
+    "lastRumorId",
+    "lastMessageId",
+    "lastTranscriptHash",
+    "accepted"
+  ], "Trade transcript");
   validateChoreography(transcript.choreography);
   if (typeof transcript.nextSequence !== "string" || !CANONICAL_INTEGER.test(transcript.nextSequence)) {
     throw new Error("Trade transcript sequence is invalid");
@@ -145,8 +313,45 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
     (typeof transcript.lastMessageId !== "string" || !UUID_V4.test(transcript.lastMessageId))
   ) throw new Error("Last message ID is invalid");
   optionalHex(transcript.lastTranscriptHash, "Last transcript hash");
-  uniqueStrings(transcript.acceptedRumorIds, HEX_32, "Accepted rumor IDs");
-  uniqueStrings(transcript.acceptedMessageIds, UUID_V4, "Accepted message IDs");
+  if (!Array.isArray(transcript.accepted)) {
+    throw new Error("Accepted trade transcript is invalid");
+  }
+  const accepted = transcript.accepted.map((value, index) => {
+    const entry = object(value, "Accepted trade transcript entry");
+    exactKeys(
+      entry,
+      ["sequence", "messageId", "rumorId", "transcriptHash"],
+      "Accepted trade transcript entry"
+    );
+    if (
+      entry.sequence !== String(index) ||
+      typeof entry.messageId !== "string" ||
+      !UUID_V4.test(entry.messageId) ||
+      typeof entry.rumorId !== "string" ||
+      !HEX_32.test(entry.rumorId) ||
+      typeof entry.transcriptHash !== "string" ||
+      !HEX_32.test(entry.transcriptHash)
+    ) throw new Error("Accepted trade transcript entry is invalid");
+    return entry as {
+      sequence: string;
+      messageId: string;
+      rumorId: string;
+      transcriptHash: string;
+    };
+  });
+  for (const [field, values] of [
+    ["sequence", accepted.map(({ sequence }) => sequence)],
+    ["message ID", accepted.map(({ messageId }) => messageId)],
+    ["rumor ID", accepted.map(({ rumorId }) => rumorId)],
+    ["transcript hash", accepted.map(({ transcriptHash }) => transcriptHash)]
+  ] as const) {
+    if (new Set(values).size !== values.length) {
+      throw new Error(`Accepted trade transcript has a duplicate ${field}`);
+    }
+  }
+  if (transcript.nextSequence !== String(accepted.length)) {
+    throw new Error("Trade transcript sequence does not follow accepted messages");
+  }
   const lastValues = [
     transcript.lastRumorId,
     transcript.lastMessageId,
@@ -155,6 +360,15 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
   if (lastValues.some((item) => item === null) && lastValues.some((item) => item !== null)) {
     throw new Error("Trade transcript head is incomplete");
   }
+  const head = accepted.at(-1);
+  if (
+    (head === undefined && lastValues.some((item) => item !== null)) ||
+    (head !== undefined && (
+      transcript.lastRumorId !== head.rumorId ||
+      transcript.lastMessageId !== head.messageId ||
+      transcript.lastTranscriptHash !== head.transcriptHash
+    ))
+  ) throw new Error("Trade transcript head does not match its accepted tuple");
 }
 
 function validateMessage(value: unknown): void {
@@ -177,6 +391,17 @@ function validateMessage(value: unknown): void {
 
 function validateOutbox(value: unknown): asserts value is TradeOutboxJournal {
   const outbox = object(value, "Trade outbox");
+  exactKeys(outbox, [
+    "message",
+    "rumor",
+    "seal",
+    "wrapper",
+    "recipientInboxListId",
+    "recipientRelays",
+    "receipts",
+    "nextChoreography",
+    "status"
+  ], "Trade outbox");
   validateMessage(outbox.message);
   validateEvent(outbox.rumor, 14, "Trade rumor", false);
   validateEvent(outbox.seal, 13, "Trade seal");
@@ -184,28 +409,33 @@ function validateOutbox(value: unknown): asserts value is TradeOutboxJournal {
   if (typeof outbox.recipientInboxListId !== "string" || !HEX_32.test(outbox.recipientInboxListId)) {
     throw new Error("Recipient inbox list ID is invalid");
   }
-  const relays = uniqueStrings(
-    outbox.recipientRelays,
-    /^wss:\/\/[^?#]+$/,
-    "Recipient relays",
-    false
-  );
-  if (relays.length > 3) throw new Error("Recipient relays are invalid");
+  const relays = validateRelayList(outbox.recipientRelays, "Recipient relays", false);
+  validateReceipts(outbox.receipts, relays, "Trade outbox receipts");
   if (
-    !Array.isArray(outbox.receipts) ||
-    outbox.receipts.some((receipt) =>
-      !receipt || typeof receipt !== "object" ||
-      typeof receipt.relay !== "string" ||
-      typeof receipt.ok !== "boolean" ||
-      typeof receipt.message !== "string"
-    ) ||
     (outbox.status !== "staged" && outbox.status !== "acknowledged")
   ) throw new Error("Trade outbox receipts or status are invalid");
+  const receipts = outbox.receipts as Array<{ ok: boolean }>;
+  if (
+    (outbox.status === "acknowledged" && !receipts.some(({ ok }) => ok))
+  ) throw new Error("Trade outbox status does not match its receipts");
   validateChoreography(outbox.nextChoreography);
 }
 
 function validateExpectedLock(value: unknown): void {
   const expected = object(value, "Expected HTLC lock");
+  exactKeys(expected, [
+    "mintUrl",
+    "unit",
+    "binding",
+    "amount",
+    "hash",
+    "receiverPubkey",
+    "refundPubkey",
+    "locktime",
+    "leg",
+    "refundHorizon",
+    "deadlines"
+  ], "Expected HTLC lock");
   normalizedHttps(expected.mintUrl, "Expected HTLC mint");
   if (
     typeof expected.unit !== "string" ||
@@ -223,24 +453,65 @@ function validateExpectedLock(value: unknown): void {
   safeTime(expected.locktime, "Expected HTLC locktime");
   safeTime(expected.refundHorizon, "Expected HTLC refund horizon");
   const binding = object(expected.binding, "Expected HTLC binding");
+  exactKeys(binding, [
+    "protocolVersion",
+    "network",
+    "orderId",
+    "reservationId",
+    "sessionId",
+    "direction",
+    "transcriptHash"
+  ], "Expected HTLC binding");
   if (
     typeof binding.sessionId !== "string" || !HEX_32.test(binding.sessionId) ||
     typeof binding.reservationId !== "string" || !UUID_V4.test(binding.reservationId) ||
     typeof binding.transcriptHash !== "string" || !HEX_32.test(binding.transcriptHash) ||
     binding.direction !== expected.leg
   ) throw new Error("Expected HTLC binding is invalid");
+  const deadlines = object(expected.deadlines, "Expected HTLC deadlines");
+  exactKeys(deadlines, ["short", "long", "minimumGap"], "Expected HTLC deadlines");
+  const short = safeTime(deadlines.short, "Expected HTLC short deadline");
+  const long = safeTime(deadlines.long, "Expected HTLC long deadline");
+  if (deadlines.minimumGap !== 600 || long !== short + 600) {
+    throw new Error("Expected HTLC deadlines are invalid");
+  }
 }
 
 function validateCashuOperation(value: unknown): asserts value is CashuOperationJournal {
   const operation = object(value, "Cashu operation journal");
+  exactKeys(operation, [
+    "operationId",
+    "leg",
+    "kind",
+    "status",
+    "preparedAt",
+    "inputsReserved",
+    "artifact",
+    "result"
+  ], "Cashu operation journal");
   if (
     typeof operation.operationId !== "string" ||
     !UUID_V4.test(operation.operationId) ||
     (operation.leg !== "base" && operation.leg !== "quote") ||
     !["outgoing-lock", "claim", "refund"].includes(operation.kind as string) ||
-    !["prepared", "completed", "wallet_applied"].includes(operation.status as string)
+    !["prepared", "completed", "wallet_applied"].includes(operation.status as string) ||
+    typeof operation.inputsReserved !== "boolean"
   ) throw new Error("Cashu operation metadata is invalid");
+  safeTime(operation.preparedAt, "Cashu operation prepared time");
+  if (operation.status !== "prepared" && operation.inputsReserved !== true) {
+    throw new Error("Completed Cashu operation requires reserved inputs");
+  }
   const artifact = object(operation.artifact, "Cashu operation artifact");
+  exactKeys(artifact, [
+    "version",
+    "kind",
+    "mintUrl",
+    "unit",
+    "preview",
+    "spentSecrets",
+    "expected",
+    "operationCommitment"
+  ], "Cashu operation artifact");
   if (
     artifact.version !== 1 ||
     artifact.kind !== operation.kind ||
@@ -255,6 +526,12 @@ function validateCashuOperation(value: unknown): asserts value is CashuOperation
   ) throw new Error("Cashu operation artifact is invalid");
   object(artifact.preview, "Cashu operation preview");
   validateExpectedLock(artifact.expected);
+  const expected = artifact.expected as Record<string, unknown>;
+  if (
+    artifact.mintUrl !== expected.mintUrl ||
+    artifact.unit !== expected.unit ||
+    operation.leg !== expected.leg
+  ) throw new Error("Cashu operation artifact disagrees with its expected lock");
   if (operation.status === "prepared" && operation.result !== null) {
     throw new Error("Prepared Cashu operation cannot have a completed result");
   }
@@ -263,6 +540,15 @@ function validateCashuOperation(value: unknown): asserts value is CashuOperation
   }
   if (operation.result !== null) {
     const result = object(operation.result, "Cashu operation result");
+    exactKeys(result, [
+      "walletMutation",
+      "mintUrl",
+      "unit",
+      "proofs",
+      "lockedToken",
+      "amount",
+      "proofCount"
+    ], "Cashu operation result");
     if (
       (result.walletMutation !== "replace" && result.walletMutation !== "receive") ||
       typeof result.mintUrl !== "string" ||
@@ -271,6 +557,23 @@ function validateCashuOperation(value: unknown): asserts value is CashuOperation
       result.proofs.some((proof) => {
         if (!proof || typeof proof !== "object") return true;
         const item = proof as Record<string, unknown>;
+        try {
+          exactAllowedKeys(
+            item,
+            ["amount", "id", "secret", "C"],
+            ["dleq"],
+            "Cashu operation proof"
+          );
+          if (item.dleq !== undefined) {
+            exactKeys(
+              object(item.dleq, "Cashu operation proof DLEQ"),
+              ["e", "s", "r"],
+              "Cashu operation proof DLEQ"
+            );
+          }
+        } catch {
+          return true;
+        }
         return typeof item.amount !== "string" || !POSITIVE_INTEGER.test(item.amount) ||
           typeof item.id !== "string" || typeof item.secret !== "string" ||
           typeof item.C !== "string";
@@ -281,31 +584,440 @@ function validateCashuOperation(value: unknown): asserts value is CashuOperation
       !Number.isSafeInteger(result.proofCount) ||
       (result.proofCount as number) < 1
     ) throw new Error("Cashu operation result is invalid");
+    if (
+      result.mintUrl !== artifact.mintUrl ||
+      result.unit !== artifact.unit ||
+      result.amount !== expected.amount
+    ) throw new Error("Cashu operation result disagrees with its prepared artifact");
+    if (operation.kind === "outgoing-lock") {
+      if (
+        result.walletMutation !== "replace" ||
+        typeof result.lockedToken !== "string" ||
+        result.lockedToken.length === 0
+      ) throw new Error("Outgoing lock result must retain its exact locked token");
+    } else if (
+      result.walletMutation !== "receive" ||
+      result.lockedToken !== null ||
+      (result.proofs as unknown[]).length === 0 ||
+      result.proofCount !== (result.proofs as unknown[]).length
+    ) {
+      throw new Error("Claim or refund result must contain its exact received proofs");
+    }
   }
 }
 
 function validatePrivateLeg(value: unknown): asserts value is PrivateLegJournal {
   const leg = object(value, "Private trade leg");
-  if (!(typeof leg.token === "string" || leg.token === null)) {
+  exactKeys(leg, ["token", "expected", "observations"], "Private trade leg");
+  if (!(leg.token === null || (typeof leg.token === "string" && leg.token.length > 0))) {
     throw new Error("Private trade token is invalid");
   }
   if (leg.expected !== null) validateExpectedLock(leg.expected);
+  if (!Array.isArray(leg.observations)) {
+    throw new Error("Private trade observations are invalid");
+  }
+  const observations = leg.observations;
   if (
-    !Array.isArray(leg.observations) ||
-    leg.observations.some((observation) => {
+    observations.some((observation, index) => {
       if (!observation || typeof observation !== "object") return true;
       const item = observation as Record<string, unknown>;
+      try {
+        exactKeys(
+          item,
+          ["observedAt", "state", "proofCount", "witnessCommitment"],
+          "Private trade observation"
+        );
+      } catch {
+        return true;
+      }
+      const previous = index === 0
+        ? undefined
+        : observations[index - 1] as Record<string, unknown>;
       return !Number.isSafeInteger(item.observedAt) ||
+        (item.observedAt as number) < 0 ||
+        (previous !== undefined &&
+          (item.observedAt as number) <= (previous.observedAt as number)) ||
         typeof item.state !== "string" || !MINT_STATES.has(item.state) ||
         !Number.isSafeInteger(item.proofCount) || (item.proofCount as number) < 1 ||
         !(item.witnessCommitment === null ||
-          (typeof item.witnessCommitment === "string" && HEX_32.test(item.witnessCommitment)));
+          (typeof item.witnessCommitment === "string" && HEX_32.test(item.witnessCommitment))) ||
+        (item.state === "SPENT") !== (item.witnessCommitment !== null);
     })
   ) throw new Error("Private trade observations are invalid");
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function validateInbox(value: unknown): asserts value is TradeInboxJournal {
+  const inbox = object(value, "Trade inbox checkpoint");
+  exactKeys(inbox, [
+    "status",
+    "quorum",
+    "event",
+    "discoveryRelays",
+    "inboxRelays",
+    "receipts",
+    "readbacks",
+    "stagedAt",
+    "acknowledgedAt",
+    "registeredAt"
+  ], "Trade inbox checkpoint");
+  if (!["unregistered", "staged", "acknowledged", "registered"].includes(inbox.status as string)) {
+    throw new Error("Trade inbox status is invalid");
+  }
+  if (
+    !Number.isSafeInteger(inbox.quorum) ||
+    (inbox.quorum as number) < 1 ||
+    (inbox.quorum as number) > 3
+  ) throw new Error("Trade inbox quorum is invalid");
+  const quorum = inbox.quorum as number;
+  const discoveryRelays = validateRelayList(
+    inbox.discoveryRelays,
+    "Trade inbox discovery relays",
+    inbox.status === "unregistered"
+  );
+  const inboxRelays = validateRelayList(
+    inbox.inboxRelays,
+    "Trade inbox recipient relays",
+    inbox.status === "unregistered"
+  );
+  const receipts = validateReceipts(
+    inbox.receipts,
+    discoveryRelays,
+    "Trade inbox receipts"
+  );
+  if (!Array.isArray(inbox.readbacks)) throw new Error("Trade inbox readbacks are invalid");
+  const readbacks = inbox.readbacks.map((value) => {
+    const readback = object(value, "Trade inbox readback");
+    exactKeys(
+      readback,
+      ["relay", "found", "event", "observedAt"],
+      "Trade inbox readback"
+    );
+    if (
+      typeof readback.relay !== "string" ||
+      !discoveryRelays.includes(readback.relay) ||
+      typeof readback.found !== "boolean"
+    ) {
+      throw new Error("Trade inbox readback relay is invalid");
+    }
+    if (readback.found) {
+      validateEvent(readback.event, 10050, "Trade inbox readback event");
+    } else if (readback.event !== null) {
+      throw new Error("Missing trade inbox readback contains an event");
+    }
+    safeTime(readback.observedAt, "Trade inbox readback time");
+    return readback;
+  });
+  if (new Set(readbacks.map(({ relay }) => relay)).size !== readbacks.length) {
+    throw new Error("Trade inbox readbacks are invalid");
+  }
+  for (const timestamp of ["stagedAt", "acknowledgedAt", "registeredAt"] as const) {
+    if (inbox[timestamp] !== null) safeTime(inbox[timestamp], `Trade inbox ${timestamp}`);
+  }
+  if (inbox.status === "unregistered") {
+    if (
+      inbox.event !== null ||
+      discoveryRelays.length !== 0 ||
+      inboxRelays.length !== 0 ||
+      receipts.length !== 0 ||
+      readbacks.length !== 0 ||
+      inbox.stagedAt !== null ||
+      inbox.acknowledgedAt !== null ||
+      inbox.registeredAt !== null
+    ) throw new Error("Unregistered trade inbox contains publication state");
+    return;
+  }
+  if (discoveryRelays.length < quorum) {
+    throw new Error("Trade inbox publication relays cannot satisfy quorum");
+  }
+  validateEvent(inbox.event, 10050, "Trade inbox list event");
+  const event = inbox.event as Record<string, unknown>;
+  const advertisedRelays = (event.tags as string[][]).map((tag) => {
+    if (tag.length !== 2 || tag[0] !== "relay" || !tag[1]) {
+      throw new Error("Trade inbox list event has invalid relay tags");
+    }
+    return tag[1];
+  });
+  const normalizedAdvertised = validateRelayList(
+    advertisedRelays,
+    "Trade inbox advertised relays",
+    false
+  );
+  if (
+    event.content !== "" ||
+    canonicalJson(normalizedAdvertised) !== canonicalJson(inboxRelays) ||
+    normalizedAdvertised.some((relay, index) => relay !== advertisedRelays[index]) ||
+    [...normalizedAdvertised].sort().some((relay, index) => relay !== normalizedAdvertised[index])
+  ) throw new Error("Trade inbox list event is non-canonical");
+  const stagedAt = safeTime(inbox.stagedAt, "Trade inbox staged time");
+  const acknowledgedAt = inbox.acknowledgedAt === null
+    ? null
+    : safeTime(inbox.acknowledgedAt, "Trade inbox acknowledgement time");
+  const registeredAt = inbox.registeredAt === null
+    ? null
+    : safeTime(inbox.registeredAt, "Trade inbox registration time");
+  if (
+    (acknowledgedAt !== null && acknowledgedAt < stagedAt) ||
+    (registeredAt !== null && (
+      acknowledgedAt === null ||
+      registeredAt < acknowledgedAt
+    ))
+  ) throw new Error("Trade inbox timestamps are invalid");
+  const successfulReceiptCount = receipts.filter(({ ok }) => ok).length;
+  if (inbox.status === "staged") {
+    if (inbox.acknowledgedAt !== null ||
+      readbacks.length !== 0 || inbox.registeredAt !== null) {
+      throw new Error("Staged trade inbox contains later state");
+    }
+  } else if (successfulReceiptCount < quorum || inbox.acknowledgedAt === null) {
+    throw new Error("Acknowledged trade inbox lacks a relay acknowledgement");
+  }
+  if (inbox.status === "acknowledged") {
+    if (readbacks.length !== 0 || inbox.registeredAt !== null) {
+      throw new Error("Acknowledged trade inbox contains registration state");
+    }
+  } else if (inbox.status === "registered") {
+    if (
+      readbacks.filter((readback) => readback.found).length < quorum ||
+      inbox.registeredAt === null ||
+      readbacks.some((readback) =>
+        (readback.found && canonicalJson(readback.event) !== canonicalJson(event)) ||
+        (readback.observedAt as number) > (inbox.registeredAt as number)
+      )
+    ) throw new Error("Registered trade inbox lacks exact readback evidence");
+  }
+}
+
+function validatePendingIncoming(
+  value: unknown
+): asserts value is TradePendingIncomingJournal {
+  const incoming = object(value, "Pending incoming trade message");
+  exactKeys(incoming, [
+    "wrapper",
+    "seal",
+    "rumor",
+    "message",
+    "transcriptHash",
+    "receivedAt",
+    "validation"
+  ], "Pending incoming trade message");
+  validateEvent(incoming.wrapper, 1059, "Pending incoming wrapper");
+  validateEvent(incoming.seal, 13, "Pending incoming seal");
+  validateEvent(incoming.rumor, 14, "Pending incoming rumor", false);
+  validateMessage(incoming.message);
+  if (typeof incoming.transcriptHash !== "string" || !HEX_32.test(incoming.transcriptHash)) {
+    throw new Error("Pending incoming transcript hash is invalid");
+  }
+  safeTime(incoming.receivedAt, "Pending incoming receive time");
+  const rumor = incoming.rumor as Record<string, unknown>;
+  const seal = incoming.seal as Record<string, unknown>;
+  const message = incoming.message as Record<string, unknown>;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(rumor.content as string);
+  } catch {
+    throw new Error("Pending incoming rumor content is invalid");
+  }
+  if (
+    canonicalJson(decoded) !== canonicalJson(message) ||
+    rumor.pubkey !== seal.pubkey ||
+    rumor.pubkey !== message.author_pubkey ||
+    rumor.created_at !== message.sent_at
+  ) throw new Error("Pending incoming artifacts disagree");
+  const validation = object(incoming.validation, "Pending incoming validation");
+  exactKeys(validation, ["status", "checkedAt", "error"], "Pending incoming validation");
+  if (validation.status === "unvalidated") {
+    if (validation.checkedAt !== null || validation.error !== null) {
+      throw new Error("Unvalidated incoming message contains a validation result");
+    }
+  } else if (validation.status === "validated") {
+    safeTime(validation.checkedAt, "Pending incoming validation time");
+    if (validation.error !== null) {
+      throw new Error("Validated incoming message contains an error");
+    }
+  } else if (validation.status === "rejected") {
+    safeTime(validation.checkedAt, "Pending incoming rejection time");
+    if (typeof validation.error !== "string" || !validation.error.trim()) {
+      throw new Error("Rejected incoming message lacks an error");
+    }
+  } else {
+    throw new Error("Pending incoming validation status is invalid");
+  }
+  if (
+    validation.checkedAt !== null &&
+    (validation.checkedAt as number) < (incoming.receivedAt as number)
+  ) throw new Error("Pending incoming validation predates receipt");
+}
+
+function eventTag(event: Record<string, unknown>, key: string): string | null {
+  const matches = (event.tags as string[][]).filter((tag) => tag[0] === key);
+  return matches.length === 1 && matches[0]?.[1] ? matches[0][1] : null;
+}
+
+function expectedRumorTags(
+  message: { sequence: string; recipient_pubkey: string },
+  lastRumorId: string | null
+): string[][] {
+  if (message.sequence === "0") return [["p", message.recipient_pubkey]];
+  if (lastRumorId === null) throw new Error("Later trade rumor lacks a predecessor");
+  return [
+    ["p", message.recipient_pubkey],
+    ["e", lastRumorId, "", "reply"]
+  ];
+}
+
+function validatePendingOrderPublication(
+  value: unknown,
+  context: {
+    orderAddress: string;
+    offeredOrderHead: string;
+    makerPubkey: string;
+    reserveTransitionId: string | null;
+    fillTransitionId: string | null;
+  },
+  quorum: number
+): void {
+  const pending = object(value, "Pending order publication");
+  exactKeys(pending, [
+    "operation",
+    "orderId",
+    "transition",
+    "projection",
+    "transitionReceipts",
+    "projectionReceipts",
+    "status",
+    "stagedAt",
+    "transitionAcknowledgedAt",
+    "projectionAcknowledgedAt",
+    "committedAt"
+  ], "Pending order publication");
+  if (
+    !["reserve", "fill", "release"].includes(pending.operation as string) ||
+    typeof pending.orderId !== "string" ||
+    !UUID_V4.test(pending.orderId)
+  ) throw new Error("Pending order publication is invalid");
+  validateEvent(pending.transition, 78, "Pending order transition");
+  validateEvent(pending.projection, 30078, "Pending order projection");
+  const transition = pending.transition as Record<string, unknown>;
+  const projection = pending.projection as Record<string, unknown>;
+  const addressParts = context.orderAddress.split(":");
+  const addressOrderId = addressParts[5];
+  if (
+    addressParts.length !== 6 ||
+    addressParts[0] !== "30078" ||
+    addressParts[1] !== context.makerPubkey ||
+    addressParts[2] !== "granola" ||
+    addressParts[3] !== "order" ||
+    addressParts[4] !== "v1" ||
+    typeof addressOrderId !== "string" ||
+    !UUID_V4.test(addressOrderId) ||
+    pending.orderId !== addressOrderId ||
+    transition.pubkey !== context.makerPubkey ||
+    transition.pubkey !== projection.pubkey ||
+    eventTag(transition, "op") !== pending.operation ||
+    eventTag(projection, "e") !== transition.id ||
+    eventTag(transition, "d") !==
+      `granola:order-transition:v1:${String(pending.orderId)}` ||
+    eventTag(projection, "d") !==
+      `granola:order:v1:${String(pending.orderId)}`
+  ) throw new Error("Pending order publication artifacts disagree");
+  if (
+    (pending.operation === "reserve" && (
+      context.reserveTransitionId !== transition.id ||
+      context.fillTransitionId !== null
+    )) ||
+    (pending.operation === "fill" && context.fillTransitionId !== transition.id) ||
+    (pending.operation === "release" && context.fillTransitionId !== null)
+  ) throw new Error("Pending order publication ID does not match session lineage");
+  const relays = [...new Set([
+    ...((pending.transitionReceipts as Array<{ relay?: unknown }> | undefined) ?? [])
+      .map(({ relay }) => relay)
+      .filter((relay): relay is string => typeof relay === "string"),
+    ...((pending.projectionReceipts as Array<{ relay?: unknown }> | undefined) ?? [])
+      .map(({ relay }) => relay)
+      .filter((relay): relay is string => typeof relay === "string")
+  ])];
+  validateRelayList(relays, "Pending order publication relays", true);
+  const transitionReceipts = validateReceipts(
+    pending.transitionReceipts,
+    relays,
+    "Pending order transition receipts"
+  );
+  const projectionReceipts = validateReceipts(
+    pending.projectionReceipts,
+    relays,
+    "Pending order projection receipts"
+  );
+  safeTime(pending.stagedAt, "Pending order staged time");
+  for (const timestamp of [
+    "transitionAcknowledgedAt",
+    "projectionAcknowledgedAt",
+    "committedAt"
+  ] as const) {
+    if (pending[timestamp] !== null) {
+      safeTime(pending[timestamp], `Pending order ${timestamp}`);
+    }
+  }
+  const transitionOk = transitionReceipts.filter(({ ok }) => ok).length >= quorum;
+  const projectionOk = projectionReceipts.filter(({ ok }) => ok).length >= quorum;
+  const status = pending.status;
+  const valid = status === "staged"
+    ? !transitionOk &&
+      projectionReceipts.length === 0 &&
+      pending.transitionAcknowledgedAt === null &&
+      pending.projectionAcknowledgedAt === null &&
+      pending.committedAt === null
+    : status === "transition_acknowledged"
+      ? transitionOk &&
+        pending.transitionAcknowledgedAt !== null &&
+        pending.projectionAcknowledgedAt === null &&
+        pending.committedAt === null
+      : status === "projection_acknowledged"
+        ? transitionOk && projectionOk &&
+          pending.transitionAcknowledgedAt !== null &&
+          pending.projectionAcknowledgedAt !== null &&
+          pending.committedAt === null
+        : status === "committed" &&
+          transitionOk && projectionOk &&
+          pending.transitionAcknowledgedAt !== null &&
+          pending.projectionAcknowledgedAt !== null &&
+          pending.committedAt !== null;
+  if (!valid) throw new Error("Pending order publication status is inconsistent");
+  const ordered = [
+    pending.stagedAt,
+    pending.transitionAcknowledgedAt,
+    pending.projectionAcknowledgedAt,
+    pending.committedAt
+  ].filter((time): time is number => typeof time === "number");
+  if (ordered.some((time, index) => index > 0 && time < ordered[index - 1]!)) {
+    throw new Error("Pending order publication timestamps regressed");
+  }
+}
+
 function validateLegEvidence(value: unknown): asserts value is TradeLegEvidence {
   const leg = object(value, "Trade leg evidence");
+  exactKeys(leg, [
+    "tokenCommitment",
+    "validationCommitment",
+    "keysetId",
+    "proofCount",
+    "fee",
+    "mintState",
+    "observedAt",
+    "spendCommitment",
+    "claimOperationCommitment",
+    "refundOperationCommitment"
+  ], "Trade leg evidence");
   optionalHex(leg.tokenCommitment, "Token commitment");
   optionalHex(leg.validationCommitment, "Validation commitment");
   optionalHex(leg.spendCommitment, "Spend commitment");
@@ -320,28 +1032,40 @@ function validateLegEvidence(value: unknown): asserts value is TradeLegEvidence 
     !MINT_STATES.has(leg.mintState) ||
     !(leg.observedAt === null || (Number.isSafeInteger(leg.observedAt) && (leg.observedAt as number) >= 0))
   ) throw new Error("Trade leg evidence is invalid");
+  if (
+    (leg.mintState === "UNKNOWN" && (
+      leg.observedAt !== null ||
+      leg.proofCount !== null ||
+      leg.spendCommitment !== null
+    )) ||
+    (leg.mintState !== "UNKNOWN" && (
+      leg.observedAt === null ||
+      leg.proofCount === null
+    )) ||
+    (leg.mintState === "SPENT") !== (leg.spendCommitment !== null)
+  ) throw new Error("Trade leg evidence state is inconsistent");
 }
 
-function validateSpentEvidence(
+function validateObservedEvidence(
   evidence: TradeLegEvidence,
   privateLeg: PrivateLegJournal
 ): void {
-  if (evidence.mintState !== "SPENT") return;
-  if (
-    evidence.observedAt === null ||
-    evidence.proofCount === null ||
-    evidence.spendCommitment === null
-  ) {
-    throw new Error("SPENT trade evidence is incomplete");
+  if (evidence.mintState === "UNKNOWN") {
+    if (privateLeg.observations.length !== 0) {
+      throw new Error("UNKNOWN trade evidence contains private observations");
+    }
+    return;
   }
-  const matchesPrivateObservation = privateLeg.observations.some((observation) =>
-    observation.state === "SPENT" &&
+  const observation = privateLeg.observations.at(-1);
+  const matchesPrivateObservation = observation !== undefined &&
+    observation.state === evidence.mintState &&
     observation.observedAt === evidence.observedAt &&
     observation.proofCount === evidence.proofCount &&
-    observation.witnessCommitment === evidence.spendCommitment
-  );
+    observation.witnessCommitment === (
+      evidence.mintState === "SPENT" ? evidence.spendCommitment : null
+    );
   if (!matchesPrivateObservation) {
-    throw new Error("SPENT trade evidence lacks its matching private observation");
+    throw new Error("Trade evidence lacks its matching private observation");
   }
 }
 
@@ -404,6 +1128,15 @@ function assertSession(value: unknown): asserts value is TradeSession {
   ) throw new Error("Settlement plan profile is invalid");
 
   const evidence = object(session.evidence, "Trade evidence");
+  exactKeys(evidence, [
+    "makerPubkey",
+    "commitments",
+    "mintStates",
+    "reserveTransitionId",
+    "fillTransitionId",
+    "reservation",
+    "legs"
+  ], "Trade evidence");
   if (
     typeof evidence.makerPubkey !== "string" ||
     !HEX_32.test(evidence.makerPubkey) ||
@@ -412,22 +1145,67 @@ function assertSession(value: unknown): asserts value is TradeSession {
     !Array.isArray(evidence.mintStates) ||
     evidence.mintStates.some((item) => typeof item !== "string")
   ) throw new Error("Trade evidence is invalid");
+  optionalHex(evidence.reserveTransitionId, "Reserve transition evidence");
+  optionalHex(evidence.fillTransitionId, "Fill transition evidence");
+  if (new Set(evidence.commitments as string[]).size !== (evidence.commitments as string[]).length) {
+    throw new Error("Trade evidence commitments are duplicated");
+  }
+  const reservation = object(evidence.reservation, "Trade reservation evidence");
+  exactKeys(
+    reservation,
+    ["proposalSealId", "takerCommitment", "abortSeal"],
+    "Trade reservation evidence"
+  );
+  optionalHex(reservation.proposalSealId, "Proposal seal ID");
+  optionalHex(reservation.takerCommitment, "Taker commitment");
+  if (reservation.abortSeal !== null) {
+    validateEvent(reservation.abortSeal, 13, "Authenticated abort seal");
+  }
+  if (
+    (reservation.takerCommitment !== null && reservation.proposalSealId === null) ||
+    (reservation.abortSeal !== null && (
+      reservation.proposalSealId === null ||
+      reservation.takerCommitment === null
+    ))
+  ) throw new Error("Trade reservation evidence is incomplete");
+  if (
+    (session.reserveTransitionId === null) !==
+      (reservation.takerCommitment === null)
+  ) throw new Error("Reserve transition and taker commitment evidence disagree");
+  if (evidence.reserveTransitionId !== session.reserveTransitionId) {
+    throw new Error("Reserve transition evidence disagrees with the session");
+  }
+  if (evidence.fillTransitionId !== session.fillTransitionId) {
+    throw new Error("Fill transition evidence disagrees with the session");
+  }
   const evidenceLegs = object(evidence.legs, "Trade evidence legs");
   validateLegEvidence(evidenceLegs.base);
   validateLegEvidence(evidenceLegs.quote);
+  if (
+    (evidenceLegs.base as TradeLegEvidence).keysetId !== terms.baseKeyset ||
+    (evidenceLegs.quote as TradeLegEvidence).keysetId !== terms.quoteKeyset
+  ) throw new Error("Trade evidence keysets disagree with negotiated terms");
 
   if (session.pendingOrderPublication !== null) {
-    const pending = object(session.pendingOrderPublication, "Pending order publication");
-    if (
-      (pending.operation !== "reserve" && pending.operation !== "fill") ||
-      (pending.stage !== "transition" && pending.stage !== "projection") ||
-      typeof pending.orderId !== "string" ||
-      !UUID_V4.test(pending.orderId) ||
-      typeof pending.transitionId !== "string" ||
-      !HEX_32.test(pending.transitionId) ||
-      typeof pending.projectionId !== "string" ||
-      !HEX_32.test(pending.projectionId)
-    ) throw new Error("Pending order publication is invalid");
+    validatePendingOrderPublication(session.pendingOrderPublication, {
+      orderAddress: session.orderAddress as string,
+      offeredOrderHead: session.offeredOrderHead as string,
+      makerPubkey: evidence.makerPubkey as string,
+      reserveTransitionId: session.reserveTransitionId as string | null,
+      fillTransitionId: session.fillTransitionId as string | null
+    }, 2);
+    const pendingPublication = session.pendingOrderPublication as NonNullable<
+      TradeSession["pendingOrderPublication"]
+    >;
+    const pendingTimes = [
+      pendingPublication.stagedAt,
+      pendingPublication.transitionAcknowledgedAt,
+      pendingPublication.projectionAcknowledgedAt,
+      pendingPublication.committedAt
+    ].filter((time): time is number => time !== null);
+    if (pendingTimes.some((time) => time > updatedAt)) {
+      throw new Error("Pending order publication is newer than its session");
+    }
   }
 
   const privateState = object(session.privateState, "Trade private state");
@@ -436,34 +1214,187 @@ function assertSession(value: unknown): asserts value is TradeSession {
       throw new Error("Trade private key is invalid");
     }
   }
+  const nostrKey = hexBytes(privateState.nostrPrivateKey as string);
+  let localNostrPubkey: string;
+  try {
+    localNostrPubkey = getPublicKey(nostrKey);
+  } finally {
+    nostrKey.fill(0);
+  }
   optionalHex(privateState.preimage, "Trade preimage");
+  optionalHex(privateState.htlcHash, "Trade HTLC hash");
   optionalHex(privateState.settlementTranscriptHash, "Settlement transcript hash");
-  const inbox = object(privateState.inbox, "Trade inbox checkpoint");
-  optionalHex(inbox.listEventId, "Trade inbox list event ID");
   if (
-    !(inbox.registeredAt === null ||
-      (Number.isSafeInteger(inbox.registeredAt) && (inbox.registeredAt as number) >= 0)) ||
-    !Array.isArray(inbox.relays) ||
-    inbox.relays.some((relay) => typeof relay !== "string" || !/^wss:\/\/[^?#]+$/.test(relay)) ||
-    new Set(inbox.relays).size !== inbox.relays.length ||
-    inbox.relays.length > 3
-  ) throw new Error("Trade inbox checkpoint is invalid");
-  const unregistered = inbox.listEventId === null && inbox.registeredAt === null;
-  const registered = inbox.listEventId !== null && inbox.registeredAt !== null &&
-    inbox.relays.length > 0;
-  if ((!unregistered && !registered) || (unregistered && inbox.relays.length !== 0)) {
-    throw new Error("Trade inbox checkpoint is incomplete");
+    privateState.preimage !== null && privateState.htlcHash === null
+  ) throw new Error("Trade preimage lacks its HTLC hash");
+  if (
+    privateState.preimage !== null &&
+    !verifyHTLCHash(privateState.preimage as string, privateState.htlcHash as string)
+  ) throw new Error("Trade preimage does not match its HTLC hash");
+  if (
+    privateState.htlcHash !== null &&
+    !(evidence.commitments as string[]).includes(privateState.htlcHash as string)
+  ) throw new Error("Trade HTLC hash lacks public commitment evidence");
+  if (
+    privateState.htlcHash !== null &&
+    privateState.settlementTranscriptHash === privateState.htlcHash
+  ) throw new Error("HTLC hash and settlement transcript hash must remain distinct");
+  validateInbox(privateState.inbox);
+  if ([
+    privateState.inbox.stagedAt,
+    privateState.inbox.acknowledgedAt,
+    privateState.inbox.registeredAt
+  ].some((time) => time !== null && time > updatedAt)) {
+    throw new Error("Trade inbox checkpoint is newer than its session");
+  }
+  if (privateState.inbox.event !== null) {
+    if (privateState.inbox.event.pubkey !== localNostrPubkey) {
+      throw new Error("Trade inbox list event is signed by another session key");
+    }
+  }
+  if (privateState.pendingIncoming !== null) {
+    validatePendingIncoming(privateState.pendingIncoming);
+    const pending = privateState.pendingIncoming as TradePendingIncomingJournal;
+    if (pending.message.session_id !== session.sessionId ||
+      pending.message.reservation_id !== session.reservationId ||
+      pending.message.order_address !== session.orderAddress) {
+      throw new Error("Pending incoming message targets another trade session");
+    }
+    if (
+      pending.message.recipient_pubkey !== localNostrPubkey ||
+      eventTag(pending.wrapper as unknown as Record<string, unknown>, "p") !==
+        localNostrPubkey
+    ) throw new Error("Pending incoming message targets another session key");
+    if (
+      pending.receivedAt > updatedAt ||
+      (pending.validation.checkedAt !== null &&
+        pending.validation.checkedAt > updatedAt)
+    ) throw new Error("Pending incoming message is newer than its session");
   }
   validateTranscript(privateState.transcript);
-  if (privateState.outbox !== null) validateOutbox(privateState.outbox);
-  if (privateState.cashuOperation !== null) validateCashuOperation(privateState.cashuOperation);
+  const transcript = privateState.transcript as TradeTranscriptJournal;
+  if (reservation.abortSeal !== null) {
+    const participants = transcript.choreography.participants;
+    const expectedAbortAuthor = session.role === "maker"
+      ? participants.takerSessionPubkey
+      : participants.makerSessionPubkey;
+    if (
+      expectedAbortAuthor === undefined ||
+      (reservation.abortSeal as NostrEvent).pubkey !== expectedAbortAuthor
+    ) throw new Error("Authenticated abort seal has the wrong counterparty author");
+  }
+  if (
+    privateState.settlementTranscriptHash !== null &&
+    !transcript.accepted.some(({ transcriptHash }) =>
+      transcriptHash === privateState.settlementTranscriptHash)
+  ) throw new Error("Settlement transcript hash lacks an accepted transcript tuple");
+  if (privateState.pendingIncoming !== null) {
+    const pending = privateState.pendingIncoming as TradePendingIncomingJournal;
+    const participants = transcript.choreography.participants;
+    const expectedCounterparty = session.role === "maker"
+      ? participants.takerSessionPubkey
+      : participants.makerSessionPubkey;
+    if (
+      pending.message.sequence !== transcript.nextSequence ||
+      pending.message.maker_order_pubkey !== evidence.makerPubkey ||
+      pending.message.order_head !==
+        (session.reserveTransitionId ?? session.offeredOrderHead) ||
+      pending.message.previous_message_id !== transcript.lastMessageId ||
+      pending.message.previous_transcript_hash !== transcript.lastTranscriptHash ||
+      canonicalJson(pending.rumor.tags) !==
+        canonicalJson(expectedRumorTags(pending.message, transcript.lastRumorId)) ||
+      transcript.accepted.some(({ messageId, rumorId }) =>
+        messageId === pending.message.message_id || rumorId === pending.rumor.id)
+    ) throw new Error("Pending incoming message conflicts with the durable transcript");
+    if (
+      pending.validation.status === "validated" &&
+      expectedCounterparty !== undefined &&
+      pending.message.author_pubkey !== expectedCounterparty
+    ) throw new Error("Validated incoming message is not signed by the counterparty");
+  }
+  if (privateState.outbox !== null) {
+    validateOutbox(privateState.outbox);
+    if (privateState.pendingIncoming !== null) {
+      throw new Error("Trade session cannot stage incoming and outgoing messages together");
+    }
+    const outbox = privateState.outbox as TradeOutboxJournal;
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(outbox.rumor.content);
+    } catch {
+      throw new Error("Trade outbox rumor content is invalid");
+    }
+    if (
+      canonicalJson(decoded) !== canonicalJson(outbox.message) ||
+      outbox.rumor.pubkey !== outbox.seal.pubkey ||
+      outbox.rumor.pubkey !== outbox.message.author_pubkey ||
+      outbox.message.author_pubkey !== localNostrPubkey ||
+      outbox.rumor.created_at !== outbox.message.sent_at ||
+      outbox.message.session_id !== session.sessionId ||
+      outbox.message.reservation_id !== session.reservationId ||
+      outbox.message.order_address !== session.orderAddress ||
+      outbox.message.order_head !==
+        (session.reserveTransitionId ?? session.offeredOrderHead) ||
+      outbox.message.maker_order_pubkey !== evidence.makerPubkey ||
+      outbox.message.sequence !== transcript.nextSequence ||
+      outbox.message.previous_message_id !== transcript.lastMessageId ||
+      outbox.message.previous_transcript_hash !== transcript.lastTranscriptHash ||
+      eventTag(outbox.wrapper as unknown as Record<string, unknown>, "p") !==
+        outbox.message.recipient_pubkey ||
+      canonicalJson(outbox.rumor.tags) !==
+        canonicalJson(expectedRumorTags(outbox.message, transcript.lastRumorId)) ||
+      transcript.accepted.some(({ messageId, rumorId }) =>
+        messageId === outbox.message.message_id || rumorId === outbox.rumor.id)
+    ) throw new Error("Trade outbox artifacts disagree with the durable transcript");
+  }
+  if (privateState.cashuOperation !== null) {
+    validateCashuOperation(privateState.cashuOperation);
+    if (privateState.cashuOperation.preparedAt > updatedAt) {
+      throw new Error("Cashu operation preparation time is in the future");
+    }
+    const operationEvidence = privateState.cashuOperation.leg === "base"
+      ? evidenceLegs.base as TradeLegEvidence
+      : evidenceLegs.quote as TradeLegEvidence;
+    const commitment = privateState.cashuOperation.artifact.operationCommitment;
+    const expected = privateState.cashuOperation.artifact.expected;
+    if (
+      expected.binding.sessionId !== session.sessionId ||
+      expected.binding.reservationId !== session.reservationId ||
+      expected.binding.transcriptHash !== privateState.settlementTranscriptHash ||
+      expected.hash !== privateState.htlcHash ||
+      (privateState.cashuOperation.kind === "claim" &&
+        operationEvidence.claimOperationCommitment !== commitment) ||
+      (privateState.cashuOperation.kind === "refund" &&
+        operationEvidence.refundOperationCommitment !== commitment)
+    ) throw new Error("Cashu operation lacks matching public commitment evidence");
+  }
   const privateLegs = object(privateState.legs, "Private trade legs");
   const privateBase = privateLegs.base;
   const privateQuote = privateLegs.quote;
   validatePrivateLeg(privateBase);
   validatePrivateLeg(privateQuote);
-  validateSpentEvidence(evidenceLegs.base, privateBase);
-  validateSpentEvidence(evidenceLegs.quote, privateQuote);
+  validateObservedEvidence(evidenceLegs.base, privateBase);
+  validateObservedEvidence(evidenceLegs.quote, privateQuote);
+  for (const [legName, evidenceLeg, privateLeg] of [
+    ["base", evidenceLegs.base as TradeLegEvidence, privateBase as PrivateLegJournal],
+    ["quote", evidenceLegs.quote as TradeLegEvidence, privateQuote as PrivateLegJournal]
+  ] as const) {
+    const expected = privateLeg.expected;
+    if (expected !== null && (
+      expected.leg !== legName ||
+      expected.mintUrl !== (legName === "base" ? terms.baseMint : terms.quoteMint) ||
+      expected.unit !== (legName === "base" ? terms.baseUnit : terms.quoteUnit) ||
+      expected.amount !== (legName === "base" ? terms.baseAmount : terms.quoteAmount) ||
+      expected.binding.sessionId !== session.sessionId ||
+      expected.binding.reservationId !== session.reservationId ||
+      privateState.settlementTranscriptHash === null ||
+      expected.binding.transcriptHash !== privateState.settlementTranscriptHash
+    )) throw new Error("Expected HTLC lock disagrees with the trade session");
+    if (
+      evidenceLeg.tokenCommitment !== null &&
+      (privateLeg.token === null || evidenceLeg.validationCommitment === null)
+    ) throw new Error("Trade token commitment lacks exact private token evidence");
+  }
 }
 
 function assertSessions(value: unknown): asserts value is TradeSession[] {
@@ -473,6 +1404,163 @@ function assertSessions(value: unknown): asserts value is TradeSession[] {
     assertSession(session);
     if (seen.has(session.sessionId)) throw new Error("Trade session storage has duplicate IDs");
     seen.add(session.sessionId);
+  }
+}
+
+const INBOX_STATUS_RANK: Record<TradeInboxJournal["status"], number> = {
+  unregistered: 0,
+  staged: 1,
+  acknowledged: 2,
+  registered: 3
+};
+
+const OUTBOX_STATUS_RANK: Record<TradeOutboxJournal["status"], number> = {
+  staged: 0,
+  acknowledged: 1
+};
+
+const CASHU_STATUS_RANK: Record<CashuOperationJournal["status"], number> = {
+  prepared: 0,
+  completed: 1,
+  wallet_applied: 2
+};
+
+const ORDER_STATUS_RANK: Record<
+  NonNullable<TradeSession["pendingOrderPublication"]>["status"],
+  number
+> = {
+  staged: 0,
+  transition_acknowledged: 1,
+  projection_acknowledged: 2,
+  committed: 3
+};
+
+const HAPPY_PATH_PHASES = new Set([
+  "negotiating:reserved",
+  "reserved:base_locked",
+  "base_locked:quote_locked",
+  "quote_locked:quote_claimed",
+  "quote_claimed:base_claimed",
+  "base_claimed:filled",
+  "reserved:released",
+  "base_locked:waiting_base_refund",
+  "quote_locked:waiting_quote_refund",
+  "quote_claimed:waiting_base_claim",
+  "waiting_quote_refund:waiting_base_refund",
+  "waiting_base_refund:released",
+  "waiting_base_claim:base_claimed"
+]);
+
+function isPrefix(previous: unknown[], next: unknown[]): boolean {
+  return previous.every((value, index) =>
+    canonicalJson(value) === canonicalJson(next[index])
+  );
+}
+
+function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void {
+  for (const field of [
+    "sessionId",
+    "reservationId",
+    "role",
+    "orderAddress",
+    "offeredOrderHead",
+    "createdAt"
+  ] as const) {
+    if (next[field] !== current[field]) {
+      throw new Error(`Trade session ${field} cannot change`);
+    }
+  }
+  if (
+    next.phase !== current.phase &&
+    !HAPPY_PATH_PHASES.has(`${current.phase}:${next.phase}`) &&
+    next.phase !== "frozen"
+  ) throw new Error("Trade session phase skipped a happy-path checkpoint");
+
+  const previousInbox = current.privateState.inbox.status;
+  const nextInbox = next.privateState.inbox.status;
+  const inboxAdvance = INBOX_STATUS_RANK[nextInbox] - INBOX_STATUS_RANK[previousInbox];
+  if (inboxAdvance < 0 || inboxAdvance > 1) {
+    throw new Error("Trade inbox checkpoint regressed or skipped a durable stage");
+  }
+  if (
+    previousInbox !== "unregistered" &&
+    (
+      canonicalJson(current.privateState.inbox.event) !==
+        canonicalJson(next.privateState.inbox.event) ||
+      canonicalJson(current.privateState.inbox.discoveryRelays) !==
+        canonicalJson(next.privateState.inbox.discoveryRelays) ||
+      canonicalJson(current.privateState.inbox.inboxRelays) !==
+        canonicalJson(next.privateState.inbox.inboxRelays)
+    )
+  ) throw new Error("Trade inbox retry artifact changed after staging");
+
+  if (
+    !isPrefix(
+      current.privateState.transcript.accepted,
+      next.privateState.transcript.accepted
+    )
+  ) throw new Error("Trade transcript history regressed or changed");
+
+  const currentOutbox = current.privateState.outbox;
+  const nextOutbox = next.privateState.outbox;
+  if (currentOutbox && nextOutbox) {
+    if (
+      canonicalJson(currentOutbox.message) !== canonicalJson(nextOutbox.message) ||
+      canonicalJson(currentOutbox.rumor) !== canonicalJson(nextOutbox.rumor) ||
+      canonicalJson(currentOutbox.seal) !== canonicalJson(nextOutbox.seal) ||
+      canonicalJson(currentOutbox.wrapper) !== canonicalJson(nextOutbox.wrapper) ||
+      currentOutbox.recipientInboxListId !== nextOutbox.recipientInboxListId ||
+      canonicalJson(currentOutbox.recipientRelays) !==
+        canonicalJson(nextOutbox.recipientRelays) ||
+      canonicalJson(currentOutbox.nextChoreography) !==
+        canonicalJson(nextOutbox.nextChoreography) ||
+      OUTBOX_STATUS_RANK[nextOutbox.status] < OUTBOX_STATUS_RANK[currentOutbox.status] ||
+      OUTBOX_STATUS_RANK[nextOutbox.status] > OUTBOX_STATUS_RANK[currentOutbox.status] + 1
+    ) throw new Error("Trade outbox retry artifact regressed or changed");
+  } else if (currentOutbox?.status === "staged" && nextOutbox === null) {
+    throw new Error("A staged trade outbox cannot be cleared before acknowledgement");
+  }
+
+  const currentCashu = current.privateState.cashuOperation;
+  const nextCashu = next.privateState.cashuOperation;
+  if (currentCashu && nextCashu) {
+    const advance = CASHU_STATUS_RANK[nextCashu.status] -
+      CASHU_STATUS_RANK[currentCashu.status];
+    if (
+      currentCashu.operationId !== nextCashu.operationId ||
+      currentCashu.artifact.operationCommitment !==
+        nextCashu.artifact.operationCommitment ||
+      advance < 0 ||
+      advance > 1
+    ) throw new Error("Cashu operation checkpoint regressed or changed");
+  } else if (currentCashu && currentCashu.status !== "wallet_applied") {
+    throw new Error("Cashu operation cannot be cleared before wallet application");
+  }
+
+  const currentOrder = current.pendingOrderPublication;
+  const nextOrder = next.pendingOrderPublication;
+  if (currentOrder && nextOrder &&
+    currentOrder.transition.id === nextOrder.transition.id) {
+    const advance = ORDER_STATUS_RANK[nextOrder.status] -
+      ORDER_STATUS_RANK[currentOrder.status];
+    if (
+      currentOrder.projection.id !== nextOrder.projection.id ||
+      advance < 0 ||
+      advance > 1
+    ) throw new Error("Order publication checkpoint regressed or changed");
+  } else if (currentOrder && nextOrder === null && currentOrder.status !== "committed") {
+    throw new Error("Order publication cannot be cleared before commit");
+  }
+
+  for (const leg of ["base", "quote"] as const) {
+    if (
+      !isPrefix(
+        current.privateState.legs[leg].observations,
+        next.privateState.legs[leg].observations
+      ) ||
+      (current.evidence.legs[leg].mintState === "SPENT" &&
+        next.evidence.legs[leg].mintState !== "SPENT")
+    ) throw new Error(`Trade ${leg} mint evidence regressed`);
   }
 }
 
@@ -521,6 +1609,7 @@ export class TradeSessionRepository {
         if (session.updatedAt < current.updatedAt) {
           throw new Error("Trade session update time regressed");
         }
+        assertMonotonicUpdate(current, session);
         sessions[index] = clone(session);
       }
       assertSessions(sessions);

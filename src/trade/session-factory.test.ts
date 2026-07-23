@@ -208,8 +208,21 @@ describe("trade session factory", () => {
       terms: { baseAmount: "1000", quoteAmount: "20" },
       privateState: {
         preimage: null,
+        htlcHash: null,
         settlementTranscriptHash: null,
-        inbox: { listEventId: null, registeredAt: null, relays: [] },
+        inbox: {
+          status: "unregistered",
+          quorum: 2,
+          event: null,
+          discoveryRelays: [],
+          inboxRelays: [],
+          receipts: [],
+          readbacks: [],
+          stagedAt: null,
+          acknowledgedAt: null,
+          registeredAt: null
+        },
+        pendingIncoming: null,
         transcript: { nextSequence: "0", lastRumorId: null }
       }
     });
@@ -232,18 +245,42 @@ describe("trade session factory", () => {
       role: "maker",
       phase: "negotiating",
       offeredOrderHead: "44".repeat(32),
-      evidence: { commitments: [entropy(3).htlcMaterial().hash] },
+      evidence: {
+        commitments: [entropy(3).htlcMaterial().hash],
+        reservation: {
+          proposalSealId: opened.seal.id,
+          takerCommitment: null,
+          abortSeal: null
+        }
+      },
       privateState: {
         preimage: entropy(3).htlcMaterial().preimage,
+        htlcHash: entropy(3).htlcMaterial().hash,
         settlementTranscriptHash: null,
-        inbox: { listEventId: null, registeredAt: null, relays: [] },
+        inbox: {
+          status: "unregistered",
+          quorum: 2,
+          event: null,
+          discoveryRelays: [],
+          inboxRelays: [],
+          receipts: [],
+          readbacks: [],
+          stagedAt: null,
+          acknowledgedAt: null,
+          registeredAt: null
+        },
+        pendingIncoming: null,
         transcript: {
           nextSequence: "1",
           lastRumorId: opened.rumor.id,
           lastMessageId: opened.message.message_id,
           lastTranscriptHash: opened.transcriptHash,
-          acceptedRumorIds: [opened.rumor.id],
-          acceptedMessageIds: [opened.message.message_id],
+          accepted: [{
+            sequence: "0",
+            messageId: opened.message.message_id,
+            rumorId: opened.rumor.id,
+            transcriptHash: opened.transcriptHash
+          }],
           choreography: { phase: "awaiting_reserve_accept" }
         }
       }

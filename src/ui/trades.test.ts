@@ -40,6 +40,13 @@ const trade: PublicTradeView = {
     makerPubkey: "22".repeat(32),
     commitments: ["44".repeat(32)],
     mintStates: ["base:UNSPENT", "quote:UNSPENT"],
+    reserveTransitionId: "44".repeat(32),
+    fillTransitionId: null,
+    reservation: {
+      proposalSealId: "99".repeat(32),
+      takerCommitment: "aa".repeat(32),
+      abortSealId: null
+    },
     legs: {
       base: {
         tokenCommitment: "55".repeat(32),
