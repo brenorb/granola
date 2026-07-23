@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createOrderState } from "./model.js";
+import { createOrderState, fillOrder, reserveOrder } from "./model.js";
 import {
   createProjectionTemplate,
+  createStateTransitionTemplate,
   createTransitionTemplate,
   parseCreateTransitionEvent,
   parseProjectionEvent,
+  parseTransitionEvent,
   type NostrEvent
 } from "./events.js";
 
@@ -135,5 +137,91 @@ describe("Granola Nostr order events", () => {
       tags: event.tags.map((tag) => tag[0] === "m" ? ["m", "0".repeat(64)] : tag)
     };
     await expect(parseProjectionEvent(forged, () => true)).rejects.toThrow("market index");
+  });
+
+  it("builds and validates a reserve then fill chain with public commitments", async () => {
+    const initial = askState();
+    const create: NostrEvent = {
+      ...createTransitionTemplate(initial, maker, "create-op"),
+      id: transitionId,
+      pubkey: maker,
+      sig: signature
+    };
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "2000",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_900,
+      proposalEventId: "1".repeat(64),
+      takerCommitment: "2".repeat(64)
+    });
+    const reserveTemplate = createStateTransitionTemplate(
+      reserved,
+      maker,
+      "reserve-op",
+      "reserve",
+      create
+    );
+    expect(reserveTemplate).toMatchObject({
+      kind: 78,
+      created_at: 1_700_000_100,
+      tags: expect.arrayContaining([
+        ["op", "reserve"],
+        ["e", transitionId]
+      ])
+    });
+    const reserve: NostrEvent = {
+      ...reserveTemplate,
+      id: "e".repeat(64),
+      pubkey: maker,
+      sig: signature
+    };
+    expect(parseTransitionEvent(reserve, () => true)).toMatchObject({
+      operation: "reserve",
+      revision: "1",
+      previous: transitionId,
+      state: { status: "reserved", reserved_amount: "2000" }
+    });
+    const reservedProjection = await createProjectionTemplate(reserved, reserve);
+    expect((await parseProjectionEvent({
+      ...reservedProjection,
+      id: "f".repeat(64),
+      pubkey: maker,
+      sig: signature
+    }, () => true)).state.status).toBe("reserved");
+
+    const filled = fillOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      amount: "2000"
+    });
+    const fillTemplate = createStateTransitionTemplate(
+      filled,
+      maker,
+      "fill-op",
+      "fill",
+      reserve,
+      {
+        settlement_hash: "3".repeat(64),
+        base_token_commitment: "4".repeat(64),
+        quote_token_commitment: "5".repeat(64)
+      }
+    );
+    const parsed = parseTransitionEvent({
+      ...fillTemplate,
+      id: "6".repeat(64),
+      pubkey: maker,
+      sig: signature
+    }, () => true);
+    expect(parsed).toMatchObject({
+      operation: "fill",
+      revision: "2",
+      previous: reserve.id,
+      state: { status: "filled", remaining_amount: "0" },
+      evidence: {
+        settlement_hash: "3".repeat(64),
+        base_token_commitment: "4".repeat(64),
+        quote_token_commitment: "5".repeat(64)
+      }
+    });
   });
 });
