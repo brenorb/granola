@@ -10,14 +10,6 @@ export interface SettlementAmountGuidance {
   higherQuoteAmount: string;
 }
 
-export interface SettlementAmountRounding {
-  direction: "down" | "up";
-  originalAmount: string;
-  roundedAmount: string;
-  quoteAmount: string;
-  deltaAmount: string;
-}
-
 function gcd(left: bigint, right: bigint): bigint {
   while (right !== 0n) [left, right] = [right, left % right];
   return left;
@@ -73,33 +65,5 @@ export function settlementAmountGuidance(
     lowerQuoteAmount: lowerQuoteAmount.toString(),
     higherCompatibleAmount: higher.toString(),
     higherQuoteAmount: higherQuoteAmount.toString()
-  };
-}
-
-/**
- * Pick the settlement-safe size to apply in the human order form. Prefer
- * rounding down so an order never commits more than the user entered. If the
- * amount is smaller than one compatible multiple, round up so it remains a
- * valid non-zero order rather than silently becoming zero.
- */
-export function settlementAmountRounding(
-  baseAmount: string,
-  price: RationalPrice
-): SettlementAmountRounding | null {
-  const guidance = settlementAmountGuidance(baseAmount, price);
-  if (guidance === null) return null;
-  const amount = BigInt(baseAmount);
-  const roundedAmount = guidance.lowerCompatibleAmount.length > 0
-    ? BigInt(guidance.lowerCompatibleAmount)
-    : BigInt(guidance.higherCompatibleAmount);
-  const quoteAmount = guidance.lowerCompatibleAmount.length > 0
-    ? guidance.lowerQuoteAmount
-    : guidance.higherQuoteAmount;
-  return {
-    direction: guidance.lowerCompatibleAmount.length > 0 ? "down" : "up",
-    originalAmount: baseAmount,
-    roundedAmount: roundedAmount.toString(),
-    quoteAmount,
-    deltaAmount: (roundedAmount - amount).toString()
   };
 }

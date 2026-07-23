@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fiatPerBtcPrice,
-  settlementAmountGuidance,
-  settlementAmountRounding
+  settlementAmountGuidance
 } from "./human-price.js";
 
 describe("human fiat/BTC price", () => {
@@ -35,25 +34,4 @@ describe("human fiat/BTC price", () => {
       .toBeNull();
   });
 
-  it("rounds down to preserve the entered order size", () => {
-    expect(settlementAmountRounding("2000", fiatPerBtcPrice("49600.00")))
-      .toEqual({
-        direction: "down",
-        originalAmount: "2000",
-        roundedAmount: "1875",
-        quoteAmount: "93",
-        deltaAmount: "-125"
-      });
-  });
-
-  it("rounds a too-small amount up to the first valid non-zero size", () => {
-    expect(settlementAmountRounding("1", fiatPerBtcPrice("49600.00")))
-      .toEqual({
-        direction: "up",
-        originalAmount: "1",
-        roundedAmount: "625",
-        quoteAmount: "31",
-        deltaAmount: "624"
-      });
-  });
 });

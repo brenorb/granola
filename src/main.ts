@@ -8,8 +8,7 @@ import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import {
   fiatPerBtcPrice,
-  settlementAmountGuidance,
-  settlementAmountRounding
+  settlementAmountGuidance
 } from "./order/human-price.js";
 import { assertOrderFunding } from "./order/funding.js";
 import type { OrderRecord } from "./order/model.js";
@@ -327,43 +326,22 @@ function decimalMinorUnits(numerator: string, denominator: string): string {
   return `${integerPart}.${fraction.replace(/0+$/, "")}${remainder !== 0n ? "…" : ""}`;
 }
 
-function usdCents(value: string): string {
-  const cents = BigInt(value);
-  const whole = cents / 100n;
-  const fraction = (cents % 100n).toString().padStart(2, "0");
-  return `$${whole.toString()}.${fraction}`;
-}
-
-function adjustmentMagnitude(value: string): string {
-  const delta = BigInt(value);
-  return groupedInteger((delta < 0n ? -delta : delta).toString());
-}
-
-function updateOrderSettlementHint(applyRounding = false): void {
+function updateOrderSettlementHint(): void {
   orderAmountInput.setCustomValidity("");
   orderSettlementHint.textContent = defaultOrderSettlementHint;
   try {
     const price = fiatPerBtcPrice(orderPriceInput.value);
     const guidance = settlementAmountGuidance(orderAmountInput.value, price);
     if (guidance === null) return;
-    const rounding = settlementAmountRounding(orderAmountInput.value, price);
-    if (rounding === null) return;
     const currentQuote = decimalMinorUnits(
       guidance.currentQuoteNumerator,
       guidance.currentQuoteDenominator
     );
-    const action = rounding.direction === "down" ? "round down" : "round up";
-    const resultingSize = `${groupedInteger(rounding.roundedAmount)} SAT → ` +
-      `${groupedInteger(rounding.quoteAmount)} cents (${usdCents(rounding.quoteAmount)})`;
-    const message = applyRounding
-      ? `Adjusted ${groupedInteger(rounding.originalAmount)} SAT ${action} by ` +
-        `${adjustmentMagnitude(rounding.deltaAmount)} SAT to ${resultingSize}. ` +
-        `The signed order now uses an integer settlement amount.`
-      : `At ${orderPriceInput.value} USD/BTC, ${groupedInteger(orderAmountInput.value)} SAT ` +
-        `produces ${currentQuote} USD cents, which is not whole. ` +
-        `I will ${action} to ${resultingSize} (multiples of ` +
-        `${groupedInteger(guidance.baseMultiple)} SAT) when this field is committed.`;
-    if (applyRounding) orderAmountInput.value = rounding.roundedAmount;
+    const message = `At ${orderPriceInput.value} USD/BTC, ${groupedInteger(orderAmountInput.value)} SAT ` +
+      `produces ${currentQuote} USD cents, which is not whole. ` +
+      `Change the price or enter a compatible amount (a multiple of ` +
+      `${groupedInteger(guidance.baseMultiple)} SAT). Your amount will not be changed automatically.`;
+    orderAmountInput.setCustomValidity("Choose a price or SAT amount that produces a whole-cent settlement.");
     orderSettlementHint.textContent = message;
   } catch {
     // Native input patterns and the submit handler provide the authoritative error.
@@ -372,8 +350,8 @@ function updateOrderSettlementHint(applyRounding = false): void {
 
 orderAmountInput.addEventListener("input", () => updateOrderSettlementHint());
 orderPriceInput.addEventListener("input", () => updateOrderSettlementHint());
-orderAmountInput.addEventListener("change", () => updateOrderSettlementHint(true));
-orderPriceInput.addEventListener("change", () => updateOrderSettlementHint(true));
+orderAmountInput.addEventListener("change", () => updateOrderSettlementHint());
+orderPriceInput.addEventListener("change", () => updateOrderSettlementHint());
 orderAmountInput.addEventListener("invalid", () => {
   if (orderAmountInput.validationMessage.length > 0) {
     report(orderAmountInput.validationMessage, true);
@@ -389,7 +367,7 @@ executionInput.addEventListener("change", () => {
 
 orderForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  updateOrderSettlementHint(true);
+  updateOrderSettlementHint();
   const form = new FormData(event.currentTarget as HTMLFormElement);
   void (async () => {
     const side = String(form.get("side"));
