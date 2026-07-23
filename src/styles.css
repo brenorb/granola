@@ -17,6 +17,9 @@ button, select, input, textarea { border-radius: 0; }
 button { border: 1px solid var(--ink); background: var(--acid); padding: .8rem 1rem; cursor: pointer; box-shadow: 3px 3px 0 var(--ink); font: 700 .72rem/1 "Courier New", monospace; text-transform: uppercase; letter-spacing: .05em; }
 button:hover { transform: translate(1px,1px); box-shadow: 2px 2px 0 var(--ink); }
 button:disabled { cursor: wait; opacity: .6; transform: none; }
+button[data-busy="true"] { position: relative; padding-left: 2.1rem; }
+button[data-busy="true"]::before { position: absolute; left: .75rem; width: .75rem; height: .75rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; content: ""; animation: granola-spin .7s linear infinite; }
+@keyframes granola-spin { to { transform: rotate(360deg); } }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
 button.quiet { background: transparent; box-shadow: none; }
 

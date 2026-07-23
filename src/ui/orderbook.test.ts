@@ -105,7 +105,7 @@ describe("order-book presentation", () => {
     expect(button?.textContent).toBe("Settling…");
     expect(button?.disabled).toBe(true);
     expect(amount?.value).toBe("20");
-    expect(take).toHaveBeenCalledWith(best, "20");
+    expect(take).toHaveBeenCalledWith(best, "20", expect.any(HTMLButtonElement));
   });
 
   it("offers bid taking and exposes cancellation only for owned orders", async () => {
@@ -132,7 +132,7 @@ describe("order-book presentation", () => {
       `[data-order-id="${askLow}"] [data-cancel-order]`
     );
     cancelButton?.click();
-    expect(cancel).toHaveBeenCalledWith(ask);
+    expect(cancel).toHaveBeenCalledWith(ask, expect.any(HTMLButtonElement));
     expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-cancel-order]`))
       .toBeNull();
   });
@@ -170,7 +170,7 @@ describe("order-book presentation", () => {
 
     partialAmount.value = "25";
     partialRow.querySelector<HTMLButtonElement>("[data-take-order]")!.click();
-    expect(take).toHaveBeenCalledWith(partial, "25");
+    expect(take).toHaveBeenCalledWith(partial, "25", expect.any(HTMLButtonElement));
   });
 
   it("preserves integer prices above Number.MAX_SAFE_INTEGER", async () => {

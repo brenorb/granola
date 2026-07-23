@@ -26,7 +26,7 @@ describe("pending order publications", () => {
     expect(root.textContent).toContain("11111111…11111111");
     expect(root.textContent).not.toContain(pending.makerPubkey);
     root.querySelector("button")?.click();
-    expect(retry).toHaveBeenCalledWith(pending.orderId);
+    expect(retry).toHaveBeenCalledWith(pending.orderId, expect.any(HTMLButtonElement));
   });
 
   it("hides the outbox when no retry is pending", () => {

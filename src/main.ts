@@ -29,6 +29,7 @@ import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
 import { renderTrades } from "./ui/trades.js";
+import { endButtonFeedback, withButtonFeedback } from "./ui/button-feedback.js";
 import {
   renderActivityLog,
   type ActivityDetail,
@@ -269,29 +270,39 @@ const takeRequestIds = new Map<string, string>();
 
 function takeOrderFromBook(
   order: OrderRecord,
-  fillBaseAmount: string
+  fillBaseAmount: string,
+  button?: HTMLButtonElement
 ): void {
   const retryKey = `${order.address}:${order.eventId}:${fillBaseAmount}`;
   const requestId = takeRequestIds.get(retryKey) ?? crypto.randomUUID();
   takeRequestIds.set(retryKey, requestId);
-  void granola.takeOrder({
-    requestId,
-    address: order.address,
-    expectedProjectionId: order.eventId,
-    expectedRevision: order.state.revision,
-    fillBaseAmount
-  }).then(async (trade) => {
+  const task = async (): Promise<void> => {
+    const trade = await granola.takeOrder({
+      requestId,
+      address: order.address,
+      expectedProjectionId: order.eventId,
+      expectedRevision: order.state.revision,
+      fillBaseAmount
+    });
     tradeTrace(trade);
     report("Order taken; settling automatically");
     const result = await granola.runUntilSettled(trade.sessionId);
     await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
     report(`Swap filled after ${result.checkpoints.length} verified checkpoints`);
-  }).catch((error: unknown) => report(messageOf(error), true))
+  };
+  const request = button
+    ? withButtonFeedback(button, "Settling…", task)
+    : task();
+  void request.catch((error: unknown) => report(messageOf(error), true))
     .finally(() => takeRequestIds.delete(retryKey));
 }
 
-function retryPendingPublication(orderId: string): void {
-  void granola.retryOrderPublication(orderId)
+function retryPendingPublication(orderId: string, button?: HTMLButtonElement): void {
+  const task = () => granola.retryOrderPublication(orderId);
+  const request = button
+    ? withButtonFeedback(button, "Retrying…", task)
+    : task();
+  void request
     .then(async (publication) => {
       await Promise.all([
         refreshOrderBook(),
@@ -307,12 +318,16 @@ function retryPendingPublication(orderId: string): void {
     });
 }
 
-function cancelOrderFromBook(order: OrderRecord): void {
-  void granola.cancelOrder({
+function cancelOrderFromBook(order: OrderRecord, button?: HTMLButtonElement): void {
+  const task = () => granola.cancelOrder({
     address: order.address,
     expectedProjectionId: order.eventId,
     expectedRevision: order.state.revision
-  }).then(async () => {
+  });
+  const request = button
+    ? withButtonFeedback(button, "Canceling…", task)
+    : task();
+  void request.then(async () => {
     await Promise.all([
       refreshOrderBook(),
       refreshPendingPublications(),
@@ -419,30 +434,35 @@ async function requestAndClaimMint(input: {
   mintUrl: string;
   unit: string;
   amount: string;
-}): Promise<void> {
-  const quote = await granola.requestMint(input);
-  log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
-  report("Quote created; waiting for the fake mint to mark it paid");
+}, button?: HTMLButtonElement): Promise<void> {
+  const task = async (): Promise<void> => {
+    const quote = await granola.requestMint(input);
+    log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
+    report("Quote created; waiting for the fake mint to mark it paid");
 
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 1000));
-    const state = await granola.claimMint(quote.ref);
-    await refresh(state);
-    const current = state.quotes.find((item) => item.ref === quote.ref);
-    if (current?.state === "ISSUED") {
-      log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
-      report("Fake test tokens added to this browser wallet");
-      return;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      const state = await granola.claimMint(quote.ref);
+      await refresh(state);
+      const current = state.quotes.find((item) => item.ref === quote.ref);
+      if (current?.state === "ISSUED") {
+        log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
+        report("Fake test tokens added to this browser wallet");
+        return;
+      }
     }
-  }
-  throw new Error("The quote did not become paid within 60 seconds");
+    throw new Error("The quote did not become paid within 60 seconds");
+  };
+  return button
+    ? withButtonFeedback(button, "Funding…", task)
+    : task();
 }
 
-renderMintActions(byId("mint-actions"), (request) => {
+renderMintActions(byId("mint-actions"), (request, button) => {
   void requestAndClaimMint({
     ...request,
     mintUrl: defaultMintForUnit(request.unit)
-  }).catch((error: unknown) => report(messageOf(error), true));
+  }, button).catch((error: unknown) => report(messageOf(error), true));
 });
 
 function runAgentSettlement(sessionId: string): void {
@@ -479,16 +499,21 @@ if (requestedAgentRun !== null) runAgentSettlement(requestedAgentRun);
 byId("profile-label").textContent = profile === "default"
   ? "Local browser wallet"
   : `Local wallet workspace: ${profile}`;
-byId("refresh").addEventListener("click", () => {
-  void refresh().then(() => report("Wallet state refreshed")).catch((error: unknown) => report(messageOf(error), true));
+const refreshButton = byId<HTMLButtonElement>("refresh");
+refreshButton.addEventListener("click", () => {
+  void withButtonFeedback(refreshButton, "Refreshing…", () => refresh())
+    .then(() => report("Wallet state refreshed"))
+    .catch((error: unknown) => report(messageOf(error), true));
 });
-byId("refresh-orderbook").addEventListener("click", () => {
-  void refreshOrderBook()
+const refreshOrderbookButton = byId<HTMLButtonElement>("refresh-orderbook");
+refreshOrderbookButton.addEventListener("click", () => {
+  void withButtonFeedback(refreshOrderbookButton, "Refreshing…", () => refreshOrderBook())
     .then(() => report("Order book refreshed from public relays"))
     .catch((error: unknown) => report(messageOf(error), true));
 });
-byId("refresh-trades").addEventListener("click", () => {
-  void refreshTrades()
+const refreshTradesButton = byId<HTMLButtonElement>("refresh-trades");
+refreshTradesButton.addEventListener("click", () => {
+  void withButtonFeedback(refreshTradesButton, "Checking…", () => refreshTrades())
     .then(() => report("Swap sessions refreshed from durable checkpoints"))
     .catch((error: unknown) => report(messageOf(error), true));
 });
@@ -500,6 +525,8 @@ function requiredOrderInput(name: string): HTMLInputElement {
 }
 const orderAmountInput = requiredOrderInput("amount");
 const orderPriceInput = requiredOrderInput("fiatPrice");
+const orderSubmitButton = orderForm.querySelector<HTMLButtonElement>("button[type=submit]");
+if (orderSubmitButton === null) throw new Error("Missing order submit button");
 
 const defaultOrderSettlementHint = orderSettlementHint.textContent ?? "";
 function groupedInteger(value: string): string {
@@ -558,7 +585,7 @@ orderForm.addEventListener("submit", (event) => {
   event.preventDefault();
   updateOrderSettlementHint();
   const form = new FormData(event.currentTarget as HTMLFormElement);
-  void (async () => {
+  void withButtonFeedback(orderSubmitButton, "Posting…", async () => {
     const side = String(form.get("side"));
     const days = Number(String(form.get("days")));
     if (side !== "buy" && side !== "sell") throw new Error("Unknown order side");
@@ -584,14 +611,15 @@ orderForm.addEventListener("submit", (event) => {
     ]);
     await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
     report(`Order published with ${acknowledgements} relay acknowledgements`);
-  })().catch(async (error: unknown) => {
+  }).catch(async (error: unknown) => {
     await refreshPendingPublications();
     report(messageOf(error), true);
   });
 });
 
-byId("backup").addEventListener("click", () => {
-  void (async () => {
+const backupButton = byId<HTMLButtonElement>("backup");
+backupButton.addEventListener("click", () => {
+  void withButtonFeedback(backupButton, "Preparing…", async () => {
     const backup = await granola.createBackup();
     const data = JSON.stringify(backup, null, 2);
     const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
@@ -602,17 +630,19 @@ byId("backup").addEventListener("click", () => {
     URL.revokeObjectURL(url);
     log(`Downloaded a bearer backup containing ${backup.tokens.length} token pocket(s)`);
     report("Bearer backup downloaded — keep it private");
-  })().catch((error: unknown) => report(messageOf(error), true));
+  }).catch((error: unknown) => report(messageOf(error), true));
 });
 
-byId("clear-wallet").addEventListener("click", () => {
-  void granola.clearWallet("DELETE TEST WALLET")
+const clearWalletButton = byId<HTMLButtonElement>("clear-wallet");
+clearWalletButton.addEventListener("click", () => {
+  void withButtonFeedback(clearWalletButton, "Erasing…", () => granola.clearWallet("DELETE TEST WALLET"))
     .then(async () => { await refresh(); log("Erased this profile’s local wallet"); report("Local wallet erased"); })
     .catch((error: unknown) => report(messageOf(error), true));
 });
 
-byId("reset-profile").addEventListener("click", () => {
-  void granola.resetProfile("RESET GRANOLA PROFILE")
+const resetProfileButton = byId<HTMLButtonElement>("reset-profile");
+resetProfileButton.addEventListener("click", () => {
+  void withButtonFeedback(resetProfileButton, "Restarting…", () => granola.resetProfile("RESET GRANOLA PROFILE"))
     .then(() => window.location.reload())
     .catch((error: unknown) => report(messageOf(error), true));
 });

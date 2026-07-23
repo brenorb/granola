@@ -3,6 +3,7 @@ import type {
   OrderBook,
   OrderRecord
 } from "../order/model.js";
+import { beginButtonFeedback } from "./button-feedback.js";
 
 export type OrderBookRenderState =
   | { status: "loading" }
@@ -10,8 +11,8 @@ export type OrderBookRenderState =
   | { status: "ready"; book: OrderBook };
 
 export interface OrderBookRenderOptions {
-  onTake?: (order: OrderRecord, fillBaseAmount: string) => void;
-  onCancel?: (order: OrderRecord) => void;
+  onTake?: (order: OrderRecord, fillBaseAmount: string, button: HTMLButtonElement) => void;
+  onCancel?: (order: OrderRecord, button: HTMLButtonElement) => void;
   canCancel?: (order: OrderRecord) => boolean;
 }
 
@@ -151,9 +152,8 @@ function orderRow(
   if (options.onTake) take.addEventListener("click", () => {
     validateTakeAmount(amount, order);
     if (!amount.reportValidity()) return;
-    take.disabled = true;
-    take.textContent = "Settling…";
-    options.onTake?.(order, amount.value);
+    beginButtonFeedback(take, "Settling…");
+    options.onTake?.(order, amount.value, take);
   });
   action.append(amount, take);
   action.append(orderInfo(order));
@@ -162,7 +162,7 @@ function orderRow(
     cancel.type = "button";
     cancel.className = "quiet";
     cancel.dataset.cancelOrder = "true";
-    cancel.addEventListener("click", () => options.onCancel?.(order));
+    cancel.addEventListener("click", () => options.onCancel?.(order, cancel));
     action.append(cancel);
   }
   row.append(action);

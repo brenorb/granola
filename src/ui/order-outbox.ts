@@ -16,7 +16,7 @@ function shortId(value: string): string {
 export function renderPendingPublications(
   root: HTMLElement,
   publications: PublicOrderPublication[],
-  retry: (orderId: string) => void,
+  retry: (orderId: string, button: HTMLButtonElement) => void,
   relayCount = 3
 ): void {
   root.replaceChildren();
@@ -35,7 +35,7 @@ export function renderPendingPublications(
     );
     const button = element("button", "Retry same signed projection");
     button.type = "button";
-    button.addEventListener("click", () => retry(publication.orderId));
+    button.addEventListener("click", () => retry(publication.orderId, button));
     item.append(description, button);
     list.append(item);
   }
