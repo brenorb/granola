@@ -124,8 +124,6 @@ textarea { resize: vertical; word-break: break-all; }
 .preview { min-height: 3.2rem; padding: .75rem; border-left: 4px solid var(--acid); background: rgba(245,241,229,.65); }
 .check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: .6rem; text-transform: none; }
 .check input { width: auto; }
-.quote { display: grid; gap: .6rem; margin-top: 1rem; padding: 1rem; background: var(--ink); color: var(--paper); }
-.quote code { max-height: 6rem; overflow: auto; word-break: break-all; }
 details { margin-top: 2rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 summary { cursor: pointer; font: 700 .72rem "Courier New", monospace; text-transform: uppercase; }
 details form { margin-top: 1rem; }

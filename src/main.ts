@@ -354,14 +354,6 @@ async function requestAndClaimMint(input: {
   amount: string;
 }): Promise<void> {
   const quote = await granola.requestMint(input);
-  const quoteBox = byId("quote");
-  quoteBox.hidden = false;
-  quoteBox.replaceChildren();
-  const heading = document.createElement("strong");
-  heading.textContent = `${formatUnitAmount(quote.amount, quote.unit)} · ${quote.state}`;
-  const invoice = document.createElement("code");
-  invoice.textContent = quote.request;
-  quoteBox.append(heading, invoice);
   log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
   report("Quote created; waiting for the fake mint to mark it paid");
 
@@ -370,7 +362,6 @@ async function requestAndClaimMint(input: {
     const state = await granola.claimMint(quote.ref);
     await refresh(state);
     const current = state.quotes.find((item) => item.ref === quote.ref);
-    if (current) heading.textContent = `${formatUnitAmount(current.amount, current.unit)} · ${current.state}`;
     if (current?.state === "ISSUED") {
       log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
       report("Fake test tokens added to this browser wallet");
@@ -435,8 +426,6 @@ byId("refresh-trades").addEventListener("click", () => {
     .catch((error: unknown) => report(messageOf(error), true));
 });
 const orderForm = byId<HTMLFormElement>("order-form");
-const mintInput = byId<HTMLSelectElement>("mint-url");
-const mintUnitInput = byId<HTMLSelectElement>("mint-unit");
 function requiredOrderInput(name: string): HTMLInputElement {
   const input = orderForm.querySelector<HTMLInputElement>(`input[name="${name}"]`);
   if (input === null) throw new Error(`Missing order input ${name}`);
@@ -498,12 +487,6 @@ orderAmountInput.addEventListener("invalid", () => {
 });
 updateOrderSettlementHint();
 
-mintUnitInput.addEventListener("change", () => {
-  mintInput.value = mintUnitInput.value === "usd"
-    ? "https://nofee.testnut.cashu.space"
-    : "https://testnut.cashu.space";
-});
-
 orderForm.addEventListener("submit", (event) => {
   event.preventDefault();
   updateOrderSettlementHint();
@@ -531,16 +514,6 @@ orderForm.addEventListener("submit", (event) => {
     await refreshPendingPublications();
     report(messageOf(error), true);
   });
-});
-
-byId<HTMLFormElement>("mint-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget as HTMLFormElement);
-  const mintUrl = String(form.get("mintUrl"));
-  const unit = String(form.get("unit"));
-  const amount = String(form.get("amount"));
-  void requestAndClaimMint({ mintUrl, unit, amount })
-    .catch((error: unknown) => report(messageOf(error), true));
 });
 
 byId("backup").addEventListener("click", () => {

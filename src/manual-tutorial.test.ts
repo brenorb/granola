@@ -7,8 +7,8 @@ describe("manual testnet swap tutorial", () => {
   it("keeps the complete shared-page happy-path recipe", () => {
     expect(tutorial).toContain("?wallet=maker-tutorial");
     expect(tutorial).toContain("?wallet=taker-tutorial");
-    expect(tutorial).toContain("100 SAT");
-    expect(tutorial).toContain("USD 0.10");
+    expect(tutorial).toContain("Fund SAT");
+    expect(tutorial).toContain("Fund USD");
     expect(tutorial).toContain("automatically registers and listens");
     expect(tutorial).not.toContain("Sync maker listener");
     expect(tutorial).toContain("20 SAT");
@@ -28,6 +28,7 @@ describe("manual testnet swap tutorial", () => {
     );
     expect(html).toContain("Manual test tutorial");
     expect(html).toContain('id="order-settlement-hint"');
+    expect(html).not.toContain('id="mint-form"');
   });
 
   it("keeps the public market header focused on the wallet and order book", () => {

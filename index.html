@@ -95,30 +95,6 @@
       </section>
 
       <div class="work-grid">
-        <section class="panel" aria-labelledby="mint-title">
-            <p class="eyebrow">04 / Acquire</p>
-          <h2 id="mint-title">Mint fake tokens</h2>
-          <p class="hint">Use the compact SAT or USD actions above for a 10,000-unit issue, or open the full form for another amount or mint.</p>
-          <details id="mint-details">
-            <summary>Open custom mint form</summary>
-            <form id="mint-form">
-              <label>Test mint
-                <select id="mint-url" name="mintUrl">
-                  <option value="https://testnut.cashu.space">Testnut / fee test</option>
-                  <option value="https://nofee.testnut.cashu.space">Testnut / no fee</option>
-                </select>
-              </label>
-              <div class="field-pair">
-                <label>Unit<select id="mint-unit" name="unit"><option value="sat">SAT</option><option value="usd">USD</option></select></label>
-                <label>Minor units<input name="amount" inputmode="numeric" pattern="[1-9][0-9]*" value="10000" required /></label>
-              </div>
-              <p class="hint">SAT is satoshis. USD uses cents. The mint advertises the available units and limits.</p>
-              <button type="submit">Request &amp; claim quote</button>
-            </form>
-            <div id="quote" class="quote" hidden></div>
-          </details>
-        </section>
-
         <section class="panel" aria-labelledby="custody-title">
           <p class="eyebrow">04 / Custody</p>
           <h2 id="custody-title">Back up or erase</h2>
