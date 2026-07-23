@@ -1,6 +1,6 @@
 # ADR 0001: Nostr events for the Granola order book
 
-- Status: proposed
+- Status: accepted for the testnet prototype
 - Date: 2026-07-23
 - Decision owners: Granola implementers
 
