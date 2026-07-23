@@ -286,7 +286,7 @@ describe("BrowserTradeController", () => {
       .mockResolvedValueOnce(view())
       .mockResolvedValueOnce(view());
     api.advanceTrade
-      .mockRejectedValueOnce(new Error("No next private trade message is available"))
+      .mockRejectedValueOnce(new Error("No private trade message is available"))
       .mockResolvedValueOnce(view(1))
       .mockResolvedValueOnce({ ...view(2), phase: "filled" });
 

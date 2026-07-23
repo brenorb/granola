@@ -89,6 +89,11 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const PEER_WAIT_MESSAGES = new Set([
+  "No private trade message is available",
+  "No next private trade message is available"
+]);
+
 export class BrowserTradeController {
   private readonly api: BrowserTradeControllerOptions["api"];
   private readonly sessions: BrowserTradeControllerOptions["sessions"];
@@ -185,7 +190,7 @@ export class BrowserTradeController {
         actions += 1;
         idlePolls = 0;
       } catch (error) {
-        if (messageOf(error) !== "No next private trade message is available") {
+        if (!PEER_WAIT_MESSAGES.has(messageOf(error))) {
           throw error;
         }
         idlePolls += 1;
