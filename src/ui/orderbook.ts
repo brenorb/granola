@@ -61,7 +61,10 @@ function infoLine(label: string, value: string, title?: string): HTMLElement {
   return line;
 }
 
-function orderInfo(order: OrderRecord): HTMLDetailsElement {
+function orderInfo(
+  order: OrderRecord,
+  onCancel?: (button: HTMLButtonElement) => void
+): HTMLDetailsElement {
   const details = element("details");
   details.className = "order-info";
   details.dataset.orderInfo = "true";
@@ -83,6 +86,14 @@ function orderInfo(order: OrderRecord): HTMLDetailsElement {
     infoLine("Expires", expiry),
     infoLine("Order", `${order.state.order_id.slice(0, 8)}…`, order.state.order_id)
   );
+  if (onCancel) {
+    const cancel = element("button", "Cancel order");
+    cancel.type = "button";
+    cancel.className = "quiet order-info__cancel";
+    cancel.dataset.cancelOrder = "true";
+    cancel.addEventListener("click", () => onCancel(cancel));
+    popup.append(cancel);
+  }
   details.append(summary, popup);
   return details;
 }
@@ -163,15 +174,12 @@ function orderRow(
     options.onTake?.(order, amount.value, take);
   });
   action.append(amount, take);
-  action.append(orderInfo(order));
-  if (options.canCancel?.(order) && options.onCancel) {
-    const cancel = element("button", "Cancel order");
-    cancel.type = "button";
-    cancel.className = "quiet";
-    cancel.dataset.cancelOrder = "true";
-    cancel.addEventListener("click", () => options.onCancel?.(order, cancel));
-    action.append(cancel);
-  }
+  action.append(orderInfo(
+    order,
+    options.canCancel?.(order) && options.onCancel
+      ? (cancel) => options.onCancel?.(order, cancel)
+      : undefined
+  ));
   row.append(action);
   return row;
 }
