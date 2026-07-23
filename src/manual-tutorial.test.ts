@@ -47,4 +47,12 @@ describe("manual testnet swap tutorial", () => {
     expect(html).not.toContain("Minimum fill");
     expect(html).not.toContain('name="minimumFillAmount"');
   });
+
+  it("keeps demo wallet deletion to one click", () => {
+    expect(html).toContain('id="clear-wallet"');
+    expect(html).toContain('id="reset-profile"');
+    expect(html).not.toContain('name="confirmation"');
+    expect(html).not.toContain("DELETE TEST WALLET");
+    expect(html).not.toContain("RESET GRANOLA PROFILE");
+  });
 });
