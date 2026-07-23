@@ -254,6 +254,46 @@ export class NostrOrderService {
     return this.publishStaged(await this.stage(state));
   }
 
+  async loadCurrentTransition(address: string, expectedHeadId: string): Promise<NostrEvent> {
+    const parsed = new Map<string, { event: NostrEvent; record: TransitionRecord }>();
+    for (const event of await this.relays.queryTransitions([address])) {
+      try {
+        const record = parseTransitionEvent(event, this.verify);
+        if (record.address === address) parsed.set(event.id, { event, record });
+      } catch {
+        // Invalid relay data cannot become an authoritative transition.
+      }
+    }
+    const roots = [...parsed.values()].filter(({ record }) => record.previous === null);
+    if (roots.length !== 1 || roots[0]?.record.operation !== "create") {
+      throw new Error("Order transition chain has competing or invalid roots");
+    }
+    const children = new Map<string, Array<{ event: NostrEvent; record: TransitionRecord }>>();
+    for (const item of parsed.values()) {
+      if (item.record.previous === null) continue;
+      const successors = children.get(item.record.previous) ?? [];
+      successors.push(item);
+      children.set(item.record.previous, successors);
+    }
+    if ([...children.values()].some((successors) => successors.length !== 1)) {
+      throw new Error("Order transition chain forked");
+    }
+    const visited = new Set<string>();
+    let current = roots[0]!;
+    while (true) {
+      if (visited.has(current.event.id)) throw new Error("Order transition chain cycles");
+      visited.add(current.event.id);
+      const successors = children.get(current.event.id) ?? [];
+      if (successors.length === 0) break;
+      const next = successors[0]!;
+      assertLinearStep(current, next);
+      current = next;
+    }
+    if (visited.size !== parsed.size) throw new Error("Order transition chain is incomplete");
+    if (current.event.id !== expectedHeadId) throw new Error("Expected transition is not the current head");
+    return structuredClone(current.event);
+  }
+
   async loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook> {
     const selectedMarket = await marketId(market);
     const events = await this.relays.queryProjections(selectedMarket, 0);

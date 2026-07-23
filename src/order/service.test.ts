@@ -132,6 +132,23 @@ describe("Nostr order service", () => {
     expect(JSON.parse(fillPublication.projection.content).head).toBe(fillPublication.transition.id);
   });
 
+  it("loads an exact current maker head and rejects it after a successor exists", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
+    const created = await service.publish(order());
+    const address = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
+
+    await expect(service.loadCurrentTransition(address, created.transition.id))
+      .resolves.toEqual(created.transition);
+
+    await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    await expect(service.loadCurrentTransition(address, created.transition.id))
+      .rejects.toThrow("not the current head");
+  });
+
   it("verifies a complete create-to-fill chain and excludes its filled projection", async () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
