@@ -56,6 +56,30 @@ class FakeConnection implements InboxRelayConnection {
 }
 
 describe("nostr-tools inbox relay port", () => {
+  it("calls the browser fetch implementation with the Window receiver", async () => {
+    const receiver = vi.fn();
+    vi.stubGlobal("fetch", function (
+      this: unknown,
+      _input: RequestInfo | URL,
+      _init?: RequestInit
+    ): Promise<Response> {
+      receiver(this);
+      return Promise.resolve(new Response(JSON.stringify({
+        supported_nips: [17, 40, 42],
+        limitation: { auth_required: true }
+      }), { status: 200 }));
+    });
+    try {
+      const port = new NostrToolsInboxRelayPort(
+        async () => new FakeConnection()
+      );
+      await port.info(relayUrl);
+      expect(receiver).toHaveBeenCalledWith(globalThis);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("reads NIP-11 capabilities and authenticates publish/query with the supplied key", async () => {
     const connection = new FakeConnection();
     const fetcher = vi.fn(async () => new Response(JSON.stringify({

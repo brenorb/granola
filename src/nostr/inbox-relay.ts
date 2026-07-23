@@ -64,7 +64,8 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
 
   constructor(
     private readonly connect: InboxRelayFactory = defaultFactory,
-    private readonly fetchInfo: InboxInfoFetcher = fetch,
+    private readonly fetchInfo: InboxInfoFetcher = (input, init) =>
+      globalThis.fetch(input, init),
     private readonly queryTimeoutMs = 8_000
   ) {
     if (!Number.isSafeInteger(queryTimeoutMs) || queryTimeoutMs < 1) {
