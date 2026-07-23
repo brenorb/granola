@@ -22,6 +22,23 @@ interface ProjectionContent extends OrderState {
   head: string;
 }
 
+interface CreateTransitionContent {
+  schema: "granola/order-transition/v1";
+  operation_id: string;
+  operation: "create";
+  revision: "0";
+  previous: null;
+  state: OrderState;
+}
+
+export interface CreateTransitionRecord {
+  eventId: string;
+  makerPubkey: string;
+  address: string;
+  operationId: string;
+  state: OrderState;
+}
+
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 
@@ -31,6 +48,16 @@ function orderAddress(pubkey: string, orderId: string): string {
 
 function requireHex(value: string, pattern: RegExp, label: string): void {
   if (!pattern.test(value)) throw new Error(`${label} must be lowercase hex`);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export function createTransitionTemplate(
@@ -156,7 +183,77 @@ function parseOpenState(value: unknown): { state: OrderState; head: string } {
   ) {
     throw new Error("Only canonical open revision-zero projections are supported");
   }
+  const { head: _head, ...rawState } = input as ProjectionContent;
+  if (canonicalJson(rawState) !== canonicalJson(state)) {
+    throw new Error("Projection order state must be canonical");
+  }
   return { state, head: input.head };
+}
+
+export function parseCreateTransitionEvent(
+  event: NostrEvent,
+  verify: (event: NostrEvent) => boolean
+): CreateTransitionRecord {
+  if (event.kind !== 78) throw new Error("Event is not a create transition");
+  requireHex(event.id, HEX_32, "Event ID");
+  requireHex(event.pubkey, HEX_32, "Maker public key");
+  requireHex(event.sig, HEX_64, "Event signature");
+  if (!verify(event)) throw new Error("Event signature verification failed");
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(event.content);
+  } catch {
+    throw new Error("Transition content is not valid JSON");
+  }
+  if (!decoded || typeof decoded !== "object") {
+    throw new Error("Transition content must be an object");
+  }
+  const input = decoded as Partial<CreateTransitionContent>;
+  if (
+    input.schema !== "granola/order-transition/v1" ||
+    input.operation !== "create" ||
+    input.revision !== "0" ||
+    input.previous !== null ||
+    typeof input.operation_id !== "string" ||
+    !input.operation_id.trim() ||
+    !input.state
+  ) {
+    throw new Error("Transition content is incomplete");
+  }
+  const { state } = parseOpenState({ ...input.state, head: event.id });
+  const expectedContent: CreateTransitionContent = {
+    schema: "granola/order-transition/v1",
+    operation_id: input.operation_id,
+    operation: "create",
+    revision: "0",
+    previous: null,
+    state
+  };
+  if (canonicalJson(decoded) !== canonicalJson(expectedContent)) {
+    throw new Error("Transition content and order state must be canonical");
+  }
+  if (event.created_at !== state.created_at) {
+    throw new Error("Transition timestamp does not match order creation");
+  }
+  const address = orderAddress(event.pubkey, state.order_id);
+  if (oneTag(event, "d") !== `granola:order-transition:v1:${state.order_id}`) {
+    throw new Error("Transition order ID tag mismatch");
+  }
+  if (oneTag(event, "t") !== "granola-order-transition") {
+    throw new Error("Transition namespace mismatch");
+  }
+  if (oneTag(event, "v") !== "1") throw new Error("Transition version mismatch");
+  if (oneTag(event, "op") !== "create") throw new Error("Transition operation mismatch");
+  if (oneTag(event, "a") !== address) throw new Error("Transition address tag mismatch");
+
+  return {
+    eventId: event.id,
+    makerPubkey: event.pubkey,
+    address,
+    operationId: input.operation_id,
+    state
+  };
 }
 
 export async function parseProjectionEvent(
@@ -176,6 +273,9 @@ export async function parseProjectionEvent(
     throw new Error("Projection content is not valid JSON");
   }
   const { state, head } = parseOpenState(decoded);
+  if (event.created_at !== state.created_at) {
+    throw new Error("Projection timestamp does not match order creation");
+  }
   const expectedD = `granola:order:v1:${state.order_id}`;
   if (oneTag(event, "d") !== expectedD) throw new Error("Projection order ID tag mismatch");
   if (oneTag(event, "t") !== "granola-order") throw new Error("Projection namespace mismatch");
@@ -199,7 +299,7 @@ export async function parseProjectionEvent(
     address: orderAddress(event.pubkey, state.order_id),
     eventId: event.id,
     makerPubkey: event.pubkey,
-    verified: true,
+    verified: false,
     state
   };
 }

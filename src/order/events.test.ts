@@ -4,6 +4,7 @@ import { createOrderState } from "./model.js";
 import {
   createProjectionTemplate,
   createTransitionTemplate,
+  parseCreateTransitionEvent,
   parseProjectionEvent,
   type NostrEvent
 } from "./events.js";
@@ -84,10 +85,42 @@ describe("Granola Nostr order events", () => {
       address: `30078:${maker}:granola:order:v1:${orderId}`,
       eventId: event.id,
       makerPubkey: maker,
-      verified: true,
+      verified: false,
       state: { order_id: orderId, status: "open" }
     });
     expect(JSON.stringify(record)).not.toContain(signature);
+  });
+
+  it("verifies the authoritative create transition and its exact order state", () => {
+    const state = askState();
+    const event: NostrEvent = {
+      ...createTransitionTemplate(state, maker, "operation-1"),
+      id: transitionId,
+      pubkey: maker,
+      sig: signature
+    };
+
+    expect(parseCreateTransitionEvent(event, () => true)).toMatchObject({
+      eventId: transitionId,
+      makerPubkey: maker,
+      address: `30078:${maker}:granola:order:v1:${orderId}`,
+      operationId: "operation-1",
+      state
+    });
+
+    const wrongAddress = {
+      ...event,
+      tags: event.tags.map((tag) => tag[0] === "a" ? ["a", "30078:wrong"] : tag)
+    };
+    expect(() => parseCreateTransitionEvent(wrongAddress, () => true))
+      .toThrow("address tag mismatch");
+
+    const nonCanonical = {
+      ...event,
+      content: event.content.replace('"101","denominator":"2000"', '"202","denominator":"4000"')
+    };
+    expect(() => parseCreateTransitionEvent(nonCanonical, () => true))
+      .toThrow("canonical");
   });
 
   it("rejects a signature failure or forged market index", async () => {

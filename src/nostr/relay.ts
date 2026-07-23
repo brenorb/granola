@@ -63,6 +63,8 @@ function validateRelays(relays: readonly string[]): string[] {
   return normalized;
 }
 
+const ORDER_ADDRESS = /^30078:[0-9a-f]{64}:granola:order:v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 export class RelayClient {
   readonly relays: string[];
   private readonly pool: RelayPoolPort;
@@ -96,6 +98,26 @@ export class RelayClient {
       "#t": ["granola-order"],
       "#m": [market],
       since,
+      limit: 500
+    };
+    const events = await this.pool.querySync(
+      this.relays,
+      filter as Record<string, unknown>,
+      { maxWait: this.maxWait }
+    );
+    return uniqueEvents(events);
+  }
+
+  async queryTransitions(addresses: string[]): Promise<NostrEvent[]> {
+    const uniqueAddresses = [...new Set(addresses)].sort();
+    if (uniqueAddresses.length === 0) return [];
+    if (uniqueAddresses.length > 500 || uniqueAddresses.some((address) => !ORDER_ADDRESS.test(address))) {
+      throw new Error("Transition query requires at most 500 canonical order addresses");
+    }
+    const filter: Filter = {
+      kinds: [78],
+      "#t": ["granola-order-transition"],
+      "#a": uniqueAddresses,
       limit: 500
     };
     const events = await this.pool.querySync(

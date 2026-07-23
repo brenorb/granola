@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NostrEvent, UnsignedNostrEvent } from "./events.js";
+import { createTransitionTemplate } from "./events.js";
 import { createOrderState, type ExactMarket } from "./model.js";
 import {
   NostrOrderService,
@@ -58,6 +59,7 @@ class FakeSigner implements OrderSigner {
 class FakeRelay implements OrderRelayPort {
   published: NostrEvent[] = [];
   events: NostrEvent[] = [];
+  transitions?: NostrEvent[];
   failTransition = false;
 
   async publish(event: NostrEvent) {
@@ -71,6 +73,10 @@ class FakeRelay implements OrderRelayPort {
 
   async queryProjections(): Promise<NostrEvent[]> {
     return this.events;
+  }
+
+  async queryTransitions(): Promise<NostrEvent[]> {
+    return this.transitions ?? this.published.filter((event) => event.kind === 78);
   }
 }
 
@@ -139,5 +145,39 @@ describe("Nostr order service", () => {
 
     expect(result.book.asks).toEqual([]);
     expect(result.rejected).toBe(2);
+  });
+
+  it("rejects a projection whose authoritative head is missing", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
+    const published = await service.publish(order());
+    relay.events = [published.projection];
+    relay.transitions = [];
+
+    const result = await service.loadBook(MARKET, 1_700_000_100);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.rejected).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects hidden competing create roots for one order authority", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
+    const published = await service.publish(order());
+    const fork: NostrEvent = {
+      ...createTransitionTemplate(order(), MAKER, "operation-fork"),
+      id: "e".repeat(64),
+      pubkey: MAKER,
+      sig: "f".repeat(128)
+    };
+    relay.events = [published.projection];
+    relay.transitions = [published.transition, fork];
+
+    const result = await service.loadBook(MARKET, 1_700_000_100);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.rejected).toBeGreaterThanOrEqual(2);
   });
 });
