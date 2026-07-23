@@ -6,11 +6,10 @@ import {
 } from "nostr-tools/pure";
 
 import {
-  PublicationQuorumError,
-  type OrderPublication,
   type SuccessorOperation,
   type StagedOrderPublication
 } from "../order/service.js";
+import type { OrderOutboxEntry } from "../storage/order-outbox.js";
 import {
   createOrderState,
   fillOrder,
@@ -322,18 +321,48 @@ class FakeOrders implements OrderServicePort {
     );
   }
 
-  async publishStaged(staged: StagedOrderPublication): Promise<OrderPublication> {
+  publicationQuorum(): number {
+    return 1;
+  }
+
+  async publishNextStage(entry: OrderOutboxEntry): Promise<OrderOutboxEntry> {
+    if (entry.status === "staged") {
+      if (
+        entry.intent.expectedHeadId !== null &&
+        this.current.id !== entry.intent.expectedHeadId &&
+        this.current.id !== entry.publication.transition.id
+      ) {
+        throw new Error("Staged successor is stale or the authoritative head forked");
+      }
+      this.publishCalls += 1;
+      if (!this.fail) this.current = structuredClone(entry.publication.transition);
+      return {
+        ...entry,
+        status: this.fail ? "staged" : "transition_acknowledged",
+        publication: {
+          ...entry.publication,
+          transitionReceipts: [{
+            relay: "wss://one.example",
+            ok: !this.fail,
+            message: this.fail ? "blocked" : "stored"
+          }]
+        }
+      };
+    }
     this.publishCalls += 1;
-    const publication: OrderPublication = {
-      ...staged,
-      transitionReceipts: [{ relay: "wss://one.example", ok: !this.fail, message: this.fail ? "blocked" : "stored" }],
-      projectionReceipts: this.fail
-        ? []
-        : [{ relay: "wss://one.example", ok: true, message: "stored" }]
+    this.current = structuredClone(entry.publication.transition);
+    return {
+      ...entry,
+      status: this.fail ? "transition_acknowledged" : "projection_acknowledged",
+      publication: {
+        ...entry.publication,
+        projectionReceipts: [{
+          relay: "wss://one.example",
+          ok: !this.fail,
+          message: this.fail ? "blocked" : "stored"
+        }]
+      }
     };
-    if (this.fail) throw new PublicationQuorumError("transition", publication, 2);
-    this.current = structuredClone(publication.transition);
-    return publication;
   }
 
   async loadBook() {
@@ -360,6 +389,10 @@ const settlementEvidence = {
   quote_token_commitment: "8".repeat(64)
 };
 
+function testOutbox(driver = new MemoryStorageDriver()): OrderOutboxRepository {
+  return new OrderOutboxRepository(driver, undefined, () => true);
+}
+
 describe("order browser API", () => {
   it("maps a sell to offered SAT and requested USD on the fixed issuer pair", async () => {
     const orders = new FakeOrders();
@@ -367,7 +400,8 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       orders,
       () => 1_700_000_000,
-      () => ORDER_ID
+      () => ORDER_ID,
+      testOutbox()
     );
 
     const result = await api.publishOrder({
@@ -387,9 +421,11 @@ describe("order browser API", () => {
       makerPubkey: MAKER,
       transitionId: "b".repeat(64),
       projectionId: "d".repeat(64),
+      status: "transition_acknowledged",
       transitionReceipts: [{ relay: "wss://one.example", ok: true, message: "stored" }],
-      projectionReceipts: [{ relay: "wss://one.example", ok: true, message: "stored" }]
+      projectionReceipts: []
     });
+    expect(orders.publishCalls).toBe(1);
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
@@ -399,7 +435,8 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       orders,
       () => 1_700_000_000,
-      () => "22222222-2222-4222-8222-222222222222"
+      () => "22222222-2222-4222-8222-222222222222",
+      testOutbox()
     );
 
     await api.publishOrder({
@@ -420,7 +457,8 @@ describe("order browser API", () => {
       { publicKey: async () => MAKER },
       new FakeOrders(),
       () => 1_700_000_000,
-      () => ORDER_ID
+      () => ORDER_ID,
+      testOutbox()
     );
 
     await expect(api.getMakerIdentity()).resolves.toEqual({ publicKey: MAKER });
@@ -430,7 +468,7 @@ describe("order browser API", () => {
   it("persists a failed publication and retries the exact signed IDs", async () => {
     const orders = new FakeOrders();
     orders.fail = true;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -440,18 +478,16 @@ describe("order browser API", () => {
       () => true
     );
 
-    await expect(api.publishOrder({
+    const partial = await api.publishOrder({
       side: "sell",
       amount: "2000",
       price: { numerator: "101", denominator: "2000" }
-    })).rejects.toMatchObject({
-      name: "PendingPublicationError",
-      stage: "transition",
-      publication: {
-        orderId: ORDER_ID,
-        transitionId: "b".repeat(64),
-        projectionId: "d".repeat(64)
-      }
+    });
+    expect(partial).toMatchObject({
+      status: "staged",
+      orderId: ORDER_ID,
+      transitionId: "b".repeat(64),
+      projectionId: "d".repeat(64)
     });
     await expect(api.getPendingOrderPublications()).resolves.toMatchObject([{
       orderId: ORDER_ID,
@@ -461,15 +497,22 @@ describe("order browser API", () => {
 
     orders.fail = false;
     const retried = await api.retryOrderPublication(ORDER_ID);
+    expect(retried.status).toBe("transition_acknowledged");
     expect(retried.transitionId).toBe("b".repeat(64));
     expect(retried.projectionId).toBe("d".repeat(64));
+    expect(orders.publishCalls).toBe(2);
+    const projected = await api.retryOrderPublication(ORDER_ID);
+    expect(projected.status).toBe("projection_acknowledged");
+    expect(orders.publishCalls).toBe(3);
+    await api.clearAcknowledgedOrderPublication(ORDER_ID);
     await expect(api.getPendingOrderPublications()).resolves.toEqual([]);
   });
 
   it("refuses a locally tampered pending publication before retrying it", async () => {
     const orders = new FakeOrders();
     orders.fail = true;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const driver = new MemoryStorageDriver();
+    const outbox = testOutbox(driver);
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -481,14 +524,18 @@ describe("order browser API", () => {
       side: "sell",
       amount: "2000",
       price: { numerator: "101", denominator: "2000" }
-    })).rejects.toMatchObject({ name: "PendingPublicationError" });
-    const tampered = await outbox.load(ORDER_ID);
-    if (!tampered) throw new Error("Expected pending publication");
-    tampered.transition.sig = "0".repeat(128);
-    await outbox.save(tampered);
+    })).resolves.toMatchObject({ status: "staged" });
+    const persisted = await driver.get("granola.order-outbox.v2") as OrderOutboxEntry[];
+    if (!persisted[0]) throw new Error("Expected pending publication");
+    persisted[0].publication.transition.content =
+      persisted[0].publication.transition.content.replace(
+        '"operation":"create"',
+        '"operation":"fill"'
+      );
+    await driver.set("granola.order-outbox.v2", persisted);
     orders.fail = false;
 
-    await expect(api.retryOrderPublication(ORDER_ID)).rejects.toThrow(/signature/i);
+    await expect(api.retryOrderPublication(ORDER_ID)).rejects.toThrow(/corrupt/i);
     expect(orders.publishCalls).toBe(1);
   });
 
@@ -499,7 +546,7 @@ describe("order browser API", () => {
       orders,
       () => 1_700_000_100,
       () => ORDER_ID,
-      new OrderOutboxRepository(new MemoryStorageDriver())
+      testOutbox()
     );
 
     const result = await api.reserveOrder(reserveInput);
@@ -555,7 +602,9 @@ describe("order browser API", () => {
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
-      () => 1_700_000_200
+      () => 1_700_000_200,
+      () => ORDER_ID,
+      testOutbox()
     );
 
     const result = await api.fillOrder({
@@ -607,7 +656,7 @@ describe("order browser API", () => {
       )
     );
     const reservedHead = orders.current.id;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const earlyApi = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -658,7 +707,7 @@ describe("order browser API", () => {
     const orders = new FakeOrders();
     const authenticated = await authenticatedAbortFixture();
     orders.current = authenticated.reservedHead;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     orders.fail = true;
     const api = new OrderApi(
       { publicKey: async () => MAKER },
@@ -669,19 +718,18 @@ describe("order browser API", () => {
       () => true
     );
 
-    await expect(api.releaseOrder({
+    const partial = await api.releaseOrder({
       address: ADDRESS,
       expectedHeadId: authenticated.reservedHead.id,
       reservationId: RESERVATION_ID,
       reason: "abort",
       proposalMessage: authenticated.proposalMessage,
       abortMessage: authenticated.abortMessage
-    })).rejects.toMatchObject({
-      name: "PendingPublicationError",
-      publication: {
-        orderId: ORDER_ID,
-        transitionId: RELEASE_HEAD
-      }
+    });
+    expect(partial).toMatchObject({
+      status: "staged",
+      orderId: ORDER_ID,
+      transitionId: RELEASE_HEAD
     });
     expect(orders.successor?.evidence).toEqual({
       release_reason: "abort",
@@ -693,9 +741,13 @@ describe("order browser API", () => {
 
     orders.fail = false;
     const retried = await api.retryOrderPublication(ORDER_ID);
+    expect(retried.status).toBe("transition_acknowledged");
     expect(retried.transitionId).toBe(RELEASE_HEAD);
     expect(retried.projectionId).toBe(pending[0]?.projectionId);
-    await expect(outbox.list()).resolves.toEqual([]);
+    const projected = await api.retryOrderPublication(ORDER_ID);
+    expect(projected.status).toBe("projection_acknowledged");
+    await api.clearAcknowledgedOrderPublication(ORDER_ID);
+    expect((await outbox.list())[0]?.status).toBe("committed");
   });
 
   it("rejects fabricated or incorrectly bound abort artifacts before staging", async () => {
@@ -742,7 +794,9 @@ describe("order browser API", () => {
       const api = new OrderApi(
         { publicKey: async () => MAKER },
         orders,
-        () => DM_NOW
+        () => DM_NOW,
+        () => ORDER_ID,
+        testOutbox()
       );
       await expect(api.releaseOrder({
         address: ADDRESS,
@@ -760,7 +814,9 @@ describe("order browser API", () => {
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
-      () => DM_NOW
+      () => DM_NOW,
+      () => ORDER_ID,
+      testOutbox()
     );
     const fabricated = structuredClone(valid.abortMessage);
     fabricated.seal.sig = "0".repeat(128);
@@ -799,7 +855,7 @@ describe("order browser API", () => {
   it("rejects a stale head without staging or persisting a successor", async () => {
     const orders = new FakeOrders();
     orders.loadFailure = new Error("Expected transition is not the current head");
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -821,7 +877,9 @@ describe("order browser API", () => {
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
-      () => 1_700_000_100
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      testOutbox()
     );
 
     await expect(api.reserveOrder({
@@ -837,7 +895,9 @@ describe("order browser API", () => {
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
-      () => 1_700_000_100
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      testOutbox()
     );
 
     await expect(api.reserveOrder({ ...reserveInput, amount: "1" }))
@@ -876,7 +936,7 @@ describe("order browser API", () => {
   it("retains an exact failed reserve publication and blocks replacement until retry", async () => {
     const orders = new FakeOrders();
     orders.fail = true;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -886,30 +946,34 @@ describe("order browser API", () => {
       () => true
     );
 
-    await expect(api.reserveOrder(reserveInput)).rejects.toMatchObject({
-      name: "PendingPublicationError",
-      publication: {
-        orderId: ORDER_ID,
-        transitionId: RESERVE_HEAD
-      }
+    await expect(api.reserveOrder(reserveInput)).resolves.toMatchObject({
+      status: "staged",
+      orderId: ORDER_ID,
+      transitionId: RESERVE_HEAD
     });
     await expect(api.reserveOrder(reserveInput))
-      .rejects.toThrow("pending publication");
-    expect(orders.loadCalls).toHaveLength(2);
+      .resolves.toMatchObject({ status: "staged", transitionId: RESERVE_HEAD });
+    expect(orders.loadCalls).toHaveLength(1);
     expect(orders.successor?.previous.id).toBe(CREATE_HEAD);
 
     orders.fail = false;
     await expect(api.retryOrderPublication(ORDER_ID)).resolves.toMatchObject({
+      status: "transition_acknowledged",
       orderId: ORDER_ID,
       transitionId: RESERVE_HEAD
     });
-    await expect(outbox.list()).resolves.toEqual([]);
+    await expect(api.retryOrderPublication(ORDER_ID)).resolves.toMatchObject({
+      status: "projection_acknowledged",
+      transitionId: RESERVE_HEAD
+    });
+    await api.clearAcknowledgedOrderPublication(ORDER_ID);
+    expect((await outbox.list())[0]?.status).toBe("committed");
   });
 
   it("rejects a pending successor retry after another instance advances the head", async () => {
     const orders = new FakeOrders();
     orders.fail = true;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -918,8 +982,8 @@ describe("order browser API", () => {
       outbox,
       () => true
     );
-    await expect(api.reserveOrder(reserveInput)).rejects.toMatchObject({
-      name: "PendingPublicationError"
+    await expect(api.reserveOrder(reserveInput)).resolves.toMatchObject({
+      status: "staged"
     });
     orders.current = verified(
       createStateTransitionTemplate(
@@ -949,7 +1013,7 @@ describe("order browser API", () => {
   it("serializes concurrent pending retries and publishes the signed batch once", async () => {
     const orders = new FakeOrders();
     orders.fail = true;
-    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
@@ -958,8 +1022,8 @@ describe("order browser API", () => {
       outbox,
       () => true
     );
-    await expect(api.reserveOrder(reserveInput)).rejects.toMatchObject({
-      name: "PendingPublicationError"
+    await expect(api.reserveOrder(reserveInput)).resolves.toMatchObject({
+      status: "staged"
     });
     orders.fail = false;
 
@@ -968,18 +1032,21 @@ describe("order browser API", () => {
       api.retryOrderPublication(ORDER_ID)
     ]);
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-    expect(orders.publishCalls).toBe(2);
-    await expect(outbox.list()).resolves.toEqual([]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(0);
+    expect(orders.publishCalls).toBe(3);
+    expect((await outbox.list())[0]?.status).toBe("projection_acknowledged");
   });
 
   it("serializes same-order successors so concurrent callers cannot publish a fork", async () => {
     const orders = new FakeOrders();
+    const outbox = testOutbox();
     const api = new OrderApi(
       { publicKey: async () => MAKER },
       orders,
-      () => 1_700_000_100
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      outbox
     );
 
     const results = await Promise.allSettled([
@@ -987,9 +1054,186 @@ describe("order browser API", () => {
       api.reserveOrder(reserveInput)
     ]);
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(0);
     expect(orders.successorCalls).toBe(1);
-    expect(orders.loadCalls).toHaveLength(2);
+    expect(orders.loadCalls).toHaveLength(1);
+    expect(orders.publishCalls).toBe(2);
+    expect((await outbox.list())[0]?.status).toBe("projection_acknowledged");
+  });
+
+  it("ensures one compatible reserve artifact without publishing or re-signing", async () => {
+    const orders = new FakeOrders();
+    const outbox = testOutbox();
+    const api = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      outbox,
+      () => true
+    );
+
+    const first = await api.ensureReserveStaged(reserveInput);
+    const restarted = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_999,
+      () => ORDER_ID,
+      outbox,
+      () => true
+    );
+    const recovered = await restarted.ensureReserveStaged(reserveInput);
+
+    expect(first.status).toBe("staged");
+    expect(recovered).toEqual(first);
+    expect(orders.successorCalls).toBe(1);
+    expect(orders.publishCalls).toBe(0);
+    await expect(restarted.ensureReserveStaged({
+      ...reserveInput,
+      takerCommitment: "6".repeat(64)
+    })).rejects.toThrow(/conflict/i);
+    expect(orders.successorCalls).toBe(1);
+  });
+
+  it("recovers compatible fill and release artifacts without re-signing", async () => {
+    const makeReservedOrders = () => {
+      const orders = new FakeOrders();
+      const reserved = reserveOrder(initialOrder(), {
+        reservationId: RESERVATION_ID,
+        amount: "2000",
+        acceptedAt: 1_700_000_100,
+        expiresAt: 1_700_001_900,
+        proposalEventId: "4".repeat(64),
+        takerCommitment: "5".repeat(64)
+      });
+      orders.current = verified(createStateTransitionTemplate(
+        reserved,
+        MAKER,
+        "reserve-operation",
+        "reserve",
+        createHead(),
+        undefined,
+        1_700_000_100
+      ));
+      return orders;
+    };
+
+    const fillOrders = makeReservedOrders();
+    const fillOutbox = testOutbox();
+    const fillApi = new OrderApi(
+      { publicKey: async () => MAKER },
+      fillOrders,
+      () => 1_700_000_200,
+      () => ORDER_ID,
+      fillOutbox,
+      () => true
+    );
+    const fillInput = {
+      address: ADDRESS,
+      expectedHeadId: fillOrders.current.id,
+      reservationId: RESERVATION_ID,
+      amount: "2000",
+      evidence: settlementEvidence
+    };
+    const firstFill = await fillApi.ensureFillStaged(fillInput);
+    await expect(fillApi.ensureFillStaged(fillInput)).resolves.toEqual(firstFill);
+    await expect(fillApi.ensureFillStaged({
+      ...fillInput,
+      evidence: { ...settlementEvidence, settlement_hash: "a".repeat(64) }
+    })).rejects.toThrow(/conflict/i);
+    expect(fillOrders.successorCalls).toBe(1);
+
+    const releaseOrders = makeReservedOrders();
+    const releaseApi = new OrderApi(
+      { publicKey: async () => MAKER },
+      releaseOrders,
+      () => 1_700_001_900,
+      () => ORDER_ID,
+      testOutbox(),
+      () => true
+    );
+    const releaseInput = {
+      address: ADDRESS,
+      expectedHeadId: releaseOrders.current.id,
+      reservationId: RESERVATION_ID,
+      reason: "expired" as const
+    };
+    const firstRelease = await releaseApi.ensureReleaseStaged(releaseInput);
+    await expect(releaseApi.ensureReleaseStaged(releaseInput))
+      .resolves.toEqual(firstRelease);
+    await expect(releaseApi.ensureReleaseStaged({
+      ...releaseInput,
+      reservationId: "88888888-8888-4888-8888-888888888888"
+    })).rejects.toThrow(/conflict/i);
+    expect(releaseOrders.successorCalls).toBe(1);
+  });
+
+  it("advances transition then projection across restarts and clears only after commit", async () => {
+    const orders = new FakeOrders();
+    const outbox = testOutbox();
+    const firstApi = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      outbox,
+      () => true
+    );
+    const staged = await firstApi.ensureReserveStaged(reserveInput);
+
+    const transition = await firstApi.publishNextStage(ORDER_ID);
+    expect(transition.status).toBe("transition_acknowledged");
+    expect(orders.publishCalls).toBe(1);
+    expect(transition.transitionId).toBe(staged.transitionId);
+
+    const restarted = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_200,
+      () => ORDER_ID,
+      outbox,
+      () => true
+    );
+    const projection = await restarted.publishNextStage(ORDER_ID);
+    expect(projection.status).toBe("projection_acknowledged");
+    expect(orders.publishCalls).toBe(2);
+    await expect(restarted.loadAcknowledgedOrderPublication(ORDER_ID))
+      .resolves.toEqual(projection);
+    expect((await restarted.getPendingOrderPublications())).toHaveLength(1);
+
+    const committed = await restarted.clearAcknowledgedOrderPublication(ORDER_ID);
+    expect(committed.status).toBe("committed");
+    await expect(restarted.clearAcknowledgedOrderPublication(ORDER_ID))
+      .resolves.toEqual(committed);
+    await expect(restarted.loadAcknowledgedOrderPublication(ORDER_ID))
+      .resolves.toBeUndefined();
+    await expect(restarted.getPendingOrderPublications()).resolves.toEqual([]);
+  });
+
+  it("retries a partial relay stage with the same signed IDs", async () => {
+    const orders = new FakeOrders();
+    const outbox = testOutbox();
+    const api = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_100,
+      () => ORDER_ID,
+      outbox,
+      () => true
+    );
+    const staged = await api.ensureReserveStaged(reserveInput);
+    orders.fail = true;
+
+    const partial = await api.publishNextStage(ORDER_ID);
+    expect(partial.status).toBe("staged");
+    expect(partial.transitionId).toBe(staged.transitionId);
+
+    orders.fail = false;
+    const retried = await api.publishNextStage(ORDER_ID);
+    expect(retried.status).toBe("transition_acknowledged");
+    expect(retried.transitionId).toBe(staged.transitionId);
+    expect(retried.projectionId).toBe(staged.projectionId);
+    expect(orders.publishCalls).toBe(2);
   });
 });

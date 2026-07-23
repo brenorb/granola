@@ -13,7 +13,6 @@ import {
   type ReserveOrderInput
 } from "../order/model.js";
 import {
-  parseProjectionEvent,
   parseTransitionEvent,
   type FillTransitionEvidence,
   type NostrEvent,
@@ -22,12 +21,16 @@ import {
 } from "../order/events.js";
 import type {
   LoadedOrderBook,
-  OrderPublication,
   SuccessorOperation,
   StagedOrderPublication
 } from "../order/service.js";
-import { PublicationQuorumError } from "../order/service.js";
-import type { OrderOutboxPort } from "../storage/order-outbox.js";
+import {
+  canonicalOrderPublicationCompatibility,
+  type OrderOutboxEntry,
+  type OrderOutboxPort,
+  type OrderPublicationIntent,
+  type OrderPublicationStatus
+} from "../storage/order-outbox.js";
 import {
   assertAuthenticatedOpenedTradeMessage,
   assertVerifiedInitialReserveProposal,
@@ -55,7 +58,8 @@ export interface OrderServicePort {
     evidence?: TransitionEvidence,
     createdAt?: number
   ): Promise<StagedOrderPublication>;
-  publishStaged(staged: StagedOrderPublication): Promise<OrderPublication>;
+  publishNextStage(entry: OrderOutboxEntry): Promise<OrderOutboxEntry>;
+  publicationQuorum(): number;
   loadCurrentTransition(address: string, expectedHeadId: string): Promise<NostrEvent>;
   loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook>;
 }
@@ -74,8 +78,8 @@ export interface PublicOrderPublication {
   makerPubkey: string;
   transitionId: string;
   projectionId: string;
-  transitionReceipts: OrderPublication["transitionReceipts"];
-  projectionReceipts: OrderPublication["projectionReceipts"];
+  transitionReceipts: StagedOrderPublication["transitionReceipts"];
+  projectionReceipts: StagedOrderPublication["projectionReceipts"];
 }
 
 export interface PublishReserveInput extends Omit<ReserveOrderInput, "acceptedAt"> {
@@ -108,27 +112,6 @@ export type PublishReleaseInput = PublishReleaseHead & (
     }
 );
 
-class VolatileOrderOutbox implements OrderOutboxPort {
-  private readonly publications = new Map<string, StagedOrderPublication>();
-
-  async load(orderId: string): Promise<StagedOrderPublication | undefined> {
-    const publication = this.publications.get(orderId);
-    return publication ? structuredClone(publication) : undefined;
-  }
-
-  async list(): Promise<StagedOrderPublication[]> {
-    return [...this.publications.values()].map((publication) => structuredClone(publication));
-  }
-
-  async save(publication: StagedOrderPublication): Promise<void> {
-    this.publications.set(publication.state.order_id, structuredClone(publication));
-  }
-
-  async remove(orderId: string): Promise<void> {
-    this.publications.delete(orderId);
-  }
-}
-
 function publicPublication(publication: StagedOrderPublication): PublicOrderPublication {
   return {
     orderId: publication.state.order_id,
@@ -140,17 +123,12 @@ function publicPublication(publication: StagedOrderPublication): PublicOrderPubl
   };
 }
 
-export class PendingPublicationError extends Error {
-  readonly publication: PublicOrderPublication;
+export interface OrderPublicationProgress extends PublicOrderPublication {
+  status: OrderPublicationStatus;
+}
 
-  constructor(
-    readonly stage: "transition" | "projection",
-    publication: StagedOrderPublication
-  ) {
-    super(`Order publication is pending at the ${stage} relay quorum`);
-    this.name = "PendingPublicationError";
-    this.publication = publicPublication(publication);
-  }
+function publicProgress(entry: OrderOutboxEntry): OrderPublicationProgress {
+  return { ...publicPublication(entry.publication), status: entry.status };
 }
 
 function orderAssets(side: PublishOrderInput["side"]): Pick<CreateOrderInput, "offered" | "requested"> {
@@ -171,17 +149,60 @@ function orderAssets(side: PublishOrderInput["side"]): Pick<CreateOrderInput, "o
       };
 }
 
+function reserveCompatibility(input: PublishReserveInput): string {
+  return canonicalOrderPublicationCompatibility({
+    operation: "reserve",
+    reservationId: input.reservationId,
+    amount: input.amount,
+    expiresAt: input.expiresAt,
+    proposalEventId: input.proposalEventId,
+    takerCommitment: input.takerCommitment
+  });
+}
+
+function fillCompatibility(input: PublishFillInput): string {
+  return canonicalOrderPublicationCompatibility({
+    operation: "fill",
+    reservationId: input.reservationId,
+    amount: input.amount,
+    evidence: input.evidence
+  });
+}
+
+function releaseCompatibility(input: PublishReleaseInput): string {
+  if (input.reason === "expired") {
+    return canonicalOrderPublicationCompatibility({
+      operation: "release",
+      reservationId: input.reservationId,
+      reason: input.reason
+    });
+  }
+  assertVerifiedInitialReserveProposal(input.proposalMessage);
+  assertAuthenticatedOpenedTradeMessage(input.abortMessage);
+  return canonicalOrderPublicationCompatibility({
+    operation: "release",
+    reservationId: input.reservationId,
+    reason: input.reason,
+    proposalEventId: input.proposalMessage.seal.id,
+    abortEventId: input.abortMessage.seal.id
+  });
+}
+
 export class OrderApi {
   private readonly successorQueues = new Map<string, Promise<void>>();
+  private readonly outbox: OrderOutboxPort;
 
   constructor(
     private readonly identity: MakerIdentityPort,
     private readonly orders: OrderServicePort,
     private readonly now: () => number = () => Math.floor(Date.now() / 1000),
     private readonly orderId: () => string = () => crypto.randomUUID(),
-    private readonly outbox: OrderOutboxPort = new VolatileOrderOutbox(),
+    outbox: OrderOutboxPort | undefined = undefined,
     private readonly verify: (event: NostrEvent) => boolean = (event) => verifyEvent(event)
-  ) {}
+  ) {
+    if (!outbox) throw new Error("Order API requires a durable publication outbox");
+    this.outbox = outbox;
+  }
 
   async getMakerIdentity(): Promise<{ publicKey: string }> {
     return { publicKey: await this.identity.publicKey() };
@@ -192,7 +213,70 @@ export class OrderApi {
   }
 
   async getPendingOrderPublications(): Promise<PublicOrderPublication[]> {
-    return (await this.outbox.list()).map(publicPublication);
+    return (await this.outbox.list())
+      .filter((entry) => entry.status !== "committed")
+      .map((entry) => publicPublication(entry.publication));
+  }
+
+  private async existingCompatible(
+    operation: OrderPublicationIntent["operation"],
+    address: string,
+    expectedHeadId: string | null,
+    compatibility: string
+  ): Promise<OrderOutboxEntry | undefined> {
+    const entries = (await this.outbox.list()).filter(
+      (entry) => entry.intent.address === address
+    );
+    if (entries.length > 1) throw new Error("Order has conflicting pending publications");
+    const existing = entries[0];
+    if (!existing) return undefined;
+    if (
+      existing.intent.operation !== operation ||
+      existing.intent.expectedHeadId !== expectedHeadId ||
+      existing.intent.compatibility !== compatibility
+    ) {
+      if (existing.status === "committed") return undefined;
+      throw new Error("Order publication intent conflicts with the durable outbox");
+    }
+    return existing;
+  }
+
+  async publishNextStage(orderId: string): Promise<OrderPublicationProgress> {
+    const initial = await this.outbox.load(orderId);
+    if (!initial || initial.status === "committed") {
+      throw new Error("No pending publication exists for this order ID");
+    }
+    return this.serializeSuccessor(initial.intent.address, async () => {
+      const current = await this.outbox.load(orderId);
+      if (!current || current.status === "committed") {
+        throw new Error("No pending publication exists for this order ID");
+      }
+      if (
+        current.publication.transition.id !== initial.publication.transition.id ||
+        current.publication.projection.id !== initial.publication.projection.id
+      ) {
+        throw new Error("Pending publication changed while waiting to advance");
+      }
+      const advanced = await this.orders.publishNextStage(current);
+      return publicProgress(await this.outbox.recordProgress(advanced));
+    });
+  }
+
+  async loadAcknowledgedOrderPublication(
+    orderId: string
+  ): Promise<OrderPublicationProgress | undefined> {
+    const entry = await this.outbox.loadAcknowledged(orderId);
+    return entry ? publicProgress(entry) : undefined;
+  }
+
+  async clearAcknowledgedOrderPublication(
+    orderId: string
+  ): Promise<OrderPublicationProgress> {
+    return publicProgress(await this.outbox.clearAcknowledged(orderId));
+  }
+
+  async pruneCommittedOrderPublication(orderId: string): Promise<void> {
+    await this.outbox.pruneCommitted(orderId);
   }
 
   private async serializeSuccessor<T>(
@@ -232,83 +316,18 @@ export class OrderApi {
     if (record.makerPubkey !== await this.identity.publicKey()) {
       throw new Error("Order transition belongs to another maker");
     }
-    if (await this.outbox.load(record.state.order_id)) {
+    const pending = await this.outbox.load(record.state.order_id);
+    if (pending && pending.status !== "committed") {
       throw new Error("Order has a pending publication; retry it before publishing a successor");
     }
     return { previous, state: record.state, record };
   }
 
-  private async settle(staged: StagedOrderPublication): Promise<PublicOrderPublication> {
-    try {
-      const publication = await this.orders.publishStaged(staged);
-      await this.outbox.remove(publication.state.order_id);
-      return publicPublication(publication);
-    } catch (error) {
-      if (error instanceof PublicationQuorumError) {
-        await this.outbox.save(error.publication);
-        throw new PendingPublicationError(error.stage, error.publication);
-      }
-      throw error;
-    }
+  async retryOrderPublication(orderId: string): Promise<OrderPublicationProgress> {
+    return this.publishNextStage(orderId);
   }
 
-  private async validatePendingPublication(
-    staged: StagedOrderPublication
-  ): Promise<TransitionRecord> {
-    const transition = parseTransitionEvent(staged.transition, this.verify);
-    const projection = await parseProjectionEvent(staged.projection, this.verify);
-    if (
-      JSON.stringify(transition.state) !== JSON.stringify(staged.state) ||
-      JSON.stringify(projection.state) !== JSON.stringify(staged.state) ||
-      projection.address !== transition.address ||
-      projection.makerPubkey !== transition.makerPubkey ||
-      projection.headEventId !== staged.transition.id ||
-      staged.projection.created_at !== staged.transition.created_at
-    ) {
-      throw new Error("Pending publication transition and projection do not match");
-    }
-    return transition;
-  }
-
-  async retryOrderPublication(orderId: string): Promise<PublicOrderPublication> {
-    const initial = await this.outbox.load(orderId);
-    if (!initial) throw new Error("No pending publication exists for this order ID");
-    const initialRecord = await this.validatePendingPublication(initial);
-    return this.serializeSuccessor(initialRecord.address, async () => {
-      const staged = await this.outbox.load(orderId);
-      if (!staged) throw new Error("No pending publication exists for this order ID");
-      if (
-        staged.transition.id !== initial.transition.id ||
-        staged.projection.id !== initial.projection.id
-      ) {
-        throw new Error("Pending publication changed while waiting to retry");
-      }
-      const record = await this.validatePendingPublication(staged);
-      if (record.revision !== "0") {
-        if (record.previous === null) {
-          throw new Error("Pending successor has no predecessor");
-        }
-        let currentMatches = false;
-        for (const expected of [record.previous, staged.transition.id]) {
-          try {
-            const current = await this.orders.loadCurrentTransition(record.address, expected);
-            if (current.id === expected) {
-              currentMatches = true;
-              break;
-            }
-          } catch {
-            // Try the other legitimate retry position before declaring it stale.
-          }
-        }
-        if (!currentMatches) {
-          throw new Error("Pending successor is stale: its predecessor is not the current head");
-        }
-      }
-      return this.settle(staged);
-    });
-  }
-
-  async publishOrder(input: PublishOrderInput): Promise<PublicOrderPublication> {
+  async publishOrder(input: PublishOrderInput): Promise<OrderPublicationProgress> {
     const createdAt = this.now();
     const state = createOrderState({
       orderId: this.orderId(),
@@ -325,13 +344,39 @@ export class OrderApi {
         ? {}
         : { minimumFillAmount: input.minimumFillAmount })
     });
-    const staged = await this.orders.stage(state);
-    await this.outbox.save(staged);
-    return this.settle(staged);
+    const maker = await this.identity.publicKey();
+    const entry = await this.outbox.ensureStaged({
+      operation: "create",
+      orderId: state.order_id,
+      address: `30078:${maker}:granola:order:v1:${state.order_id}`,
+      expectedHeadId: null,
+      quorum: this.orders.publicationQuorum(),
+      compatibility: canonicalOrderPublicationCompatibility({
+        operation: "create",
+        side: input.side,
+        amount: input.amount,
+        price: input.price,
+        expiresAt: state.expires_at,
+        execution: state.execution,
+        minimumFillAmount: state.minimum_fill_amount
+      }),
+      state,
+      evidence: null,
+      createdAt
+    }, () => this.orders.stage(state));
+    return this.publishNextStage(entry.intent.orderId);
   }
 
-  async reserveOrder(input: PublishReserveInput): Promise<PublicOrderPublication> {
+  private async stageReserve(input: PublishReserveInput): Promise<OrderOutboxEntry> {
     return this.serializeSuccessor(input.address, async () => {
+      const compatibility = reserveCompatibility(input);
+      const existing = await this.existingCompatible(
+        "reserve",
+        input.address,
+        input.expectedHeadId,
+        compatibility
+      );
+      if (existing) return existing;
       const { previous, state } = await this.loadMakerHead(
         input.address,
         input.expectedHeadId
@@ -345,20 +390,46 @@ export class OrderApi {
         proposalEventId: input.proposalEventId,
         takerCommitment: input.takerCommitment
       });
-      const staged = await this.orders.stageSuccessor(
+      const entry = await this.outbox.ensureStaged({
+        operation: "reserve",
+        orderId: next.order_id,
+        address: input.address,
+        expectedHeadId: previous.id,
+        quorum: this.orders.publicationQuorum(),
+        compatibility,
+        state: next,
+        evidence: null,
+        createdAt: acceptedAt
+      }, () => this.orders.stageSuccessor(
         next,
         "reserve",
         previous,
         undefined,
         acceptedAt
-      );
-      await this.outbox.save(staged);
-      return this.settle(staged);
+      ));
+      return entry;
     });
   }
 
-  async fillOrder(input: PublishFillInput): Promise<PublicOrderPublication> {
+  async ensureReserveStaged(input: PublishReserveInput): Promise<OrderPublicationProgress> {
+    return publicProgress(await this.stageReserve(input));
+  }
+
+  async reserveOrder(input: PublishReserveInput): Promise<OrderPublicationProgress> {
+    const entry = await this.stageReserve(input);
+    return this.publishNextStage(entry.intent.orderId);
+  }
+
+  private async stageFill(input: PublishFillInput): Promise<OrderOutboxEntry> {
     return this.serializeSuccessor(input.address, async () => {
+      const compatibility = fillCompatibility(input);
+      const existing = await this.existingCompatible(
+        "fill",
+        input.address,
+        input.expectedHeadId,
+        compatibility
+      );
+      if (existing) return existing;
       const { previous, state } = await this.loadMakerHead(
         input.address,
         input.expectedHeadId
@@ -368,20 +439,46 @@ export class OrderApi {
         reservationId: input.reservationId,
         amount: input.amount
       });
-      const staged = await this.orders.stageSuccessor(
+      const entry = await this.outbox.ensureStaged({
+        operation: "fill",
+        orderId: next.order_id,
+        address: input.address,
+        expectedHeadId: previous.id,
+        quorum: this.orders.publicationQuorum(),
+        compatibility,
+        state: next,
+        evidence: input.evidence,
+        createdAt
+      }, () => this.orders.stageSuccessor(
         next,
         "fill",
         previous,
         input.evidence,
         createdAt
-      );
-      await this.outbox.save(staged);
-      return this.settle(staged);
+      ));
+      return entry;
     });
   }
 
-  async releaseOrder(input: PublishReleaseInput): Promise<PublicOrderPublication> {
+  async ensureFillStaged(input: PublishFillInput): Promise<OrderPublicationProgress> {
+    return publicProgress(await this.stageFill(input));
+  }
+
+  async fillOrder(input: PublishFillInput): Promise<OrderPublicationProgress> {
+    const entry = await this.stageFill(input);
+    return this.publishNextStage(entry.intent.orderId);
+  }
+
+  private async stageRelease(input: PublishReleaseInput): Promise<OrderOutboxEntry> {
     return this.serializeSuccessor(input.address, async () => {
+      const compatibility = releaseCompatibility(input);
+      const existing = await this.existingCompatible(
+        "release",
+        input.address,
+        input.expectedHeadId,
+        compatibility
+      );
+      if (existing) return existing;
       const { previous, state, record } = await this.loadMakerHead(
         input.address,
         input.expectedHeadId
@@ -432,15 +529,33 @@ export class OrderApi {
       const evidence: TransitionEvidence = input.reason === "expired"
         ? { release_reason: "expired" }
         : { release_reason: "abort", abort_event_id: abortEventId! };
-      const staged = await this.orders.stageSuccessor(
+      const entry = await this.outbox.ensureStaged({
+        operation: "release",
+        orderId: next.order_id,
+        address: input.address,
+        expectedHeadId: previous.id,
+        quorum: this.orders.publicationQuorum(),
+        compatibility,
+        state: next,
+        evidence,
+        createdAt: releasedAt
+      }, () => this.orders.stageSuccessor(
         next,
         "release",
         previous,
         evidence,
         releasedAt
-      );
-      await this.outbox.save(staged);
-      return this.settle(staged);
+      ));
+      return entry;
     });
+  }
+
+  async ensureReleaseStaged(input: PublishReleaseInput): Promise<OrderPublicationProgress> {
+    return publicProgress(await this.stageRelease(input));
+  }
+
+  async releaseOrder(input: PublishReleaseInput): Promise<OrderPublicationProgress> {
+    const entry = await this.stageRelease(input);
+    return this.publishNextStage(entry.intent.orderId);
   }
 }

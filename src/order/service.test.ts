@@ -15,10 +15,14 @@ import {
 } from "./model.js";
 import {
   NostrOrderService,
-  PublicationQuorumError,
+  type StagedOrderPublication,
   type OrderRelayPort,
   type OrderSigner
 } from "./service.js";
+import {
+  canonicalOrderPublicationCompatibility,
+  type OrderOutboxEntry
+} from "../storage/order-outbox.js";
 
 const MAKER = "b".repeat(64);
 const SAT_MINT = "https://testnut.cashu.space";
@@ -90,15 +94,18 @@ class FakeRelay implements OrderRelayPort {
   transitions?: NostrEvent[];
   failTransition = false;
   failProjection = false;
+  duplicateReceipt = false;
 
   async publish(event: NostrEvent) {
     this.published.push(event);
     const fail = event.kind === 78 ? this.failTransition : this.failProjection;
-    return [
+    const receipts = [
       { relay: "wss://one.example", ok: true, message: "stored" },
       { relay: "wss://two.example", ok: !fail, message: fail ? "blocked" : "stored" },
       { relay: "wss://three.example", ok: true, message: "stored" }
     ];
+    if (this.duplicateReceipt) receipts[1]!.relay = receipts[0]!.relay;
+    return receipts;
   }
 
   async queryProjections(): Promise<NostrEvent[]> {
@@ -111,20 +118,283 @@ class FakeRelay implements OrderRelayPort {
 }
 
 describe("Nostr order service", () => {
+  function entryFor(
+    publication: StagedOrderPublication,
+    operation: OrderOutboxEntry["intent"]["operation"],
+    expectedHeadId: string | null,
+    quorum: number,
+    evidence: OrderOutboxEntry["intent"]["evidence"] = null
+  ): OrderOutboxEntry {
+    return {
+      schema: "granola/order-outbox/v2",
+      status: "staged",
+      intent: {
+        operation,
+        orderId: publication.state.order_id,
+        address: `30078:${MAKER}:granola:order:v1:${publication.state.order_id}`,
+        expectedHeadId,
+        quorum,
+        compatibility: canonicalOrderPublicationCompatibility({ operation }),
+        state: publication.state,
+        evidence,
+        createdAt: publication.transition.created_at
+      },
+      publication
+    };
+  }
+
+  async function publishEntry(
+    service: NostrOrderService,
+    entry: OrderOutboxEntry
+  ): Promise<OrderOutboxEntry> {
+    const transitionAcknowledged = await service.publishNextStage(entry);
+    if (transitionAcknowledged.status !== "transition_acknowledged") {
+      throw new Error("Test publication did not reach transition quorum");
+    }
+    const projectionAcknowledged = await service.publishNextStage(
+      transitionAcknowledged
+    );
+    if (projectionAcknowledged.status !== "projection_acknowledged") {
+      throw new Error("Test publication did not reach projection quorum");
+    }
+    return projectionAcknowledged;
+  }
+
+  async function publishCreate(
+    service: NostrOrderService
+  ): Promise<StagedOrderPublication> {
+    const publication = await service.stage(order());
+    return (await publishEntry(
+      service,
+      entryFor(publication, "create", null, service.publicationQuorum())
+    )).publication;
+  }
+
+  async function publishSuccessor(
+    service: NostrOrderService,
+    state: ReturnType<typeof order>,
+    operation: "reserve" | "release" | "fill",
+    previous: NostrEvent,
+    transitionEvidence?: OrderOutboxEntry["intent"]["evidence"],
+    createdAt?: number
+  ): Promise<StagedOrderPublication> {
+    const publication = await service.stageSuccessor(
+      state,
+      operation,
+      previous,
+      transitionEvidence ?? undefined,
+      createdAt
+    );
+    return (await publishEntry(
+      service,
+      entryFor(
+        publication,
+        operation,
+        previous.id,
+        service.publicationQuorum(),
+        transitionEvidence ?? null
+      )
+    )).publication;
+  }
+
+  async function outboxEntry(
+    service: NostrOrderService,
+    previous: NostrEvent,
+    status: OrderOutboxEntry["status"] = "staged"
+  ): Promise<OrderOutboxEntry> {
+    const state = reserved();
+    return {
+      schema: "granola/order-outbox/v2",
+      status,
+      intent: {
+        operation: "reserve",
+        orderId: state.order_id,
+        address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+        expectedHeadId: previous.id,
+        quorum: service.publicationQuorum(),
+        compatibility: canonicalOrderPublicationCompatibility({ operation: "reserve" }),
+        state,
+        evidence: null,
+        createdAt: state.reservation!.accepted_at
+      },
+      publication: await service.stageSuccessor(
+        state,
+        "reserve",
+        previous,
+        undefined,
+        state.reservation!.accepted_at
+      )
+    };
+  }
+
+  it("advances exactly one network stage and keeps the exact signed IDs across restart", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => `operation-${signer.signed.length}`,
+      2,
+      () => true
+    );
+    const created = await publishCreate(service);
+    relay.transitions = [created.transition];
+    relay.published = [];
+    const entry = await outboxEntry(service, created.transition);
+
+    const transitionAcknowledged = await service.publishNextStage(entry);
+    expect(transitionAcknowledged.status).toBe("transition_acknowledged");
+    expect(relay.published.map((event) => event.id)).toEqual([
+      entry.publication.transition.id
+    ]);
+    relay.transitions = [created.transition, entry.publication.transition];
+
+    const restarted = new NostrOrderService(
+      signer,
+      relay,
+      () => "must-not-sign",
+      2,
+      () => true
+    );
+    const projectionAcknowledged = await restarted.publishNextStage(
+      transitionAcknowledged
+    );
+    expect(projectionAcknowledged.status).toBe("projection_acknowledged");
+    expect(relay.published.map((event) => event.id)).toEqual([
+      entry.publication.transition.id,
+      entry.publication.projection.id
+    ]);
+    expect(signer.signed).toHaveLength(4);
+  });
+
+  it("retries a partial relay failure with the same transition and never projects early", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => `operation-${signer.signed.length}`,
+      3,
+      () => true
+    );
+    const created = await publishCreate(service);
+    relay.transitions = [created.transition];
+    relay.published = [];
+    relay.failTransition = true;
+    const entry = await outboxEntry(service, created.transition);
+
+    const partial = await service.publishNextStage(entry);
+    expect(partial.status).toBe("staged");
+    expect(relay.published).toEqual([entry.publication.transition]);
+
+    relay.failTransition = false;
+    const accepted = await service.publishNextStage(partial);
+    expect(accepted.status).toBe("transition_acknowledged");
+    expect(relay.published.map((event) => event.id)).toEqual([
+      entry.publication.transition.id,
+      entry.publication.transition.id
+    ]);
+    expect(accepted.publication.transitionReceipts.filter((receipt) => receipt.ok))
+      .toHaveLength(3);
+  });
+
+  it("rejects a stale or forked successor before any relay publication", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => `operation-${signer.signed.length}`,
+      2,
+      () => true
+    );
+    const created = await publishCreate(service);
+    const entry = await outboxEntry(service, created.transition);
+    const competing = {
+      ...await service.stageSuccessor(
+        reserved(),
+        "reserve",
+        created.transition
+      )
+    }.transition;
+    relay.transitions = [created.transition, competing];
+    relay.published = [];
+
+    await expect(service.publishNextStage(entry)).rejects.toThrow(/head|fork|stale/i);
+    expect(relay.published).toEqual([]);
+  });
+
+  it("rejects a competing create root before publishing the staged create", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => "operation-create",
+      2,
+      () => true
+    );
+    const staged = await service.stage(order());
+    const competing: NostrEvent = {
+      ...createTransitionTemplate(order(), MAKER, "operation-competing"),
+      id: "9".repeat(64),
+      pubkey: MAKER,
+      sig: "c".repeat(128)
+    };
+    relay.transitions = [competing];
+
+    await expect(service.publishNextStage(
+      entryFor(staged, "create", null, 2)
+    )).rejects.toThrow(/root|head|competing/i);
+    expect(relay.published).toEqual([]);
+  });
+
+  it("rejects duplicate relay receipts and a durable quorum mismatch", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => "operation-create",
+      2,
+      () => true
+    );
+    const staged = await service.stage(order());
+    relay.duplicateReceipt = true;
+
+    await expect(service.publishNextStage(
+      entryFor(staged, "create", null, 2)
+    )).rejects.toThrow(/duplicate receipt/i);
+
+    relay.duplicateReceipt = false;
+    relay.published = [];
+    await expect(service.publishNextStage(
+      entryFor(staged, "create", null, 3)
+    )).rejects.toThrow(/quorum.*match/i);
+    expect(relay.published).toEqual([]);
+  });
+
   it("stages and publishes reserve then fill successors against exact heads", async () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
-    const created = await service.publish(order());
-    const reservePublication = await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    const created = await publishCreate(service);
+    const reservePublication = await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     const filled = fillOrder(reserved(), {
       reservationId: reserved().reservation!.id,
       amount: "2000"
     });
-    const fillPublication = await service.publishStaged(
-      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    const fillPublication = await publishSuccessor(
+      service,
+      filled,
+      "fill",
+      reservePublication.transition,
+      evidence
     );
 
     expect(relay.published.map((event) => event.kind)).toEqual([78, 30078, 78, 30078, 78, 30078]);
@@ -148,9 +418,12 @@ describe("Nostr order service", () => {
       2,
       () => true
     );
-    const created = await service.publish(order());
-    const reservePublication = await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    const created = await publishCreate(service);
+    const reservePublication = await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     const abortEventId = "9".repeat(64);
     const released = releaseOrder(reserved(), {
@@ -159,14 +432,13 @@ describe("Nostr order service", () => {
       releasedAt: 1_700_000_200,
       abortEventId
     });
-    const publication = await service.publishStaged(
-      await service.stageSuccessor(
-        released,
-        "release",
-        reservePublication.transition,
-        { release_reason: "abort", abort_event_id: abortEventId },
-        1_700_000_200
-      )
+    const publication = await publishSuccessor(
+      service,
+      released,
+      "release",
+      reservePublication.transition,
+      { release_reason: "abort", abort_event_id: abortEventId },
+      1_700_000_200
     );
     relay.events = [publication.projection];
 
@@ -195,14 +467,17 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
-    const created = await service.publish(order());
+    const created = await publishCreate(service);
     const address = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
 
     await expect(service.loadCurrentTransition(address, created.transition.id))
       .resolves.toEqual(created.transition);
 
-    await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     await expect(service.loadCurrentTransition(address, created.transition.id))
       .rejects.toThrow("not the current head");
@@ -212,16 +487,23 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
-    const created = await service.publish(order());
-    const reservePublication = await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    const created = await publishCreate(service);
+    const reservePublication = await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     const filled = fillOrder(reserved(), {
       reservationId: reserved().reservation!.id,
       amount: "2000"
     });
-    const fillPublication = await service.publishStaged(
-      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    const fillPublication = await publishSuccessor(
+      service,
+      filled,
+      "fill",
+      reservePublication.transition,
+      evidence
     );
     relay.events = [fillPublication.projection];
 
@@ -236,9 +518,12 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
-    const created = await service.publish(order());
-    const accepted = await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    const created = await publishCreate(service);
+    const accepted = await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     const fork: NostrEvent = {
       ...createStateTransitionTemplate(reserved(), MAKER, "fork-op", "reserve", created.transition),
@@ -259,16 +544,23 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
-    const created = await service.publish(order());
-    const reservePublication = await service.publishStaged(
-      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    const created = await publishCreate(service);
+    const reservePublication = await publishSuccessor(
+      service,
+      reserved(),
+      "reserve",
+      created.transition
     );
     const filled = fillOrder(reserved(), {
       reservationId: reserved().reservation!.id,
       amount: "2000"
     });
-    await service.publishStaged(
-      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    await publishSuccessor(
+      service,
+      filled,
+      "fill",
+      reservePublication.transition,
+      evidence
     );
     relay.events = [reservePublication.projection];
 
@@ -282,7 +574,7 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation", 2, () => true);
-    const created = await service.publish(order());
+    const created = await publishCreate(service);
     const invalidState = {
       ...reserved(),
       limit_price: { numerator: "1", denominator: "1" }
@@ -312,14 +604,24 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
+    const staged = await service.stage(order());
+    const entry = entryFor(staged, "create", null, 2);
 
-    const publication = await service.publish(order());
+    const transitionAcknowledged = await service.publishNextStage(entry);
 
+    expect(relay.published.map((event) => event.kind)).toEqual([78]);
+    expect(transitionAcknowledged.status).toBe("transition_acknowledged");
+    expect(transitionAcknowledged.publication.transitionReceipts
+      .filter((receipt) => receipt.ok)).toHaveLength(3);
+    expect(transitionAcknowledged.publication.projectionReceipts).toEqual([]);
+
+    const projectionAcknowledged = await service.publishNextStage(transitionAcknowledged);
     expect(relay.published.map((event) => event.kind)).toEqual([78, 30078]);
-    expect(publication.transitionReceipts.filter((receipt) => receipt.ok)).toHaveLength(3);
-    expect(publication.projectionReceipts.filter((receipt) => receipt.ok)).toHaveLength(3);
-    expect(publication.projection.tags).toContainEqual(["e", publication.transition.id]);
-    expect(JSON.parse(publication.projection.content).head).toBe(publication.transition.id);
+    expect(projectionAcknowledged.status).toBe("projection_acknowledged");
+    expect(projectionAcknowledged.publication.projection.tags)
+      .toContainEqual(["e", staged.transition.id]);
+    expect(JSON.parse(projectionAcknowledged.publication.projection.content).head)
+      .toBe(staged.transition.id);
   });
 
   it("does not publish a projection when the transition misses quorum", async () => {
@@ -327,45 +629,46 @@ describe("Nostr order service", () => {
     const relay = new FakeRelay();
     relay.failTransition = true;
     const service = new NostrOrderService(signer, relay, () => "operation-1", 3, () => true);
+    const staged = await service.stage(order());
+    const entry = entryFor(staged, "create", null, 3);
 
-    let failure: PublicationQuorumError | undefined;
-    try {
-      await service.publish(order());
-    } catch (error) {
-      if (error instanceof PublicationQuorumError) failure = error;
-    }
-    expect(failure).toBeInstanceOf(PublicationQuorumError);
-    expect(failure?.publication.transition.id).toBe("a".repeat(64));
-    expect(failure?.publication.projection.id).toBe("d".repeat(64));
+    const partial = await service.publishNextStage(entry);
+    expect(partial.status).toBe("staged");
+    expect(partial.publication.transition.id).toBe("a".repeat(64));
+    expect(partial.publication.projection.id).toBe("d".repeat(64));
     expect(relay.published.map((event) => event.kind)).toEqual([78]);
     expect(signer.signed).toHaveLength(2);
 
     relay.failTransition = false;
-    const retried = await service.publishStaged(failure!.publication);
-    expect(retried.transition.id).toBe("a".repeat(64));
-    expect(retried.projection.id).toBe("d".repeat(64));
+    const retried = await service.publishNextStage(partial);
+    expect(retried.status).toBe("transition_acknowledged");
+    expect(retried.publication.transition.id).toBe("a".repeat(64));
+    expect(retried.publication.projection.id).toBe("d".repeat(64));
+    expect(relay.published.map((event) => event.kind)).toEqual([78, 78]);
+
+    const projected = await service.publishNextStage(retried);
+    expect(projected.status).toBe("projection_acknowledged");
     expect(relay.published.map((event) => event.kind)).toEqual([78, 78, 30078]);
   });
 
   it("retries a failed projection without replacing its accepted transition", async () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
-    relay.failProjection = true;
     const service = new NostrOrderService(signer, relay, () => "operation-1", 3, () => true);
+    const staged = await service.stage(order());
+    const entry = entryFor(staged, "create", null, 3);
+    const transitionAcknowledged = await service.publishNextStage(entry);
+    relay.failProjection = true;
 
-    let failure: PublicationQuorumError | undefined;
-    try {
-      await service.publish(order());
-    } catch (error) {
-      if (error instanceof PublicationQuorumError) failure = error;
-    }
-    expect(failure?.stage).toBe("projection");
+    const partial = await service.publishNextStage(transitionAcknowledged);
+    expect(partial.status).toBe("transition_acknowledged");
     expect(relay.published.map((event) => event.kind)).toEqual([78, 30078]);
 
     relay.failProjection = false;
-    const retried = await service.publishStaged(failure!.publication);
-    expect(retried.transition.id).toBe(failure!.publication.transition.id);
-    expect(retried.projection.id).toBe(failure!.publication.projection.id);
+    const retried = await service.publishNextStage(partial);
+    expect(retried.status).toBe("projection_acknowledged");
+    expect(retried.publication.transition.id).toBe(staged.transition.id);
+    expect(retried.publication.projection.id).toBe(staged.projection.id);
     expect(relay.published.map((event) => event.kind)).toEqual([78, 30078, 30078]);
   });
 
@@ -373,7 +676,7 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
-    const published = await service.publish(order());
+    const published = await publishCreate(service);
     relay.events = [
       published.projection,
       { ...published.projection, id: "f".repeat(64), content: "not json" }
@@ -390,7 +693,7 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
-    const published = await service.publish(order());
+    const published = await publishCreate(service);
     const conflicting: NostrEvent = {
       ...published.projection,
       id: "f".repeat(64),
@@ -414,7 +717,7 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
-    const published = await service.publish(order());
+    const published = await publishCreate(service);
     relay.events = [published.projection];
     relay.transitions = [];
 
@@ -428,7 +731,7 @@ describe("Nostr order service", () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => "operation-1", 2, () => true);
-    const published = await service.publish(order());
+    const published = await publishCreate(service);
     const fork: NostrEvent = {
       ...createTransitionTemplate(order(), MAKER, "operation-fork"),
       id: "e".repeat(64),

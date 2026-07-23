@@ -23,6 +23,7 @@ import {
   type OrderRecord,
   type OrderState
 } from "./model.js";
+import type { OrderOutboxEntry } from "../storage/order-outbox.js";
 
 export type SuccessorOperation = "reserve" | "release" | "fill";
 
@@ -46,26 +47,9 @@ export interface StagedOrderPublication {
   projectionReceipts: RelayReceipt[];
 }
 
-export type OrderPublication = StagedOrderPublication;
-
 export interface LoadedOrderBook {
   book: OrderBook;
   rejected: number;
-}
-
-export class PublicationQuorumError extends Error {
-  constructor(
-    readonly stage: "transition" | "projection",
-    readonly publication: StagedOrderPublication,
-    readonly required: number
-  ) {
-    const receipts = stage === "transition"
-      ? publication.transitionReceipts
-      : publication.projectionReceipts;
-    const accepted = receipts.filter((receipt) => receipt.ok).length;
-    super(`${stage} reached ${accepted}/${required} required relay acknowledgements`);
-    this.name = "PublicationQuorumError";
-  }
 }
 
 function assertMaker(event: NostrEvent, expected: string): void {
@@ -73,7 +57,16 @@ function assertMaker(event: NostrEvent, expected: string): void {
 }
 
 function hasQuorum(receipts: RelayReceipt[], required: number): boolean {
-  return receipts.filter((receipt) => receipt.ok).length >= required;
+  return new Set(
+    receipts.filter((receipt) => receipt.ok).map((receipt) => receipt.relay)
+  ).size >= required;
+}
+
+function assertUniqueReceipts(receipts: RelayReceipt[]): void {
+  const relays = receipts.map((receipt) => receipt.relay);
+  if (new Set(relays).size !== relays.length) {
+    throw new Error("Relay publication returned duplicate receipt URLs");
+  }
 }
 
 function mergeReceipts(previous: RelayReceipt[], current: RelayReceipt[]): RelayReceipt[] {
@@ -85,8 +78,26 @@ function mergeReceipts(previous: RelayReceipt[], current: RelayReceipt[]): Relay
   return [...byRelay.values()];
 }
 
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new Error("Value cannot be canonically encoded");
+    return encoded;
+  }
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(",")}}`;
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return canonical(left) === canonical(right);
+}
+
 function sameState(left: OrderState, right: OrderState): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return sameValue(left, right);
 }
 
 function assertSuccessorState(
@@ -179,6 +190,10 @@ export class NostrOrderService {
     }
   }
 
+  publicationQuorum(): number {
+    return this.quorum;
+  }
+
   async stage(state: OrderState): Promise<StagedOrderPublication> {
     const maker = await this.signer.publicKey();
     const transition = await this.signer.sign(
@@ -236,50 +251,111 @@ export class NostrOrderService {
     };
   }
 
-  async publishStaged(staged: StagedOrderPublication): Promise<OrderPublication> {
-    const transitionRecord = parseTransitionEvent(staged.transition, this.verify);
-    const projectionRecord = await parseProjectionEvent(staged.projection, this.verify);
+  private async validateOutboxEntry(entry: OrderOutboxEntry): Promise<TransitionRecord> {
+    const transition = parseTransitionEvent(entry.publication.transition, this.verify);
+    const projection = await parseProjectionEvent(entry.publication.projection, this.verify);
     if (
-      staged.schema !== "granola/order-publication/v1" ||
-      transitionRecord.eventId !== staged.projection.tags.find((tag) => tag[0] === "e")?.[1] ||
-      transitionRecord.makerPubkey !== projectionRecord.makerPubkey ||
-      !sameState(transitionRecord.state, staged.state) ||
-      !sameState(projectionRecord.state, staged.state)
+      entry.schema !== "granola/order-outbox/v2" ||
+      entry.publication.schema !== "granola/order-publication/v1" ||
+      transition.operation !== entry.intent.operation ||
+      transition.address !== entry.intent.address ||
+      transition.previous !== entry.intent.expectedHeadId ||
+      transition.eventId !== entry.publication.transition.id ||
+      transition.makerPubkey !== projection.makerPubkey ||
+      projection.address !== transition.address ||
+      projection.headEventId !== transition.eventId ||
+      entry.intent.orderId !== transition.state.order_id ||
+      entry.intent.createdAt !== entry.publication.transition.created_at ||
+      entry.publication.projection.created_at !== entry.intent.createdAt ||
+      !sameState(transition.state, entry.intent.state) ||
+      !sameState(projection.state, entry.intent.state) ||
+      !sameState(entry.publication.state, entry.intent.state) ||
+      !sameValue(transition.evidence ?? null, entry.intent.evidence)
     ) {
-      throw new Error("Staged order publication is inconsistent");
+      throw new Error("Durable order publication is inconsistent");
     }
-
-    let publication: StagedOrderPublication = structuredClone(staged);
-    if (!hasQuorum(publication.transitionReceipts, this.quorum)) {
-      publication = {
-        ...publication,
-        transitionReceipts: mergeReceipts(
-          publication.transitionReceipts,
-          await this.relays.publish(publication.transition)
-        )
-      };
-    }
-    if (!hasQuorum(publication.transitionReceipts, this.quorum)) {
-      throw new PublicationQuorumError("transition", publication, this.quorum);
-    }
-
-    if (!hasQuorum(publication.projectionReceipts, this.quorum)) {
-      publication = {
-        ...publication,
-        projectionReceipts: mergeReceipts(
-          publication.projectionReceipts,
-          await this.relays.publish(publication.projection)
-        )
-      };
-    }
-    if (!hasQuorum(publication.projectionReceipts, this.quorum)) {
-      throw new PublicationQuorumError("projection", publication, this.quorum);
-    }
-    return publication;
+    return transition;
   }
 
-  async publish(state: OrderState): Promise<OrderPublication> {
-    return this.publishStaged(await this.stage(state));
+  private async assertPublishPosition(
+    entry: OrderOutboxEntry,
+    transition: TransitionRecord
+  ): Promise<void> {
+    if (entry.status === "transition_acknowledged") {
+      await this.loadCurrentTransition(transition.address, entry.publication.transition.id);
+      return;
+    }
+    if (entry.status !== "staged") return;
+    if (transition.previous === null) {
+      const matching = (await this.relays.queryTransitions([transition.address])).filter((event) => {
+        try {
+          return parseTransitionEvent(event, this.verify).address === transition.address;
+        } catch {
+          return false;
+        }
+      });
+      if (matching.length === 0) return;
+      await this.loadCurrentTransition(transition.address, entry.publication.transition.id);
+      return;
+    }
+    for (const expected of [transition.previous, entry.publication.transition.id]) {
+      try {
+        await this.loadCurrentTransition(transition.address, expected);
+        return;
+      } catch {
+        // An exact retry can observe either its predecessor or its own transition.
+      }
+    }
+    throw new Error("Staged successor is stale or the authoritative head forked");
+  }
+
+  /**
+   * Publishes at most one exact signed Nostr event. The caller must durably
+   * record the returned entry before invoking this method again.
+   */
+  async publishNextStage(entry: OrderOutboxEntry): Promise<OrderOutboxEntry> {
+    const transition = await this.validateOutboxEntry(entry);
+    if (entry.intent.quorum !== this.quorum) {
+      throw new Error("Durable order publication quorum does not match the service");
+    }
+    if (entry.status === "projection_acknowledged" || entry.status === "committed") {
+      return structuredClone(entry);
+    }
+    await this.assertPublishPosition(entry, transition);
+    if (entry.status === "staged") {
+      const receipts = await this.relays.publish(entry.publication.transition);
+      assertUniqueReceipts(receipts);
+      const publication = {
+        ...structuredClone(entry.publication),
+        transitionReceipts: mergeReceipts(
+          entry.publication.transitionReceipts,
+          receipts
+        )
+      };
+      return {
+        ...structuredClone(entry),
+        status: hasQuorum(publication.transitionReceipts, this.quorum)
+          ? "transition_acknowledged"
+          : "staged",
+        publication
+      };
+    }
+    const receipts = await this.relays.publish(entry.publication.projection);
+    assertUniqueReceipts(receipts);
+    const publication = {
+      ...structuredClone(entry.publication),
+      projectionReceipts: mergeReceipts(
+        entry.publication.projectionReceipts,
+        receipts
+      )
+    };
+    return {
+      ...structuredClone(entry),
+      status: hasQuorum(publication.projectionReceipts, this.quorum)
+        ? "projection_acknowledged"
+        : "transition_acknowledged",
+      publication
+    };
   }
 
   async loadCurrentTransition(address: string, expectedHeadId: string): Promise<NostrEvent> {
