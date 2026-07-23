@@ -85,11 +85,11 @@ function record(overrides: Partial<OrderRecord> = {}): OrderRecord {
     offered: { unit: "sat", mint: baseMint },
     requested: { unit: "usd", acceptableMints: [quoteMint] },
     amount: "1000",
-    price: { numerator: "1", denominator: "50" }
+    priceCentsPerBtc: "2000000"
   });
   const head = "44".repeat(32);
   return {
-    address: `30078:${maker}:granola:order:v1:${orderId}`,
+    address: `30078:${maker}:granola:order:v2:${orderId}`,
     eventId: "55".repeat(32),
     headEventId: head,
     makerPubkey: maker,
@@ -124,10 +124,10 @@ async function wrappedProposal(
     quote_keyset: quoteKeyset,
     base_amount: "1000",
     quote_amount: "20",
-    limit_price: { numerator: "1", denominator: "50" }
+    price_cents_per_btc: "2000000"
   };
   const message: GranolaTradeMessage = {
-    schema: "granola/dm/v1",
+    schema: "granola/dm/v2",
     deployment: "cashu-testnet-v1",
     type: "reserve_propose",
     message_id: "66666666-6666-4666-8666-666666666666",

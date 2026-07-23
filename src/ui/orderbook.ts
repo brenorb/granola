@@ -1,8 +1,7 @@
 import type {
   ExactMarket,
   OrderBook,
-  OrderRecord,
-  RationalPrice
+  OrderRecord
 } from "../order/model.js";
 
 export type OrderBookRenderState =
@@ -14,17 +13,6 @@ export interface OrderBookRenderOptions {
   onTake?: (order: OrderRecord, fillBaseAmount: string) => void;
 }
 
-interface ExactRational {
-  numerator: bigint;
-  denominator: bigint;
-}
-
-interface DisplayScale {
-  multiplier: bigint;
-  fractionDigits: number;
-  label: string;
-}
-
 function element<K extends keyof HTMLElementTagNameMap>(
   name: K,
   text?: string
@@ -34,92 +22,32 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function absolute(value: bigint): bigint {
-  return value < 0n ? -value : value;
-}
-
-function gcd(left: bigint, right: bigint): bigint {
-  left = absolute(left);
-  right = absolute(right);
-  while (right !== 0n) [left, right] = [right, left % right];
-  return left;
-}
-
-function reduced(numerator: bigint, denominator: bigint): ExactRational {
-  if (denominator <= 0n) throw new Error("Price denominator must be positive");
-  const divisor = gcd(numerator, denominator);
-  return { numerator: numerator / divisor, denominator: denominator / divisor };
-}
-
-function exactPrice(price: RationalPrice): ExactRational {
-  return reduced(BigInt(price.numerator), BigInt(price.denominator));
-}
-
-function difference(left: RationalPrice, right: RationalPrice): ExactRational {
-  const leftValue = exactPrice(left);
-  const rightValue = exactPrice(right);
-  return reduced(
-    leftValue.numerator * rightValue.denominator -
-      rightValue.numerator * leftValue.denominator,
-    leftValue.denominator * rightValue.denominator
-  );
-}
-
-function marketScale(market: ExactMarket): DisplayScale {
-  const base = market.baseUnit.toLowerCase();
-  const quote = market.quoteUnit.toLowerCase();
-  if (base === "sat" && (quote === "usd" || quote === "eur")) {
-    // Cashu fiat amounts use minor units. This converts minor-unit/SAT to fiat/BTC.
-    return { multiplier: 1_000_000n, fractionDigits: 2, label: `${quote.toUpperCase()}/BTC` };
-  }
-  return {
-    multiplier: 1n,
-    fractionDigits: 8,
-    label: `${quote.toUpperCase()}/${base.toUpperCase()}`
-  };
-}
-
 function groupedInteger(value: string): string {
   const sign = value.startsWith("-") ? "−" : "";
   const unsigned = value.startsWith("-") ? value.slice(1) : value;
   return `${sign}${unsigned.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }
 
-function decimal(value: ExactRational, scale: DisplayScale): string {
-  const scaledNumerator = value.numerator * scale.multiplier;
-  const sign = scaledNumerator < 0n ? -1n : 1n;
-  const unsignedNumerator = absolute(scaledNumerator);
-  const precision = 10n ** BigInt(scale.fractionDigits);
-  const rounded = (unsignedNumerator * precision * 2n + value.denominator) /
-    (value.denominator * 2n);
-
-  if (rounded === 0n && unsignedNumerator !== 0n) {
-    return `${sign < 0n ? "−" : ""}<${scale.fractionDigits === 0 ? "1" : `0.${"0".repeat(scale.fractionDigits - 1)}1`}`;
-  }
-
-  const whole = rounded / precision;
-  if (scale.fractionDigits === 0) return `${sign < 0n ? "−" : ""}${groupedInteger(whole.toString())}`;
-  const fraction = (rounded % precision).toString().padStart(scale.fractionDigits, "0");
-  return `${sign < 0n ? "−" : ""}${groupedInteger(whole.toString())}.${fraction}`;
+function fiatPerBtc(priceCentsPerBtc: string): string {
+  const cents = BigInt(priceCentsPerBtc);
+  const unsigned = cents < 0n ? -cents : cents;
+  const whole = unsigned / 100n;
+  const fraction = (unsigned % 100n).toString().padStart(2, "0");
+  return `${cents < 0n ? "−" : ""}${groupedInteger(whole.toString())}.${fraction}`;
 }
 
-function exactText(value: ExactRational): string {
-  return `${value.numerator}/${value.denominator}`;
+function priceLabel(market: ExactMarket): string {
+  return `${market.quoteUnit.toUpperCase()}/BTC`;
 }
 
 function priceCell(order: OrderRecord, market: ExactMarket): HTMLTableCellElement {
   const cell = element("td");
-  const value = exactPrice(order.state.limit_price);
-  const scale = marketScale(market);
-  const displayed = element("data", `${decimal(value, scale)} ${scale.label}`);
+  const price = order.state.price_cents_per_btc;
+  const displayed = element("data", `${fiatPerBtc(price)} ${priceLabel(market)}`);
   displayed.dataset.price = "true";
-  displayed.dataset.exactPrice = exactText(value);
-  displayed.setAttribute("value", exactText(value));
+  displayed.dataset.priceCentsPerBtc = price;
+  displayed.setAttribute("value", price);
   cell.append(displayed);
-
-  const exact = element("small", `Exact ratio ${exactText(value)}`);
-  exact.className = "order-price-exact";
-  cell.append(exact);
   return cell;
 }
 
@@ -219,10 +147,9 @@ function summaryValue(
     value.textContent = "—";
     return value;
   }
-  const exact = exactPrice(order.state.limit_price);
-  const scale = marketScale(market);
-  value.textContent = `${decimal(exact, scale)} ${scale.label}`;
-  value.dataset.exactPrice = exactText(exact);
+  const price = order.state.price_cents_per_btc;
+  value.textContent = `${fiatPerBtc(price)} ${priceLabel(market)}`;
+  value.dataset.priceCentsPerBtc = price;
   return value;
 }
 
@@ -239,10 +166,11 @@ function renderSummary(book: OrderBook): HTMLElement {
   const spreadValue = element("dd", "—");
   spreadValue.dataset.summary = "spread";
   if (book.topAsk && book.topBid) {
-    const spread = difference(book.topAsk.state.limit_price, book.topBid.state.limit_price);
-    const scale = marketScale(book.market);
-    spreadValue.textContent = `${decimal(spread, scale)} ${scale.label}`;
-    spreadValue.dataset.exactSpread = exactText(spread);
+    const spread =
+      BigInt(book.topAsk.state.price_cents_per_btc) -
+      BigInt(book.topBid.state.price_cents_per_btc);
+    spreadValue.textContent = `${fiatPerBtc(spread.toString())} ${priceLabel(book.market)}`;
+    spreadValue.dataset.spreadCentsPerBtc = spread.toString();
   }
   summary.append(spreadValue);
   return summary;
@@ -250,9 +178,10 @@ function renderSummary(book: OrderBook): HTMLElement {
 
 function midpointText(book: OrderBook): string {
   if (!book.topAsk || !book.topBid) return "Inside market unavailable";
-  const spread = difference(book.topAsk.state.limit_price, book.topBid.state.limit_price);
-  const scale = marketScale(book.market);
-  return `Spread ${decimal(spread, scale)} ${scale.label}`;
+  const spread =
+    BigInt(book.topAsk.state.price_cents_per_btc) -
+    BigInt(book.topBid.state.price_cents_per_btc);
+  return `Spread ${fiatPerBtc(spread.toString())} ${priceLabel(book.market)}`;
 }
 
 function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRenderOptions): void {

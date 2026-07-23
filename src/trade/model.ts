@@ -68,7 +68,7 @@ function positiveInteger(value: string, label: string): bigint {
 export interface SettlementAmountInput {
   remainingBaseAmount: string;
   fillBaseAmount: string;
-  price: { numerator: string; denominator: string };
+  priceCentsPerBtc: string;
   execution: "all_or_none" | "partial";
   minimumFillAmount: string;
 }
@@ -77,8 +77,7 @@ export function settlementAmounts(input: SettlementAmountInput): { base: string;
   const remaining = positiveInteger(input.remainingBaseAmount, "Remaining base amount");
   const fill = positiveInteger(input.fillBaseAmount, "Fill base amount");
   const minimum = positiveInteger(input.minimumFillAmount, "Minimum fill amount");
-  positiveInteger(input.price.numerator, "Price numerator");
-  positiveInteger(input.price.denominator, "Price denominator");
+  positiveInteger(input.priceCentsPerBtc, "Price cents per BTC");
 
   if (fill > remaining) throw new Error("Fill amount exceeds the remaining order amount");
   if (input.execution === "all_or_none" && fill !== remaining) {
@@ -93,7 +92,7 @@ export function settlementAmounts(input: SettlementAmountInput): { base: string;
 
   return {
     base: fill.toString(),
-    quote: quoteAmountForSettlement(fill.toString(), input.price)
+    quote: quoteAmountForSettlement(fill.toString(), input.priceCentsPerBtc)
   };
 }
 

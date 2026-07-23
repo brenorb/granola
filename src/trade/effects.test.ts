@@ -77,7 +77,7 @@ async function publishedFill(): Promise<PublishedOrderHead> {
       acceptableMints: ["https://nofee.testnut.cashu.space"]
     },
     amount: "20",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   });
   const create = finalizeEvent(
     createTransitionTemplate(initial, maker, "create"),
@@ -186,7 +186,7 @@ function baseSession(): TradeSession {
     reservationId: "11111111-1111-4111-8111-111111111111",
     role: "maker",
     phase: "base_locked",
-    orderAddress: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+    orderAddress: `30078:${MAKER}:granola:order:v2:${ORDER_ID}`,
     offeredOrderHead: "33".repeat(32),
     reserveTransitionId: "34".repeat(32),
     fillTransitionId: null,
@@ -202,7 +202,7 @@ function baseSession(): TradeSession {
       quoteUnit: "usd",
       quoteKeyset: "quote-keyset",
       quoteAmount: "1",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     },
     plan: {
       anchor: NOW - 100,
@@ -318,7 +318,7 @@ function stagedDeliverySession(): TradeSession {
   const current = baseSession();
   current.privateState.outbox = {
     message: {
-      schema: "granola/dm/v1",
+      schema: "granola/dm/v2",
       deployment: "cashu-testnet-v1",
       type: "base_lock",
       message_id: "11111111-1111-4111-8111-111111111112",
@@ -551,7 +551,7 @@ async function takerAwaitingFillVerification(): Promise<{
   current.role = "taker";
   current.phase = "filled";
   current.orderAddress =
-    `30078:${publication.transition.pubkey}:granola:order:v1:${ORDER_ID}`;
+    `30078:${publication.transition.pubkey}:granola:order:v2:${ORDER_ID}`;
   current.offeredOrderHead = publication.predecessor.id;
   current.reserveTransitionId = publication.predecessor.id;
   current.fillTransitionId = publication.transition.id;

@@ -94,13 +94,13 @@ machine and must not weaken these common fields:
 
 ```json
 {
-  "schema": "granola/dm/v1",
+  "schema": "granola/dm/v2",
   "deployment": "cashu-testnet-v1",
   "type": "reserve_propose",
   "message_id": "11111111-1111-4111-8111-111111111111",
   "session_id": "5555555555555555555555555555555555555555555555555555555555555555",
   "reservation_id": "22222222-2222-4222-8222-222222222222",
-  "order_address": "30078:<maker>:granola:order:v1:<order-id>",
+  "order_address": "30078:<maker>:granola:order:v2:<order-id>",
   "order_head": "<exact-transition-id>",
   "maker_order_pubkey": "<32-byte-lowercase-hex>",
   "author_pubkey": "<32-byte-lowercase-hex>",
@@ -120,7 +120,7 @@ machine and must not weaken these common fields:
     "quote_keyset": "<keyset-id>",
     "base_amount": "1000",
     "quote_amount": "50",
-    "limit_price": { "numerator": "1", "denominator": "20" }
+    "price_cents_per_btc": "5000000"
   },
   "body": {}
 }
@@ -129,9 +129,9 @@ machine and must not weaken these common fields:
 Every message binds the schema and deployment, stable order address, exact
 current head, session and reservation IDs, sender and receiver, monotonic
 direction-specific sequence, expiry, predecessor, running transcript hash, both
-mint URLs and keyset IDs, units, integer amounts, and exact rational price.
-When that price maps the exact base amount to a fractional quote minor unit,
-`quote_amount` is the deterministic truncated settlement defined by ADR 0005.
+mint URLs and keyset IDs, units, integer amounts, and integer cents-per-BTC
+price. `quote_amount` is the deterministic truncated settlement defined by ADR
+0005.
 
 The proposal and acceptance include the complete canonical terms. Later messages
 include the same `terms_hash`. JSON is canonicalized with [RFC 8785] before it is
@@ -142,7 +142,7 @@ can exceed JavaScript's safe range are canonical decimal strings.
 The terms hash is:
 
 ```text
-SHA256(UTF8("granola-terms-v1\n") || UTF8(JCS(terms)))
+SHA256(UTF8("granola-terms-v2\n") || UTF8(JCS(terms)))
 ```
 
 After computing the rumor ID, the resulting transcript hash is:

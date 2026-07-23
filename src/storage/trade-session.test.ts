@@ -43,7 +43,7 @@ const orderId = "22222222-2222-4222-8222-222222222222";
 const offeredOrderHead = "33".repeat(32);
 const operationId = "44444444-4444-4444-8444-444444444444";
 const htlcMaterial = createHTLCHash("04".repeat(32));
-const orderAddress = `30078:${maker}:granola:order:v1:${orderId}`;
+const orderAddress = `30078:${maker}:granola:order:v2:${orderId}`;
 const publicationRelays = [
   "wss://discovery-one.example",
   "wss://discovery-two.example"
@@ -68,7 +68,7 @@ const transition = structuredClone(finalizeEvent({
   kind: 78,
   created_at: 1_700_000_005,
   tags: [
-    ["d", `granola:order-transition:v1:${orderId}`],
+    ["d", `granola:order-transition:v2:${orderId}`],
     ["op", "reserve"]
   ],
   content: "exact-signed-reserve-transition"
@@ -77,7 +77,7 @@ const projection = structuredClone(finalizeEvent({
   kind: 30078,
   created_at: 1_700_000_005,
   tags: [
-    ["d", `granola:order:v1:${orderId}`],
+    ["d", `granola:order:v2:${orderId}`],
     ["e", transition.id]
   ],
   content: "exact-signed-order-projection"
@@ -95,7 +95,7 @@ const seal = structuredClone(finalizeEvent({
   content: "encrypted-private-seal"
 }, sessionSecret));
 const outboxMessage: GranolaTradeMessage = {
-  schema: "granola/dm/v1",
+  schema: "granola/dm/v2",
   deployment: "cashu-testnet-v1",
   type: "base_lock",
   message_id: messageId,
@@ -193,7 +193,7 @@ const session: TradeSession = {
     quoteUnit: "usd",
     quoteKeyset: "00deadbeefcafeff",
     quoteAmount: "1",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   },
   plan: {
     anchor: 1_700_000_000,
@@ -399,7 +399,7 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
       acceptableMints: ["https://nofee.testnut.cashu.space"]
     },
     amount: "20",
-    price: { numerator: "1", denominator: "20" }
+    priceCentsPerBtc: "5000000"
   });
   const record: OrderRecord = {
     address: orderAddress,
@@ -664,7 +664,7 @@ describe("trade session v2 repository", () => {
       kind: 78,
       created_at: 1_700_000_005,
       tags: [
-        ["d", `granola:order-transition:v1:${orderId}`],
+        ["d", `granola:order-transition:v2:${orderId}`],
         ["op", "release"]
       ],
       content: "exact-signed-release-transition"
@@ -673,7 +673,7 @@ describe("trade session v2 repository", () => {
       kind: 30078,
       created_at: 1_700_000_005,
       tags: [
-        ["d", `granola:order:v1:${orderId}`],
+        ["d", `granola:order:v2:${orderId}`],
         ["e", releaseTransition.id]
       ],
       content: "exact-signed-release-projection"

@@ -38,7 +38,7 @@ const { book, rejected } = await window.granola.getOrderBook();
 const publication = await window.granola.publishOrder({
   side: "sell",
   amount: "2000", // base SAT
-  price: { numerator: "101", denominator: "2000" }, // USD cents / SAT
+  priceCentsPerBtc: "5050000",
   execution: "all_or_none"
 });
 const pending = await window.granola.getPendingOrderPublications();
@@ -113,7 +113,7 @@ API. `publishOrder()` signs an immutable kind `78` transition before a kind
 `30078` current projection and requires two relay acknowledgements at each
 stage. Its return value contains public event IDs and per-relay receipts, never
 key material. `getOrderBook()` verifies signatures and schema, rejects
-conflicting projections, and returns exact rational prices.
+conflicting projections, and returns canonical integer prices in cents per BTC.
 
 Before making a relay request, the browser persists both already-signed public
 events in a private-profile outbox. If either stage misses quorum,

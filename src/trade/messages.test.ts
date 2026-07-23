@@ -36,18 +36,18 @@ const terms: GranolaTradeTerms = {
   quote_keyset: "00ba2e3e5779e035",
   base_amount: "1000",
   quote_amount: "20",
-  limit_price: { numerator: "1", denominator: "50" }
+  price_cents_per_btc: "2000000"
 };
 
 async function proposal(overrides: Partial<GranolaTradeMessage> = {}): Promise<GranolaTradeMessage> {
   return {
-    schema: "granola/dm/v1",
+    schema: "granola/dm/v2",
     deployment: "cashu-testnet-v1",
     type: "reserve_propose",
     message_id: "11111111-1111-4111-8111-111111111111",
     session_id: "55".repeat(32),
     reservation_id: "22222222-2222-4222-8222-222222222222",
-    order_address: `30078:${maker}:granola:order:v1:33333333-3333-4333-8333-333333333333`,
+    order_address: `30078:${maker}:granola:order:v2:33333333-3333-4333-8333-333333333333`,
     order_head: "44".repeat(32),
     maker_order_pubkey: maker,
     author_pubkey: taker,
@@ -85,18 +85,18 @@ function expected(message: GranolaTradeMessage, extra: Partial<Parameters<typeof
 }
 
 describe("strict Granola NIP-17 messages", () => {
-  it("binds a fractional rational price to the truncated quote amount", async () => {
+  it("binds the integer BTC price to the truncated quote amount", async () => {
     await expect(termsHash({
       ...terms,
       base_amount: "200",
       quote_amount: "9",
-      limit_price: { numerator: "99", denominator: "2000" }
+      price_cents_per_btc: "4950000"
     })).resolves.toMatch(/^[0-9a-f]{64}$/);
     await expect(termsHash({
       ...terms,
       base_amount: "200",
       quote_amount: "10",
-      limit_price: { numerator: "99", denominator: "2000" }
+      price_cents_per_btc: "4950000"
     })).rejects.toThrow("truncated settlement");
   });
 

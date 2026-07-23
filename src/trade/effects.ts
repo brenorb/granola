@@ -267,7 +267,7 @@ function granolaTerms(session: TradeSession): GranolaTradeTerms {
     quote_keyset: session.terms.quoteKeyset,
     base_amount: session.terms.baseAmount,
     quote_amount: session.terms.quoteAmount,
-    limit_price: clone(session.terms.price)
+    price_cents_per_btc: session.terms.priceCentsPerBtc
   };
 }
 
@@ -952,7 +952,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       nextTranscriptHash: string;
     }> => {
       const message: GranolaTradeMessage = {
-        schema: "granola/dm/v1",
+        schema: "granola/dm/v2",
         deployment: "cashu-testnet-v1",
         type,
         message_id: this.entropy.messageId(),

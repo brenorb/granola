@@ -44,11 +44,11 @@ export interface GranolaTradeTerms {
   quote_keyset: string;
   base_amount: string;
   quote_amount: string;
-  limit_price: { numerator: string; denominator: string };
+  price_cents_per_btc: string;
 }
 
 export interface GranolaTradeMessage {
-  schema: "granola/dm/v1";
+  schema: "granola/dm/v2";
   deployment: "cashu-testnet-v1";
   type: TradeMessageType;
   message_id: string;
@@ -266,7 +266,7 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   const terms = record(value, "Terms");
   exactKeys(terms, [
     "base_unit", "base_mint", "base_keyset", "quote_unit", "quote_mint",
-    "quote_keyset", "base_amount", "quote_amount", "limit_price"
+    "quote_keyset", "base_amount", "quote_amount", "price_cents_per_btc"
   ], "Terms");
   for (const field of ["base_unit", "quote_unit"] as const) {
     const unit = terms[field];
@@ -283,12 +283,8 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   }
   const base = positiveInteger(terms.base_amount, "base_amount");
   const quote = positiveInteger(terms.quote_amount, "quote_amount");
-  const price = record(terms.limit_price, "Limit price");
-  exactKeys(price, ["numerator", "denominator"], "Limit price");
-  const numerator = positiveInteger(price.numerator, "Price numerator");
-  const denominator = positiveInteger(price.denominator, "Price denominator");
-  const quoteNumerator = base * numerator;
-  const expectedQuote = quoteNumerator / denominator;
+  const price = positiveInteger(terms.price_cents_per_btc, "price_cents_per_btc");
+  const expectedQuote = (base * price) / 100_000_000n;
   if (expectedQuote === 0n) {
     throw new Error("Trade quote amount must be at least one quote unit");
   }
@@ -299,7 +295,7 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
 
 export async function termsHash(terms: GranolaTradeTerms): Promise<string> {
   assertTerms(terms);
-  return sha256([utf8.encode("granola-terms-v1\n"), utf8.encode(canonicalJson(terms))]);
+  return sha256([utf8.encode("granola-terms-v2\n"), utf8.encode(canonicalJson(terms))]);
 }
 
 function safeTimestamp(value: unknown, label: string): number {
@@ -326,7 +322,7 @@ async function assertMessage(value: unknown): Promise<GranolaTradeMessage> {
     "previous_transcript_hash", "sent_at", "expires_at", "terms_hash",
     ...(hasTerms ? ["terms"] : []), "body"
   ], "Granola message");
-  if (message.schema !== "granola/dm/v1" || message.deployment !== "cashu-testnet-v1") {
+  if (message.schema !== "granola/dm/v2" || message.deployment !== "cashu-testnet-v1") {
     throw new Error("Unknown Granola message schema or deployment");
   }
   if (!TRADE_MESSAGE_TYPES.includes(message.type as TradeMessageType)) {
@@ -340,7 +336,7 @@ async function assertMessage(value: unknown): Promise<GranolaTradeMessage> {
   requiredString(message.recipient_pubkey, "Recipient pubkey", HEX_32);
   requiredString(message.order_head, "Order head", HEX_32);
   const orderAddress = requiredString(message.order_address, "Order address");
-  const addressPattern = new RegExp(`^30078:${maker}:granola:order:v1:${UUID_V4_BODY}$`);
+  const addressPattern = new RegExp(`^30078:${maker}:granola:order:v2:${UUID_V4_BODY}$`);
   if (!addressPattern.test(orderAddress)) throw new Error("Order address is invalid");
   const sequence = requiredString(message.sequence, "Sequence", CANONICAL_INTEGER);
   const sentAt = safeTimestamp(message.sent_at, "sent_at");

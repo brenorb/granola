@@ -76,7 +76,12 @@ const orderApi = new OrderApi(
 );
 
 async function publishOrderWithFunding(input: PublishOrderInput) {
-  assertOrderFunding((await api.getState()).wallet, input.side, input.amount, input.price);
+  assertOrderFunding(
+    (await api.getState()).wallet,
+    input.side,
+    input.amount,
+    input.priceCentsPerBtc
+  );
   return orderApi.publishOrder(input);
 }
 const dashboard = byId("dashboard");
@@ -383,7 +388,7 @@ orderForm.addEventListener("submit", (event) => {
     const input: PublishOrderInput = {
       side,
       amount: String(form.get("amount")),
-      price: fiatPerBtcPrice(String(form.get("fiatPrice"))),
+      priceCentsPerBtc: fiatPerBtcPrice(String(form.get("fiatPrice"))),
       expiresAt: Math.floor(Date.now() / 1000) + days * 86_400,
       execution,
       ...(execution === "partial"

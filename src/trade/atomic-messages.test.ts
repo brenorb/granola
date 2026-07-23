@@ -45,7 +45,7 @@ const terms: GranolaTradeTerms = {
   quote_keyset: "00ba2e3e5779e035",
   base_amount: "1000",
   quote_amount: "20",
-  limit_price: { numerator: "1", denominator: "50" }
+  price_cents_per_btc: "2000000"
 };
 
 const ids = [
@@ -215,13 +215,13 @@ async function message<T extends AtomicSwapMessageType>(
   };
   const includesTerms = type === "reserve_propose" || type === "reserve_accept";
   return {
-    schema: "granola/dm/v1",
+    schema: "granola/dm/v2",
     deployment: "cashu-testnet-v1",
     type,
     message_id: ids[index] ?? "00000000-0000-4000-8000-00000000000b",
     session_id: sessionId,
     reservation_id: reservationId,
-    order_address: `30078:${makerOrder}:granola:order:v1:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`,
+    order_address: `30078:${makerOrder}:granola:order:v2:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`,
     order_head: type === "reserve_propose" ? proposalHead : reserveHead,
     maker_order_pubkey: makerOrder,
     author_pubkey: authors[type],

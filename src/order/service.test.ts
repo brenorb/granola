@@ -46,7 +46,7 @@ function order() {
     offered: { unit: "sat", mint: SAT_MINT },
     requested: { unit: "usd", acceptableMints: [USD_MINT] },
     amount: "2000",
-    price: { numerator: "101", denominator: "2000" }
+    priceCentsPerBtc: "5050000"
   });
 }
 
@@ -131,7 +131,7 @@ describe("Nostr order service", () => {
       intent: {
         operation,
         orderId: publication.state.order_id,
-        address: `30078:${MAKER}:granola:order:v1:${publication.state.order_id}`,
+        address: `30078:${MAKER}:granola:order:v2:${publication.state.order_id}`,
         expectedHeadId,
         quorum,
         compatibility: canonicalOrderPublicationCompatibility({ operation }),
@@ -209,7 +209,7 @@ describe("Nostr order service", () => {
       intent: {
         operation: "reserve",
         orderId: state.order_id,
-        address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+        address: `30078:${MAKER}:granola:order:v2:${ORDER_ID}`,
         expectedHeadId: previous.id,
         quorum: service.publicationQuorum(),
         compatibility: canonicalOrderPublicationCompatibility({ operation: "reserve" }),
@@ -468,7 +468,7 @@ describe("Nostr order service", () => {
     const relay = new FakeRelay();
     const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
     const created = await publishCreate(service);
-    const address = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
+    const address = `30078:${MAKER}:granola:order:v2:${ORDER_ID}`;
 
     await expect(service.loadCurrentTransition(address, created.transition.id))
       .resolves.toEqual(created.transition);
@@ -512,7 +512,7 @@ describe("Nostr order service", () => {
       evidence
     );
     relay.events = [fillPublication.projection];
-    const address = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
+    const address = `30078:${MAKER}:granola:order:v2:${ORDER_ID}`;
 
     await expect(service.loadPublishedHead(
       address,
@@ -625,7 +625,7 @@ describe("Nostr order service", () => {
     const created = await publishCreate(service);
     const invalidState = {
       ...reserved(),
-      limit_price: { numerator: "1", denominator: "1" }
+      price_cents_per_btc: "100000000"
     };
     const invalidTransition: NostrEvent = {
       ...createStateTransitionTemplate(invalidState, MAKER, "invalid-op", "reserve", created.transition),

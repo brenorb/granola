@@ -48,7 +48,7 @@ const MAKER = getPublicKey(MAKER_SECRET);
 const OTHER_MAKER = getPublicKey(OTHER_MAKER_SECRET);
 const TAKER = getPublicKey(TAKER_SECRET);
 const ORDER_ID = "11111111-1111-4111-8111-111111111111";
-const ADDRESS = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
+const ADDRESS = `30078:${MAKER}:granola:order:v2:${ORDER_ID}`;
 const RESERVE_HEAD = "2".repeat(64);
 const FILL_HEAD = "3".repeat(64);
 const RELEASE_HEAD = "9".repeat(64);
@@ -65,7 +65,7 @@ const tradeTerms: GranolaTradeTerms = {
   quote_keyset: "2".repeat(64),
   base_amount: "2000",
   quote_amount: "101",
-  limit_price: { numerator: "101", denominator: "2000" }
+  price_cents_per_btc: "5050000"
 };
 
 function initialOrder(): OrderState {
@@ -82,7 +82,7 @@ function initialOrder(): OrderState {
       acceptableMints: [TEST_MARKET.quoteMint]
     },
     amount: "2000",
-    price: { numerator: "101", denominator: "2000" }
+    priceCentsPerBtc: "5050000"
   });
 }
 
@@ -130,7 +130,7 @@ async function authenticatedAbortFixture(options: {
 } = {}): Promise<AuthenticatedAbortFixture> {
   const hash = await termsHash(tradeTerms);
   const proposal: GranolaTradeMessage = {
-    schema: "granola/dm/v1",
+    schema: "granola/dm/v2",
     deployment: "cashu-testnet-v1",
     type: "reserve_propose",
     message_id: "77777777-7777-4777-8777-777777777777",
@@ -189,7 +189,7 @@ async function authenticatedAbortFixture(options: {
   const abortSecretKey = options.abortSecretKey ?? TAKER_SECRET;
   const abortAuthor = getPublicKey(abortSecretKey);
   const abort: GranolaTradeMessage = {
-    schema: "granola/dm/v1",
+    schema: "granola/dm/v2",
     deployment: "cashu-testnet-v1",
     type: "abort",
     message_id: "88888888-8888-4888-8888-888888888888",
@@ -407,7 +407,7 @@ describe("order browser API", () => {
     const result = await api.publishOrder({
       side: "sell",
       amount: "2000",
-      price: { numerator: "101", denominator: "2000" }
+      priceCentsPerBtc: "5050000"
     });
 
     expect(orders.state?.offered).toEqual({ unit: "sat", mint: TEST_MARKET.baseMint });
@@ -442,15 +442,12 @@ describe("order browser API", () => {
     await api.publishOrder({
       side: "sell",
       amount: "200",
-      price: { numerator: "99", denominator: "2000" }
+      priceCentsPerBtc: "4950000"
     });
 
     expect(orders.state?.original_amount).toBe("200");
     expect(orders.state?.remaining_amount).toBe("200");
-    expect(orders.state?.limit_price).toEqual({
-      numerator: "99",
-      denominator: "2000"
-    });
+    expect(orders.state?.price_cents_per_btc).toBe("4950000");
   });
 
   it("maps a buy to offered USD and requested SAT", async () => {
@@ -466,7 +463,7 @@ describe("order browser API", () => {
     await api.publishOrder({
       side: "buy",
       amount: "2000",
-      price: { numerator: "99", denominator: "2000" }
+      priceCentsPerBtc: "4950000"
     });
 
     expect(orders.state?.offered).toEqual({ unit: "usd", mint: TEST_MARKET.quoteMint });
@@ -505,7 +502,7 @@ describe("order browser API", () => {
     const partial = await api.publishOrder({
       side: "sell",
       amount: "2000",
-      price: { numerator: "101", denominator: "2000" }
+      priceCentsPerBtc: "5050000"
     });
     expect(partial).toMatchObject({
       status: "staged",
@@ -549,7 +546,7 @@ describe("order browser API", () => {
     await expect(api.publishOrder({
       side: "sell",
       amount: "2000",
-      price: { numerator: "101", denominator: "2000" }
+      priceCentsPerBtc: "5050000"
     })).resolves.toMatchObject({ status: "staged" });
     const persisted = await driver.get("granola.order-outbox.v2") as OrderOutboxEntry[];
     if (!persisted[0]) throw new Error("Expected pending publication");
@@ -794,7 +791,7 @@ describe("order browser API", () => {
         label: "wrong order",
         fixture: await authenticatedAbortFixture({
           abort: {
-            order_address: `30078:${MAKER}:granola:order:v1:22222222-2222-4222-8222-222222222222`
+            order_address: `30078:${MAKER}:granola:order:v2:22222222-2222-4222-8222-222222222222`
           }
         })
       },
@@ -910,7 +907,7 @@ describe("order browser API", () => {
 
     await expect(api.reserveOrder({
       ...reserveInput,
-      address: `30078:${OTHER_MAKER}:granola:order:v1:${ORDER_ID}`,
+      address: `30078:${OTHER_MAKER}:granola:order:v2:${ORDER_ID}`,
       expectedHeadId: orders.current.id
     })).rejects.toThrow("another maker");
     expect(orders.successor).toBeUndefined();

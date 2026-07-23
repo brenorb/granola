@@ -20,8 +20,7 @@ const bidHigh = "44444444-4444-4444-8444-444444444444";
 function record(
   orderId: string,
   side: "buy" | "sell",
-  numerator: string,
-  denominator = "2000",
+  priceCentsPerBtc: string,
   amount = "2000"
 ): OrderRecord {
   return {
@@ -44,7 +43,7 @@ function record(
         ? { unit: "usd", acceptableMints: [quoteMint] }
         : { unit: "sat", acceptableMints: [baseMint] },
       amount,
-      price: { numerator, denominator }
+      priceCentsPerBtc
     })
   };
 }
@@ -52,10 +51,10 @@ function record(
 describe("order-book presentation", () => {
   it("renders asks above the midpoint, bids below, and identifies the inside market", async () => {
     const book = await buildOrderBook([
-      record(askHigh, "sell", "104"),
-      record(bidLow, "buy", "96"),
-      record(askLow, "sell", "101"),
-      record(bidHigh, "buy", "99")
+      record(askHigh, "sell", "5200000"),
+      record(bidLow, "buy", "4800000"),
+      record(askLow, "sell", "5050000"),
+      record(bidHigh, "buy", "4950000")
     ], market, 1_700_000_100);
     const root = document.createElement("section");
 
@@ -75,10 +74,10 @@ describe("order-book presentation", () => {
     expect(root.querySelector('[data-summary="best-ask"]')?.textContent).toContain("50,500.00");
     expect(root.querySelector('[data-summary="best-bid"]')?.textContent).toContain("49,500.00");
     expect(root.querySelector('[data-summary="spread"]')?.textContent).toContain("1,000.00");
-    expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-exact-spread"))
-      .toBe("1/1000");
+    expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-spread-cents-per-btc"))
+      .toBe("100000");
     expect(root.querySelector(`[data-order-id="${askLow}"] [data-price]`)
-      ?.getAttribute("data-exact-price")).toBe("101/2000");
+      ?.getAttribute("data-price-cents-per-btc")).toBe("5050000");
 
     expect(root.querySelectorAll('th[scope="row"]')).toHaveLength(4);
     expect(root.querySelector(`[data-order-id="${askLow}"]`)?.textContent).toContain("Best ask");
@@ -86,7 +85,7 @@ describe("order-book presentation", () => {
   });
 
   it("offers an explicit take action with the exact verified order record", async () => {
-    const best = record(askLow, "sell", "1", "20", "20");
+    const best = record(askLow, "sell", "5000000", "20");
     const book = await buildOrderBook([best], market, 1_700_000_100);
     const root = document.createElement("section");
     const take = vi.fn();
@@ -104,12 +103,11 @@ describe("order-book presentation", () => {
   });
 
   it("validates exact all-or-none and partial-fill amounts before taking an order", async () => {
-    const allOrNone = record(askLow, "sell", "1", "20", "20");
+    const allOrNone = record(askLow, "sell", "5000000", "20");
     const partial = record(
       "77777777-7777-4777-8777-777777777777",
       "sell",
-      "1",
-      "20",
+      "5000000",
       "100"
     );
     partial.state.execution = "partial";
@@ -140,20 +138,19 @@ describe("order-book presentation", () => {
     expect(take).toHaveBeenCalledWith(partial, "25");
   });
 
-  it("preserves a sub-safe-integer spread as an exact rational", async () => {
-    const denominator = "9007199254740992";
+  it("preserves integer prices above Number.MAX_SAFE_INTEGER", async () => {
     const book = await buildOrderBook([
-      record("55555555-5555-4555-8555-555555555555", "sell", "9007199254740993", denominator, denominator),
-      record("66666666-6666-4666-8666-666666666666", "buy", "1", "1", denominator)
+      record("55555555-5555-4555-8555-555555555555", "sell", "9007199254740993"),
+      record("66666666-6666-4666-8666-666666666666", "buy", "9007199254740992")
     ], market, 1_700_000_100);
     const root = document.createElement("section");
 
     renderOrderBook(root, { status: "ready", book });
 
-    expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-exact-spread"))
-      .toBe("1/9007199254740992");
+    expect(root.querySelector('[data-summary="spread"]')?.getAttribute("data-spread-cents-per-btc"))
+      .toBe("1");
     expect(root.querySelector('[data-order-id="55555555-5555-4555-8555-555555555555"] [data-price]')
-      ?.getAttribute("data-exact-price")).toBe("9007199254740993/9007199254740992");
+      ?.getAttribute("data-price-cents-per-btc")).toBe("9007199254740993");
   });
 
   it("renders honest loading, error, and empty states", async () => {

@@ -29,7 +29,7 @@ function askState() {
       acceptableMints: ["https://nofee.testnut.cashu.space"]
     },
     amount: "2000",
-    price: { numerator: "101", denominator: "2000" }
+    priceCentsPerBtc: "5050000"
   });
 }
 
@@ -41,13 +41,13 @@ describe("Granola Nostr order events", () => {
       kind: 78,
       created_at: state.created_at,
       tags: expect.arrayContaining([
-        ["d", `granola:order-transition:v1:${orderId}`],
-        ["a", `30078:${maker}:granola:order:v1:${orderId}`],
+        ["d", `granola:order-transition:v2:${orderId}`],
+        ["a", `30078:${maker}:granola:order:v2:${orderId}`],
         ["op", "create"]
       ])
     });
     expect(JSON.parse(transition.content)).toMatchObject({
-      schema: "granola/order-transition/v1",
+      schema: "granola/order-transition/v2",
       operation_id: "operation-1",
       previous: null,
       state: { order_id: orderId }
@@ -62,7 +62,7 @@ describe("Granola Nostr order events", () => {
     const projection = await createProjectionTemplate(state, signedTransition);
     expect(projection.kind).toBe(30078);
     expect(projection.tags).toEqual(expect.arrayContaining([
-      ["d", `granola:order:v1:${orderId}`],
+      ["d", `granola:order:v2:${orderId}`],
       ["e", transitionId],
       ["expiration", String(state.expires_at + 604_800)],
       ["m", "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"]
@@ -84,7 +84,7 @@ describe("Granola Nostr order events", () => {
     const record = await parseProjectionEvent(event, () => true);
 
     expect(record).toMatchObject({
-      address: `30078:${maker}:granola:order:v1:${orderId}`,
+      address: `30078:${maker}:granola:order:v2:${orderId}`,
       eventId: event.id,
       headEventId: transitionId,
       makerPubkey: maker,
@@ -106,7 +106,7 @@ describe("Granola Nostr order events", () => {
     expect(parseCreateTransitionEvent(event, () => true)).toMatchObject({
       eventId: transitionId,
       makerPubkey: maker,
-      address: `30078:${maker}:granola:order:v1:${orderId}`,
+      address: `30078:${maker}:granola:order:v2:${orderId}`,
       operationId: "operation-1",
       state
     });
@@ -120,7 +120,10 @@ describe("Granola Nostr order events", () => {
 
     const nonCanonical = {
       ...event,
-      content: event.content.replace('"101","denominator":"2000"', '"202","denominator":"4000"')
+      content: event.content.replace(
+        '"price_cents_per_btc":"5050000"',
+        '"price_cents_per_btc":"05050000"'
+      )
     };
     expect(() => parseCreateTransitionEvent(nonCanonical, () => true))
       .toThrow("canonical");

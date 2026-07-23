@@ -36,24 +36,19 @@ describe("order funding guard", () => {
   });
 
   it("rejects a sell order larger than the SAT balance", () => {
-    expect(() => assertOrderFunding(wallet, "sell", "1875", { numerator: "1", denominator: "1" }))
+    expect(() => assertOrderFunding(wallet, "sell", "1875", "100000000"))
       .toThrow("requested 1,875 SAT, available 100 SAT");
   });
 
   it("allows an order within balance and rejects an oversized buy", () => {
-    expect(() => assertOrderFunding(wallet, "sell", "100", { numerator: "1", denominator: "1" })).not.toThrow();
-    expect(() => assertOrderFunding(wallet, "buy", "42", { numerator: "1", denominator: "2" }))
+    expect(() => assertOrderFunding(wallet, "sell", "100", "100000000")).not.toThrow();
+    expect(() => assertOrderFunding(wallet, "buy", "42", "50000000"))
       .toThrow("requested 21 USD, available 20 USD");
   });
 
   it("checks a buy against the truncated integer quote amount", () => {
-    expect(() => assertOrderFunding(wallet, "buy", "200", {
-      numerator: "99",
-      denominator: "2000"
-    })).not.toThrow();
-    expect(() => assertOrderFunding(wallet, "buy", "500", {
-      numerator: "99",
-      denominator: "2000"
-    })).toThrow("requested 24 USD, available 20 USD");
+    expect(() => assertOrderFunding(wallet, "buy", "200", "4950000")).not.toThrow();
+    expect(() => assertOrderFunding(wallet, "buy", "500", "4950000"))
+      .toThrow("requested 24 USD, available 20 USD");
   });
 });

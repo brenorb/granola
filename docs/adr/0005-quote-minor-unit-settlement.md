@@ -1,4 +1,4 @@
-# ADR 0005: Preserve base amount and truncate fractional quote units
+# ADR 0005: Integer cents-per-BTC pricing and truncated settlement
 
 ## Status
 
@@ -6,39 +6,55 @@ Accepted for the testnet proof of concept.
 
 ## Context
 
-Order amounts are expressed in the base mint's integer minor unit and the
-SAT/USD quote mint settles in integer cents. A rational price can therefore map
-an exact SAT amount to a fractional cent. For example:
+The SAT/USD testnet protocol represented a limit price as a reduced rational
+number of quote cents per SAT. Publishing and matching therefore required GCD
+reduction, exposed implementation details such as `101/2000` in the interface,
+and rejected or changed SAT amounts whenever the quote contained a fractional
+cent.
 
-```text
-200 SAT × 99/2000 cents/SAT = 9.9 cents
-```
-
-Changing 200 SAT to a larger "compatible" amount violates the user's signed
-quantity. Rejecting the order also makes ordinary small SAT amounts unusable.
+The user-selected base amount is the economic intent. A quote mint can settle
+only whole cents, but that does not justify changing the number of SAT being
+sold.
 
 ## Decision
 
-The signed base amount is final and is never rounded. The rational price remains
-in the public order. At settlement, the quote amount is:
+Public order state and private trade terms carry one positive canonical decimal
+string:
 
-```text
-floor(base_amount × price_numerator / price_denominator)
+```json
+{ "price_cents_per_btc": "4950000" }
 ```
 
-The result must be at least one quote minor unit. Both parties bind this actual
-integer quote amount, the exact base amount, and the rational displayed price
-into the encrypted trade terms before either party locks proofs.
+Because this removes and replaces signed fields, order state, order
+transitions, order addresses, direct messages, and the terms-hash domain move
+from `v1` to `v2`.
 
-For the example above, the order remains exactly 200 SAT and the USD mint
-settles 9 cents. The realized integer-minor-unit rate is therefore
-$45,000/BTC, not $49,500/BTC. The UI must disclose both 9.9 cents at the
-displayed price and the actual 9-cent settlement.
+Settlement uses integer arithmetic only:
 
-Each partial fill applies the same formula independently.
+```text
+quote_cents = (base_sats * price_cents_per_btc) / 100_000_000
+```
+
+For positive JavaScript `BigInt` values, `/` truncates the remainder. This is
+equivalent to Python `//` for these operands. The signed base amount is never
+rounded or replaced. A result of zero cents is rejected because no quote token
+can represent it.
+
+Examples:
+
+- `200 SAT` at `4_950_000 cents/BTC` settles `9 cents`;
+- `2_000 SAT` at `4_960_000 cents/BTC` settles `99 cents`;
+- `2_000 SAT` at `5_000_000 cents/BTC` settles `100 cents`.
+
+Each partial fill applies the formula independently. Both parties bind the
+actual integer quote amount, exact base amount, and integer price into the
+encrypted trade terms before either party locks proofs.
 
 ## Consequences
 
+- No binary floating point, GCD, numerator, denominator, or “exact ratio” is
+  part of pricing.
+- Order-book comparison is direct `BigInt` comparison.
 - The user's SAT quantity is never silently changed.
 - Any sub-cent remainder is discarded from the quote leg.
 - The realized rate can differ materially for very small orders, though the
@@ -47,12 +63,15 @@ Each partial fill applies the same formula independently.
   settle a zero-value quote leg.
 - Counterparties can deterministically recompute and validate the settlement
   amount using integer arithmetic.
+- Existing `v1` testnet events and persisted sessions containing `limit_price`
+  rational objects fail closed and must be republished as `v2`.
+- This field is specific to the current SAT/fiat-minor-unit deployment. A
+  future multi-asset price format requires a separate protocol decision.
 
 ## Executable vectors
 
-- `src/order/model.test.ts`: 200 SAT at 99/2000 settles 9 cents.
+- `src/order/model.test.ts`: 200 SAT at 4,950,000 cents/BTC settles 9 cents.
 - `src/order/human-price.test.ts`: UI guidance preserves 200 SAT and displays
   the 9-cent settlement.
 - `src/trade/model.test.ts`: session terms derive the same integer quote.
 - `src/trade/messages.test.ts`: encrypted terms reject any other quote amount.
-

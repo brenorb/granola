@@ -14,7 +14,7 @@ function session(
     reservationId: "11111111-1111-4111-8111-111111111111",
     role,
     phase: "negotiating",
-    orderAddress: `30078:${"22".repeat(32)}:granola:order:v1:22222222-2222-4222-8222-222222222222`,
+    orderAddress: `30078:${"22".repeat(32)}:granola:order:v2:22222222-2222-4222-8222-222222222222`,
     offeredOrderHead: "33".repeat(32),
     reserveTransitionId: null,
     fillTransitionId: null,
@@ -30,7 +30,7 @@ function session(
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "1",
-      price: { numerator: "1", denominator: "20" }
+      priceCentsPerBtc: "5000000"
     },
     plan: {
       anchor: 1_800_000_000,

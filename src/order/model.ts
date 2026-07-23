@@ -20,11 +20,6 @@ export interface RequestedAsset {
   acceptable_mints: string[];
 }
 
-export interface RationalPrice {
-  numerator: string;
-  denominator: string;
-}
-
 export interface ReservationState {
   id: string;
   amount: string;
@@ -35,7 +30,7 @@ export interface ReservationState {
 }
 
 export interface OrderState {
-  schema: "granola/order/v1";
+  schema: "granola/order/v2";
   order_id: string;
   revision: string;
   created_at: number;
@@ -48,7 +43,7 @@ export interface OrderState {
   original_amount: string;
   remaining_amount: string;
   reserved_amount: string;
-  limit_price: RationalPrice;
+  price_cents_per_btc: string;
   minimum_fill_amount: string;
   execution: ExecutionCondition;
   status: OrderStatus;
@@ -67,7 +62,7 @@ export interface CreateOrderInput {
   offered: { unit: string; mint: string };
   requested: { unit: string; acceptableMints: string[] };
   amount: string;
-  price: RationalPrice;
+  priceCentsPerBtc: string;
   execution?: ExecutionCondition;
   minimumFillAmount?: string;
 }
@@ -135,35 +130,21 @@ function integer(value: string, label: string, allowZero = false): bigint {
   return BigInt(value);
 }
 
-function gcd(left: bigint, right: bigint): bigint {
-  while (right !== 0n) [left, right] = [right, left % right];
-  return left;
-}
-
-function canonicalPrice(price: RationalPrice): RationalPrice {
-  const numerator = integer(price.numerator, "Price numerator");
-  const denominator = integer(price.denominator, "Price denominator");
-  const divisor = gcd(numerator, denominator);
-  return {
-    numerator: (numerator / divisor).toString(),
-    denominator: (denominator / divisor).toString()
-  };
+function canonicalPriceCentsPerBtc(value: string): string {
+  return integer(value, "Price cents per BTC").toString();
 }
 
 /**
- * Convert an exact base amount and rational price into the integer quote amount
- * supported by the quote mint. Fractional quote minor units are truncated;
- * the exact base amount is never changed.
+ * Convert SAT and cents-per-BTC integers into whole quote cents. For positive
+ * BigInts, `/` truncates the fractional remainder like Python's `//`.
  */
 export function quoteAmountForSettlement(
   baseAmount: string,
-  priceInput: RationalPrice
+  priceCentsPerBtc: string
 ): string {
   const base = integer(baseAmount, "Base amount");
-  const price = canonicalPrice(priceInput);
-  const numerator = base * BigInt(price.numerator);
-  const denominator = BigInt(price.denominator);
-  const quote = numerator / denominator;
+  const price = BigInt(canonicalPriceCentsPerBtc(priceCentsPerBtc));
+  const quote = (base * price) / 100_000_000n;
   if (quote === 0n) {
     throw new Error("Order amount and limit price must produce at least one quote unit");
   }
@@ -197,8 +178,8 @@ export function createOrderState(input: CreateOrderInput): OrderState {
     throw new Error("Order expiry must be after creation");
   }
   const amount = integer(input.amount, "Order amount");
-  const price = canonicalPrice(input.price);
-  quoteAmountForSettlement(amount.toString(), price);
+  const priceCentsPerBtc = canonicalPriceCentsPerBtc(input.priceCentsPerBtc);
+  quoteAmountForSettlement(amount.toString(), priceCentsPerBtc);
 
   const execution = input.execution ?? "all_or_none";
   if (execution !== "all_or_none" && execution !== "partial") {
@@ -217,7 +198,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   if (acceptableMints.length === 0) throw new Error("At least one requested mint is required");
 
   return {
-    schema: "granola/order/v1",
+    schema: "granola/order/v2",
     order_id: input.orderId,
     revision: "0",
     created_at: input.createdAt,
@@ -230,7 +211,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
     original_amount: amount.toString(),
     remaining_amount: amount.toString(),
     reserved_amount: "0",
-    limit_price: price,
+    price_cents_per_btc: priceCentsPerBtc,
     minimum_fill_amount: minimumValue.toString(),
     execution,
     status: "open",
@@ -266,7 +247,7 @@ function validateFillShape(state: OrderState, amount: bigint, remaining: bigint)
       throw new Error("Fill would leave dust below the order minimum");
     }
   }
-  quoteAmountForSettlement(amount.toString(), state.limit_price);
+  quoteAmountForSettlement(amount.toString(), state.price_cents_per_btc);
 }
 
 export function reserveOrder(state: OrderState, input: ReserveOrderInput): OrderState {
@@ -417,11 +398,9 @@ function effectiveAvailable(state: OrderState, now: number): bigint {
 }
 
 function comparePrice(left: OrderRecord, right: OrderRecord): number {
-  const leftPrice = left.state.limit_price;
-  const rightPrice = right.state.limit_price;
-  const leftCross = BigInt(leftPrice.numerator) * BigInt(rightPrice.denominator);
-  const rightCross = BigInt(rightPrice.numerator) * BigInt(leftPrice.denominator);
-  return leftCross < rightCross ? -1 : leftCross > rightCross ? 1 : 0;
+  const leftPrice = BigInt(left.state.price_cents_per_btc);
+  const rightPrice = BigInt(right.state.price_cents_per_btc);
+  return leftPrice < rightPrice ? -1 : leftPrice > rightPrice ? 1 : 0;
 }
 
 export async function buildOrderBook(

@@ -9,7 +9,6 @@ import {
   type ExactMarket,
   type FillOrderInput,
   type OrderState,
-  type RationalPrice,
   type ReserveOrderInput
 } from "../order/model.js";
 import {
@@ -67,7 +66,7 @@ export interface OrderServicePort {
 export interface PublishOrderInput {
   side: "buy" | "sell";
   amount: string;
-  price: RationalPrice;
+  priceCentsPerBtc: string;
   expiresAt?: number;
   execution?: "all_or_none" | "partial";
   minimumFillAmount?: string;
@@ -342,7 +341,7 @@ export class OrderApi {
       quoteUnit: TEST_MARKET.quoteUnit,
       ...orderAssets(input.side),
       amount: input.amount,
-      price: input.price,
+      priceCentsPerBtc: input.priceCentsPerBtc,
       ...(input.execution === undefined ? {} : { execution: input.execution }),
       ...(input.minimumFillAmount === undefined
         ? {}
@@ -352,14 +351,14 @@ export class OrderApi {
     const entry = await this.outbox.ensureStaged({
       operation: "create",
       orderId: state.order_id,
-      address: `30078:${maker}:granola:order:v1:${state.order_id}`,
+      address: `30078:${maker}:granola:order:v2:${state.order_id}`,
       expectedHeadId: null,
       quorum: this.orders.publicationQuorum(),
       compatibility: canonicalOrderPublicationCompatibility({
         operation: "create",
         side: input.side,
         amount: input.amount,
-        price: input.price,
+        priceCentsPerBtc: input.priceCentsPerBtc,
         expiresAt: state.expires_at,
         execution: state.execution,
         minimumFillAmount: state.minimum_fill_amount

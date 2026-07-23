@@ -23,7 +23,7 @@ interface ProjectionContent extends OrderState {
 }
 
 interface CreateTransitionContent {
-  schema: "granola/order-transition/v1";
+  schema: "granola/order-transition/v2";
   operation_id: string;
   operation: "create";
   revision: "0";
@@ -47,7 +47,7 @@ export interface ReleaseTransitionEvidence {
 export type TransitionEvidence = FillTransitionEvidence | ReleaseTransitionEvidence;
 
 interface StateTransitionContent {
-  schema: "granola/order-transition/v1";
+  schema: "granola/order-transition/v2";
   operation_id: string;
   operation: OrderOperation;
   revision: string;
@@ -75,7 +75,7 @@ const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 
 function orderAddress(pubkey: string, orderId: string): string {
-  return `30078:${pubkey}:granola:order:v1:${orderId}`;
+  return `30078:${pubkey}:granola:order:v2:${orderId}`;
 }
 
 function requireHex(value: string, pattern: RegExp, label: string): void {
@@ -176,14 +176,14 @@ export function createTransitionTemplate(
     kind: 78,
     created_at: state.created_at,
     tags: [
-      ["d", `granola:order-transition:v1:${state.order_id}`],
+      ["d", `granola:order-transition:v2:${state.order_id}`],
       ["t", "granola-order-transition"],
       ["v", "1"],
       ["a", orderAddress(makerPubkey, state.order_id)],
       ["op", "create"]
     ],
     content: JSON.stringify({
-      schema: "granola/order-transition/v1",
+      schema: "granola/order-transition/v2",
       operation_id: operationId,
       operation: "create",
       revision: "0",
@@ -238,7 +238,7 @@ export function createStateTransitionTemplate(
     throw new Error("Transition timestamp is invalid");
   }
   const content: StateTransitionContent = {
-    schema: "granola/order-transition/v1",
+    schema: "granola/order-transition/v2",
     operation_id: operationId,
     operation,
     revision: state.revision,
@@ -250,7 +250,7 @@ export function createStateTransitionTemplate(
     kind: 78,
     created_at: timestamp,
     tags: [
-      ["d", `granola:order-transition:v1:${state.order_id}`],
+      ["d", `granola:order-transition:v2:${state.order_id}`],
       ["t", "granola-order-transition"],
       ["v", "1"],
       ["a", orderAddress(makerPubkey, state.order_id)],
@@ -275,7 +275,7 @@ export async function createProjectionTemplate(
     kind: 30078,
     created_at: transition.created_at,
     tags: [
-      ["d", `granola:order:v1:${state.order_id}`],
+      ["d", `granola:order:v2:${state.order_id}`],
       ["t", "granola-order"],
       ["v", "1"],
       ["s", state.status],
@@ -311,7 +311,7 @@ function canonicalNonNegative(value: unknown, label: string): string {
 function parseCanonicalState(value: unknown): { state: OrderState; head?: string } {
   if (!value || typeof value !== "object") throw new Error("Projection content must be an object");
   const input = value as Partial<ProjectionContent>;
-  if (input.schema !== "granola/order/v1") throw new Error("Unknown order schema");
+  if (input.schema !== "granola/order/v2") throw new Error("Unknown order schema");
   if (input.head !== undefined) {
     if (typeof input.head !== "string") throw new Error("Projection head is invalid");
     requireHex(input.head, HEX_32, "Projection head");
@@ -326,7 +326,7 @@ function parseCanonicalState(value: unknown): { state: OrderState; head?: string
     !input.offered ||
     !input.requested ||
     typeof input.original_amount !== "string" ||
-    !input.limit_price ||
+    typeof input.price_cents_per_btc !== "string" ||
     typeof input.minimum_fill_amount !== "string" ||
     (input.execution !== "all_or_none" && input.execution !== "partial")
   ) {
@@ -346,7 +346,7 @@ function parseCanonicalState(value: unknown): { state: OrderState; head?: string
       acceptableMints: input.requested.acceptable_mints
     },
     amount: input.original_amount,
-    price: input.limit_price,
+    priceCentsPerBtc: input.price_cents_per_btc,
     execution: input.execution,
     minimumFillAmount: input.minimum_fill_amount
   });
@@ -438,7 +438,7 @@ export function parseTransitionEvent(
   }
   const input = decoded as Partial<StateTransitionContent>;
   if (
-    input.schema !== "granola/order-transition/v1" ||
+    input.schema !== "granola/order-transition/v2" ||
     !input.operation ||
     !["create", "reserve", "release", "fill", "cancel", "replace"].includes(input.operation) ||
     typeof input.revision !== "string" ||
@@ -468,7 +468,7 @@ export function parseTransitionEvent(
     throw new Error("Transition operation cannot carry evidence");
   }
   const expectedContent: StateTransitionContent = {
-    schema: "granola/order-transition/v1",
+    schema: "granola/order-transition/v2",
     operation_id: input.operation_id,
     operation: input.operation,
     revision: state.revision,
@@ -486,7 +486,7 @@ export function parseTransitionEvent(
     throw new Error("Reserve timestamp does not match reservation acceptance");
   }
   const address = orderAddress(event.pubkey, state.order_id);
-  if (oneTag(event, "d") !== `granola:order-transition:v1:${state.order_id}`) {
+  if (oneTag(event, "d") !== `granola:order-transition:v2:${state.order_id}`) {
     throw new Error("Transition order ID tag mismatch");
   }
   if (oneTag(event, "t") !== "granola-order-transition") {
@@ -534,7 +534,7 @@ export async function parseProjectionEvent(
   if (state.revision === "0" && event.created_at !== state.created_at) {
     throw new Error("Initial projection timestamp does not match order creation");
   }
-  const expectedD = `granola:order:v1:${state.order_id}`;
+  const expectedD = `granola:order:v2:${state.order_id}`;
   if (oneTag(event, "d") !== expectedD) throw new Error("Projection order ID tag mismatch");
   if (oneTag(event, "t") !== "granola-order") throw new Error("Projection namespace mismatch");
   if (oneTag(event, "v") !== "1") throw new Error("Projection version mismatch");

@@ -13,7 +13,7 @@ const EVENT: NostrEvent = {
   content: "{}"
 };
 const TRANSITION: NostrEvent = { ...EVENT, id: "e".repeat(64), kind: 78 };
-const ADDRESS = `30078:${"b".repeat(64)}:granola:order:v1:11111111-1111-4111-8111-111111111111`;
+const ADDRESS = `30078:${"b".repeat(64)}:granola:order:v2:11111111-1111-4111-8111-111111111111`;
 
 class FakePool implements RelayPoolPort {
   destroyed = false;

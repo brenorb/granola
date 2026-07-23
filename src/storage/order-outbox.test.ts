@@ -31,7 +31,7 @@ async function publication(
     offered: { unit: "sat", mint: "https://testnut.cashu.space" },
     requested: { unit: "usd", acceptableMints: ["https://nofee.testnut.cashu.space"] },
     amount: "2000",
-    price: { numerator: "101", denominator: "2000" }
+    priceCentsPerBtc: "5050000"
   });
   const transition: NostrEvent = {
     ...createTransitionTemplate(state, MAKER, "operation-1"),
@@ -71,7 +71,7 @@ async function successorIntent(
   return {
     operation,
     orderId: staged.state.order_id,
-    address: `30078:${MAKER}:granola:order:v1:${staged.state.order_id}`,
+    address: `30078:${MAKER}:granola:order:v2:${staged.state.order_id}`,
     expectedHeadId: operation === "create" ? null : "a".repeat(64),
     quorum: 2,
     compatibility: canonicalOrderPublicationCompatibility({ operation }),
@@ -120,7 +120,7 @@ describe("order publication outbox", () => {
     const secondIntent = {
       ...firstIntent,
       orderId: second.state.order_id,
-      address: `30078:${MAKER}:granola:order:v1:${second.state.order_id}`,
+      address: `30078:${MAKER}:granola:order:v2:${second.state.order_id}`,
       state: second.state
     };
     await Promise.all([
@@ -172,7 +172,7 @@ describe("order publication outbox", () => {
     const secondIntent = {
       ...firstIntent,
       orderId: saved.state.order_id,
-      address: `30078:${MAKER}:granola:order:v1:${saved.state.order_id}`,
+      address: `30078:${MAKER}:granola:order:v2:${saved.state.order_id}`,
       state: saved.state
     };
 
@@ -233,10 +233,7 @@ describe("order publication outbox", () => {
       evidence: intent.evidence,
       state: {
         ...intent.state,
-        limit_price: {
-          denominator: intent.state.limit_price.denominator,
-          numerator: intent.state.limit_price.numerator
-        }
+        price_cents_per_btc: intent.state.price_cents_per_btc
       },
       compatibility: intent.compatibility,
       expectedHeadId: intent.expectedHeadId,

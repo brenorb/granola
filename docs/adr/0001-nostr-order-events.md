@@ -70,7 +70,7 @@ Bitcoin versus ISO-4217 fiat:
 - `pm` describes off-protocol payment methods;
 - its statuses are `pending`, `canceled`, `in-progress`, `success`, `expired`.
 
-It does not define Cashu mint URLs, acceptable mint sets, exact rational limit
+It does not define Cashu mint URLs, acceptable mint sets, integer limit
 prices, remaining quantity, minimum fills, all-or-none, partial fills, revisions,
 or reservation/fill conflict rules. Adding all of these while populating its
 mandatory Bitcoin/fiat fields would create a profile that legacy NIP-69 clients
@@ -101,7 +101,7 @@ best-effort cleanup, never as the cancellation authority.
 The stable order address is:
 
 ```text
-30078:<maker-pubkey>:granola:order:v1:<order-id>
+30078:<maker-pubkey>:granola:order:v2:<order-id>
 ```
 
 `order-id` is a random UUID. The bare UUID is not globally unique without the
@@ -124,7 +124,7 @@ The current projection has kind `30078` and these tags:
 
 ```json
 [
-  ["d", "granola:order:v1:019..."] ,
+  ["d", "granola:order:v2:019..."] ,
   ["t", "granola-order"],
   ["v", "1"],
   ["s", "open"],
@@ -161,7 +161,7 @@ The `content` is a JSON object:
 
 ```json
 {
-  "schema": "granola/order/v1",
+  "schema": "granola/order/v2",
   "order_id": "019...",
   "revision": "0",
   "head": "<current-transition-id>",
@@ -181,7 +181,7 @@ The `content` is a JSON object:
   "original_amount": "1000",
   "remaining_amount": "1000",
   "reserved_amount": "0",
-  "limit_price": { "numerator": "5", "denominator": "1" },
+  "price_cents_per_btc": "500000000",
   "minimum_fill_amount": "1000",
   "execution": "all_or_none",
   "status": "open",
@@ -195,7 +195,7 @@ A complete bid uses the same cardinality without reversing the schema:
 
 ```json
 {
-  "schema": "granola/order/v1",
+  "schema": "granola/order/v2",
   "order_id": "019...bid",
   "revision": "0",
   "head": "<current-transition-id>",
@@ -215,7 +215,7 @@ A complete bid uses the same cardinality without reversing the schema:
   "original_amount": "1000",
   "remaining_amount": "1000",
   "reserved_amount": "0",
-  "limit_price": { "numerator": "5", "denominator": "1" },
+  "price_cents_per_btc": "500000000",
   "minimum_fill_amount": "100",
   "execution": "partial",
   "status": "open",
@@ -229,13 +229,16 @@ Its `m` tags are
 `af826c2cddbdba30d2fa196180ce8a0111618e002eec2a1e644cbddd9935797e`
 and `79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b`.
 
-All amounts are canonical non-negative integer strings in the base asset's
-minor unit; original amount and minimum fill are positive. Price is the reduced
-positive rational number of quote minor units per base minor unit.
-Implementations must not use binary floating point. The base fill is exact.
-When the rational price produces a fractional quote minor unit, the quote
-settlement is truncated according to ADR 0005:
-`floor(base_fill * numerator / denominator)`. The result must be positive.
+All amounts are canonical non-negative integer strings in the asset's minor
+unit; original amount and minimum fill are positive. In the SAT/USD testnet
+deployment, price is the positive canonical `price_cents_per_btc` integer.
+Implementations must not use binary floating point. Quote settlement truncates
+with integer division:
+
+`quote_cents = (base_sats * price_cents_per_btc) / 100_000_000`
+
+The base amount is never changed to make the quote divide evenly. A quote below
+one cent is invalid.
 
 `base_unit` and `quote_unit` are side-neutral and do not carry mint cardinality.
 `side` is `sell` for an ask and `buy` for a bid. For a sell, `offered.unit` must
@@ -255,10 +258,10 @@ tags include the projection address, operation, and predecessor:
 
 ```json
 [
-  ["d", "granola:order-transition:v1:019..."],
+  ["d", "granola:order-transition:v2:019..."],
   ["t", "granola-order-transition"],
   ["v", "1"],
-  ["a", "30078:<maker-pubkey>:granola:order:v1:019..."],
+  ["a", "30078:<maker-pubkey>:granola:order:v2:019..."],
   ["op", "fill"],
   ["e", "<previous-transition-id>"]
 ]
@@ -391,8 +394,8 @@ replacements, not the economic Replace operation.
 An exchange view selects an exact base `(unit, mint)` and quote `(unit, mint)`.
 It includes only orders compatible with both issuer liabilities.
 
-- asks sort by lowest exact rational price, then stable order address;
-- bids sort by highest exact rational price, then stable order address;
+- asks sort by lowest integer cents-per-BTC price, then stable order address;
+- bids sort by highest integer cents-per-BTC price, then stable order address;
 - reserved quantity is excluded from displayed available depth;
 - terminal and locally expired orders are excluded.
 

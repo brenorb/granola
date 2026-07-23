@@ -47,7 +47,7 @@ function view(revision = 0): PublicTradeView {
     reservationId: "55555555-5555-4555-8555-555555555555",
     role: "taker",
     phase: "negotiating",
-    orderAddress: `30078:${"66".repeat(32)}:granola:order:v1:77777777-7777-4777-8777-777777777777`,
+    orderAddress: `30078:${"66".repeat(32)}:granola:order:v2:77777777-7777-4777-8777-777777777777`,
     offeredOrderHead: "88".repeat(32),
     reserveTransitionId: null,
     fillTransitionId: null,
@@ -63,7 +63,7 @@ function view(revision = 0): PublicTradeView {
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "20",
-      price: { numerator: "1", denominator: "50" }
+      priceCentsPerBtc: "2000000"
     },
     plan: {
       anchor: 1_800_000_000,

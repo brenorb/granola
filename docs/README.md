@@ -21,7 +21,7 @@
 - [ADR 0002: Separate maker signing identity](adr/0002-maker-signing-identity.md)
 - [ADR 0003: Nostr private swap messages](adr/0003-nostr-private-swap-messages.md)
 - [ADR 0004: Two-mint settlement with staggered Cashu HTLCs](adr/0004-cashu-htlc-settlement.md)
-- [ADR 0005: Preserve base amount and truncate fractional quote units](adr/0005-quote-minor-unit-settlement.md)
+- [ADR 0005: Integer cents-per-BTC pricing and truncated settlement](adr/0005-quote-minor-unit-settlement.md)
 
 ## Reading rule
 

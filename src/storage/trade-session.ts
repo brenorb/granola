@@ -20,7 +20,7 @@ const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ORDER_ADDRESS = new RegExp(
-  `^30078:[0-9a-f]{64}:granola:order:v1:${UUID_V4.source.slice(1, -1)}$`
+  `^30078:[0-9a-f]{64}:granola:order:v2:${UUID_V4.source.slice(1, -1)}$`
 );
 const CANONICAL_INTEGER = /^(0|[1-9]\d*)$/;
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
@@ -378,7 +378,7 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
 function validateMessage(value: unknown): void {
   const message = object(value, "Trade outbox message");
   if (
-    message.schema !== "granola/dm/v1" ||
+    message.schema !== "granola/dm/v2" ||
     message.deployment !== "cashu-testnet-v1" ||
     typeof message.message_id !== "string" ||
     !UUID_V4.test(message.message_id) ||
@@ -926,7 +926,7 @@ function validatePendingOrderPublication(
     addressParts[1] !== context.makerPubkey ||
     addressParts[2] !== "granola" ||
     addressParts[3] !== "order" ||
-    addressParts[4] !== "v1" ||
+    addressParts[4] !== "v2" ||
     typeof addressOrderId !== "string" ||
     !UUID_V4.test(addressOrderId) ||
     pending.orderId !== addressOrderId ||
@@ -935,9 +935,9 @@ function validatePendingOrderPublication(
     eventTag(transition, "op") !== pending.operation ||
     eventTag(projection, "e") !== transition.id ||
     eventTag(transition, "d") !==
-      `granola:order-transition:v1:${String(pending.orderId)}` ||
+      `granola:order-transition:v2:${String(pending.orderId)}` ||
     eventTag(projection, "d") !==
-      `granola:order:v1:${String(pending.orderId)}`
+      `granola:order:v2:${String(pending.orderId)}`
   ) throw new Error("Pending order publication artifacts disagree");
   if (
     (pending.operation === "reserve" && (
@@ -1115,13 +1115,10 @@ function assertSession(value: unknown): asserts value is TradeSession {
     typeof terms.baseAmount !== "string" ||
     !POSITIVE_INTEGER.test(terms.baseAmount) ||
     typeof terms.quoteAmount !== "string" ||
-    !POSITIVE_INTEGER.test(terms.quoteAmount)
+    !POSITIVE_INTEGER.test(terms.quoteAmount) ||
+    typeof terms.priceCentsPerBtc !== "string" ||
+    !POSITIVE_INTEGER.test(terms.priceCentsPerBtc)
   ) throw new Error("Trade terms are invalid");
-  const price = object(terms.price, "Trade price");
-  if (
-    typeof price.numerator !== "string" || !POSITIVE_INTEGER.test(price.numerator) ||
-    typeof price.denominator !== "string" || !POSITIVE_INTEGER.test(price.denominator)
-  ) throw new Error("Trade price is invalid");
 
   const plan = object(session.plan, "Settlement plan");
   for (const field of [

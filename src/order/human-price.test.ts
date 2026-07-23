@@ -6,10 +6,10 @@ import {
 } from "./human-price.js";
 
 describe("human fiat/BTC price", () => {
-  it("converts decimal fiat per BTC into exact minor-unit per SAT", () => {
-    expect(fiatPerBtcPrice("50500.00")).toEqual({ numerator: "101", denominator: "2000" });
-    expect(fiatPerBtcPrice("49500")).toEqual({ numerator: "99", denominator: "2000" });
-    expect(fiatPerBtcPrice("0.01")).toEqual({ numerator: "1", denominator: "100000000" });
+  it("converts decimal fiat per BTC into integer cents per BTC", () => {
+    expect(fiatPerBtcPrice("50500.00")).toBe("5050000");
+    expect(fiatPerBtcPrice("49500")).toBe("4950000");
+    expect(fiatPerBtcPrice("0.01")).toBe("1");
   });
 
   it("rejects ambiguous, negative, and over-precise prices", () => {
@@ -17,15 +17,14 @@ describe("human fiat/BTC price", () => {
       expect(() => fiatPerBtcPrice(value)).toThrow("Price must");
   });
 
-  it("shows the truncated quote settlement without changing the SAT amount", () => {
+  it("preserves the SAT amount and reports the truncated cent settlement", () => {
     expect(settlementQuoteGuidance("200", fiatPerBtcPrice("49500.00")))
       .toEqual({
-        exactQuoteNumerator: "99",
-        exactQuoteDenominator: "10",
+        exactQuoteNumerator: "990000000",
+        exactQuoteDenominator: "100000000",
         settlementQuoteAmount: "9"
       });
-    expect(settlementQuoteGuidance("2000", fiatPerBtcPrice("50500.00")))
+    expect(settlementQuoteGuidance("2000", fiatPerBtcPrice("50000.00")))
       .toBeNull();
   });
-
 });

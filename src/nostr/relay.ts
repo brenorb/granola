@@ -63,7 +63,7 @@ function validateRelays(relays: readonly string[]): string[] {
   return normalized;
 }
 
-const ORDER_ADDRESS = /^30078:[0-9a-f]{64}:granola:order:v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const ORDER_ADDRESS = /^30078:[0-9a-f]{64}:granola:order:v2:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class RelayClient {
   readonly relays: string[];

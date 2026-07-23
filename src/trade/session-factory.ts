@@ -115,11 +115,11 @@ function assertOpenSellOrder(
     throw new Error("Order authority or head is invalid");
   }
   const expectedAddress =
-    `30078:${order.makerPubkey}:granola:order:v1:${order.state.order_id}`;
+    `30078:${order.makerPubkey}:granola:order:v2:${order.state.order_id}`;
   if (order.address !== expectedAddress) throw new Error("Order address does not match its authority");
   const state = order.state;
   if (
-    state.schema !== "granola/order/v1" ||
+    state.schema !== "granola/order/v2" ||
     state.side !== "sell" ||
     state.status !== "open"
   ) throw new Error("Session factory accepts only open maker sell orders");
@@ -156,7 +156,7 @@ function amounts(order: OrderRecord, fillBaseAmount: string): { base: string; qu
   const result = settlementAmounts({
     remainingBaseAmount: order.state.remaining_amount,
     fillBaseAmount,
-    price: order.state.limit_price,
+    priceCentsPerBtc: order.state.price_cents_per_btc,
     execution: order.state.execution,
     minimumFillAmount: order.state.minimum_fill_amount
   });
@@ -234,7 +234,7 @@ function tradeTerms(
     quoteUnit: market.quoteUnit,
     quoteKeyset: market.quoteKeyset,
     quoteAmount: selected.quote,
-    price: { ...order.state.limit_price }
+    priceCentsPerBtc: order.state.price_cents_per_btc
   };
 }
 
@@ -416,8 +416,7 @@ export async function createMakerSession(
     terms.quote_keyset !== market.quoteKeyset ||
     terms.base_amount !== selected.base ||
     terms.quote_amount !== selected.quote ||
-    terms.limit_price.numerator !== input.order.state.limit_price.numerator ||
-    terms.limit_price.denominator !== input.order.state.limit_price.denominator
+    terms.price_cents_per_btc !== input.order.state.price_cents_per_btc
   ) throw new Error("Reserve proposal terms do not match the selected order market");
 
   const choreography = await advanceAtomicSwapChoreography(
