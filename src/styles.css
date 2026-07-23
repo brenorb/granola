@@ -156,9 +156,12 @@ code { font-family: "Courier New", monospace; }
   .panel:nth-child(odd) { border-right: 0; }
   .field-pair { grid-template-columns: 1fr; }
   .market-tape { grid-template-columns: 1fr 1fr; }
-  .market-wallet { flex-wrap: wrap; }
-  .wallet-summary { flex-basis: 100%; }
-  .market-wallet .mint-actions { flex: 1; }
+  .market-wallet { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .market-wallet > #wallet-summary { grid-column: 1 / -1; min-width: 0; }
+  .market-wallet .wallet-summary { width: 100%; }
+  .market-wallet .mint-actions { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2,minmax(0,1fr)); min-width: 0; padding: 1px; }
+  .market-wallet .quick-mint { width: 100%; min-width: 0; padding-inline: .5rem; }
+  .market-wallet > #refresh { grid-column: 1 / -1; width: 100%; min-width: 0; }
   .orderbook-columns { grid-template-columns: 1fr; }
   .orderbook-midpoint { order: 2; }
   .orderbook-side--bids { order: 3; }
