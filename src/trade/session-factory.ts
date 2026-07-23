@@ -49,7 +49,8 @@ export interface SessionFactoryEntropy {
 
 export interface TakerSessionInput {
   order: OrderRecord;
-  expectedOrderHead: string;
+  expectedOrderProjectionId: string;
+  expectedOrderRevision: string;
   market: SessionMarketSelection;
   fillBaseAmount: string;
   clocks: Omit<SettlementPlanInput, "orderExpiresAt">;
@@ -102,17 +103,22 @@ function canonicalMarket(input: SessionMarketSelection): SessionMarketSelection 
 
 function assertOpenSellOrder(
   order: OrderRecord,
-  expectedHead: string,
+  expectedProjectionId: string,
+  expectedRevision: string,
   marketInput: SessionMarketSelection,
   now: number
 ): SessionMarketSelection {
   const market = canonicalMarket(marketInput);
   if (!order.verified) throw new Error("Order must be verified");
-  if (!HEX_32.test(expectedHead) || order.headEventId !== expectedHead) {
-    throw new Error("Order head is stale");
+  if (
+    !HEX_32.test(expectedProjectionId) ||
+    order.eventId !== expectedProjectionId ||
+    order.state.revision !== expectedRevision
+  ) {
+    throw new Error("Order projection is stale");
   }
-  if (!HEX_32.test(order.headEventId) || !HEX_32.test(order.makerPubkey)) {
-    throw new Error("Order authority or head is invalid");
+  if (!HEX_32.test(order.eventId) || !HEX_32.test(order.makerPubkey)) {
+    throw new Error("Order authority or projection ID is invalid");
   }
   const expectedAddress =
     `30078:${order.makerPubkey}:granola:order:v1:${order.state.order_id}`;
@@ -255,8 +261,10 @@ function emptyEvidence(order: OrderRecord, market: SessionMarketSelection): Trad
     makerPubkey: order.makerPubkey,
     commitments: [],
     mintStates: [],
-    reserveTransitionId: null,
-    fillTransitionId: null,
+    reserveProjectionId: null,
+    reserveProjectionRevision: null,
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     reservation: {
       proposalSealId: null,
       takerCommitment: null,
@@ -293,9 +301,12 @@ function baseSession(input: {
     role: input.role,
     phase: "negotiating",
     orderAddress: input.order.address,
-    offeredOrderHead: input.order.headEventId,
-    reserveTransitionId: null,
-    fillTransitionId: null,
+    offeredProjectionId: input.order.eventId,
+    offeredProjectionRevision: input.order.state.revision,
+    reserveProjectionId: null,
+    reserveProjectionRevision: null,
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     pendingOrderPublication: null,
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
@@ -343,7 +354,8 @@ export async function createTakerSession(
 ): Promise<TradeSession> {
   const market = assertOpenSellOrder(
     input.order,
-    input.expectedOrderHead,
+    input.expectedOrderProjectionId,
+    input.expectedOrderRevision,
     input.market,
     input.clocks.localNow
   );
@@ -395,7 +407,8 @@ export async function createMakerSession(
   }
   const market = assertOpenSellOrder(
     input.order,
-    message.order_head,
+    message.order_projection_id,
+    message.order_revision,
     input.market,
     input.clocks.localNow
   );

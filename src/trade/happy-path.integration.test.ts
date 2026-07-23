@@ -2,7 +2,6 @@ import { createHTLCHash } from "@cashu/cashu-ts";
 import {
   finalizeEvent,
   getPublicKey,
-  verifyEvent,
   type EventTemplate
 } from "nostr-tools/pure";
 import { describe, expect, it } from "vitest";
@@ -20,11 +19,7 @@ import { createInboxList } from "../nostr/inbox.js";
 import type {
   DiscoveredTradeInbox
 } from "../nostr/trade-transport.js";
-import {
-  parseTransitionEvent,
-  type NostrEvent,
-  type UnsignedNostrEvent
-} from "../order/events.js";
+import type { NostrEvent, UnsignedNostrEvent } from "../order/events.js";
 import {
   NostrOrderService,
   type OrderRelayPort,
@@ -109,13 +104,10 @@ function sessionEntropy(
 }
 
 class MemoryOrderRelay implements OrderRelayPort {
-  private readonly transitions = new Map<string, NostrEvent>();
   private readonly projections = new Map<string, NostrEvent>();
 
   async publish(event: NostrEvent) {
-    if (event.kind === 78) {
-      this.transitions.set(event.id, structuredClone(event));
-    } else if (event.kind === 30078) {
+    if (event.kind === 30078) {
       const identifier = event.tags.find((tag) => tag[0] === "d")?.[1];
       if (!identifier) throw new Error("Projection lacks its replaceable identifier");
       this.projections.set(
@@ -134,15 +126,11 @@ class MemoryOrderRelay implements OrderRelayPort {
     return structuredClone([...this.projections.values()]);
   }
 
-  async queryTransitions(addresses: string[]): Promise<NostrEvent[]> {
-    const selected = new Set(addresses);
-    return structuredClone(
-      [...this.transitions.values()].filter((event) =>
-        event.tags.some(
-          (tag) => tag[0] === "a" && selected.has(tag[1] ?? "")
-        )
-      )
-    );
+  async queryOrder(address: string): Promise<NostrEvent[]> {
+    const [, author, ...identifierParts] = address.split(":");
+    const identifier = identifierParts.join(":");
+    const event = this.projections.get(`${author}:${identifier}`);
+    return event === undefined ? [] : [structuredClone(event)];
   }
 }
 
@@ -438,12 +426,9 @@ describe("two-party coordinator happy path", () => {
         finalizeEvent(template as EventTemplate, makerOrderKey)
     };
     const orderRelay = new MemoryOrderRelay();
-    let operationCounter = 1;
     const orderService = new NostrOrderService(
       signer,
-      orderRelay,
-      () => uuid(operationCounter++),
-      2
+      orderRelay
     );
     const orderOutbox = new OrderOutboxRepository(new MemoryStorageDriver());
     const orderApi = new OrderApi(
@@ -546,7 +531,8 @@ describe("two-party coordinator happy path", () => {
     };
     await takerSessions.save(await createTakerSession({
       order,
-      expectedOrderHead: order.headEventId,
+      expectedOrderProjectionId: order.eventId,
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "20",
       clocks
@@ -634,7 +620,7 @@ describe("two-party coordinator happy path", () => {
       if (!advanced) throw new Error("Happy-path scheduler made no progress");
     }
     expect(steps).toBeLessThan(200);
-    expect(actionTrace).toHaveLength(97);
+    expect(actionTrace).toHaveLength(95);
     expect(actionTrace.slice(0, 6)).toEqual([
       "taker:stage_inbox_registration",
       "taker:publish_inbox_registration",
@@ -665,28 +651,28 @@ describe("two-party coordinator happy path", () => {
       operation: "fill",
       status: "committed"
     });
-    expect(makerSession.evidence.reserveTransitionId)
-      .toBe(makerSession.reserveTransitionId);
-    expect(makerSession.evidence.fillTransitionId)
-      .toBe(makerSession.fillTransitionId);
-    const published = await orderService.loadPublishedHead(
+    expect(makerSession.evidence.reserveProjectionId)
+      .toBe(makerSession.reserveProjectionId);
+    expect(makerSession.evidence.fillProjectionId)
+      .toBe(makerSession.fillProjectionId);
+    const published = await orderService.loadPublishedProjection(
       makerSession.orderAddress,
-      makerSession.fillTransitionId!
+      makerSession.fillProjectionId!,
+      makerSession.fillProjectionRevision!
     );
-    const reserve = parseTransitionEvent(published.predecessor, verifyEvent);
-    const fill = parseTransitionEvent(published.transition, verifyEvent);
-    expect(reserve.operation).toBe("reserve");
-    expect(reserve.state.reservation).toMatchObject({
-      id: RESERVATION_ID,
-      amount: "20",
-      proposal_event_id: makerSession.evidence.reservation.proposalSealId,
-      taker_commitment: makerSession.evidence.reservation.takerCommitment
+    expect(published.eventId).toBe(makerSession.fillProjectionId);
+    expect(published.revision).toBe(makerSession.fillProjectionRevision);
+    expect(published.record.state).toMatchObject({
+      status: "filled",
+      remaining_amount: "0",
+      reserved_amount: "0",
+      reservation: null
     });
-    expect(fill.operation).toBe("fill");
-    expect(fill.evidence).toEqual({
-      settlement_hash: makerSession.privateState.htlcHash,
-      base_token_commitment: makerSession.evidence.legs.base.tokenCommitment,
-      quote_token_commitment: makerSession.evidence.legs.quote.tokenCommitment
+    expect(makerSession.evidence).toMatchObject({
+      reserveProjectionId: makerSession.reserveProjectionId,
+      reserveProjectionRevision: makerSession.reserveProjectionRevision,
+      fillProjectionId: makerSession.fillProjectionId,
+      fillProjectionRevision: makerSession.fillProjectionRevision
     });
 
     const makerView = await makerCoordinator.get(SESSION_ID);

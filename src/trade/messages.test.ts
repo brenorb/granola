@@ -48,7 +48,8 @@ async function proposal(overrides: Partial<GranolaTradeMessage> = {}): Promise<G
     session_id: "55".repeat(32),
     reservation_id: "22222222-2222-4222-8222-222222222222",
     order_address: `30078:${maker}:granola:order:v1:33333333-3333-4333-8333-333333333333`,
-    order_head: "44".repeat(32),
+    order_projection_id: "44".repeat(32),
+    order_revision: "0",
     maker_order_pubkey: maker,
     author_pubkey: taker,
     recipient_pubkey: maker,
@@ -78,7 +79,8 @@ function expected(message: GranolaTradeMessage, extra: Partial<Parameters<typeof
     now,
     expectedAuthorPubkey: taker,
     expectedOrderAddress: message.order_address,
-    expectedOrderHead: message.order_head,
+    expectedOrderProjectionId: message.order_projection_id,
+    expectedOrderRevision: "0",
     expectedTermsHash: message.terms_hash,
     ...extra
   };
@@ -93,12 +95,21 @@ describe("strict Granola NIP-17 messages", () => {
     const opened = await unwrapInitialReserveProposal(wrapped.wrapper, makerKey, {
       now,
       expectedOrderAddress: message.order_address,
-      expectedOrderHead: message.order_head,
+      expectedOrderProjectionId: message.order_projection_id,
+      expectedOrderRevision: "0",
       expectedTermsHash: message.terms_hash
     });
 
     expect(opened.message.author_pubkey).toBe(taker);
     expect(opened.seal.pubkey).toBe(taker);
+
+    await expect(unwrapInitialReserveProposal(wrapped.wrapper, makerKey, {
+      now,
+      expectedOrderAddress: message.order_address,
+      expectedOrderProjectionId: message.order_projection_id,
+      expectedOrderRevision: "1",
+      expectedTermsHash: message.terms_hash
+    })).rejects.toThrow(/revision/i);
 
     const later = await proposal({
       type: "ack",
@@ -112,7 +123,8 @@ describe("strict Granola NIP-17 messages", () => {
     await expect(unwrapInitialReserveProposal(laterWrap.wrapper, makerKey, {
       now,
       expectedOrderAddress: message.order_address,
-      expectedOrderHead: message.order_head,
+      expectedOrderProjectionId: message.order_projection_id,
+      expectedOrderRevision: "0",
       expectedTermsHash: message.terms_hash
     })).rejects.toThrow();
   });
@@ -129,7 +141,7 @@ describe("strict Granola NIP-17 messages", () => {
     );
 
     expect(opened.message.order_address).toBe(message.order_address);
-    expect(opened.message.order_head).toBe(message.order_head);
+    expect(opened.message.order_projection_id).toBe(message.order_projection_id);
     expect(opened.message.terms_hash).toBe(message.terms_hash);
     expect(opened.message.recipient_pubkey).toBe(maker);
   });
@@ -148,8 +160,12 @@ describe("strict Granola NIP-17 messages", () => {
       sequence: "1",
       previous_message_id: first.message_id,
       previous_transcript_hash: firstTranscript,
-      order_head: reserveHead,
-      body: { reserve_transition_id: reserveHead }
+      order_projection_id: reserveHead,
+      order_revision: "1",
+      body: {
+        reserve_projection_id: reserveHead,
+        reserve_revision: "1"
+      }
     };
     const rumor = await createTradeRumor(acceptance, makerKey, firstRumor.id);
     const wrapped = wrapTradeRumor(rumor, makerKey, wrapOptions(wrapperKeyA, 11));
@@ -163,9 +179,15 @@ describe("strict Granola NIP-17 messages", () => {
       expectedPreviousMessageId: first.message_id,
       expectedPreviousTranscriptHash: firstTranscript
     });
-    expect(opened.message.order_head).toBe(reserveHead);
+    expect(opened.message.order_projection_id).toBe(reserveHead);
 
-    const substituted = { ...acceptance, body: { reserve_transition_id: "cd".repeat(32) } };
+    const substituted = {
+      ...acceptance,
+      body: {
+        reserve_projection_id: "cd".repeat(32),
+        reserve_revision: "1"
+      }
+    };
     const substitutedRumor = await createTradeRumor(substituted, makerKey, firstRumor.id);
     const substitutedWrap = wrapTradeRumor(substitutedRumor, makerKey, wrapOptions(wrapperKeyB, 12));
     await expect(unwrapReserveAcceptance(substitutedWrap.wrapper, takerKey, {
@@ -176,7 +198,7 @@ describe("strict Granola NIP-17 messages", () => {
       expectedPreviousRumorId: firstRumor.id,
       expectedPreviousMessageId: first.message_id,
       expectedPreviousTranscriptHash: firstTranscript
-    })).rejects.toThrow(/reserve transition/i);
+    })).rejects.toThrow(/reserve projection/i);
   });
 
   it("wraps one exact rumor into distinct authenticated delivery copies", async () => {

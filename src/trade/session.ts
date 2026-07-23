@@ -41,8 +41,10 @@ export interface TradeEvidence {
   makerPubkey: string;
   commitments: string[];
   mintStates: string[];
-  reserveTransitionId: string | null;
-  fillTransitionId: string | null;
+  reserveProjectionId: string | null;
+  reserveProjectionRevision: string | null;
+  fillProjectionId: string | null;
+  fillProjectionRevision: string | null;
   reservation: {
     proposalSealId: string | null;
     takerCommitment: string | null;
@@ -177,24 +179,20 @@ export interface TradeSession {
   role: "maker" | "taker";
   phase: TradePhase;
   orderAddress: string;
-  offeredOrderHead: string;
-  reserveTransitionId: string | null;
-  fillTransitionId: string | null;
+  offeredProjectionId: string;
+  offeredProjectionRevision: string;
+  reserveProjectionId: string | null;
+  reserveProjectionRevision: string | null;
+  fillProjectionId: string | null;
+  fillProjectionRevision: string | null;
   pendingOrderPublication: {
     operation: "reserve" | "fill" | "release";
     orderId: string;
-    transition: NostrEvent;
     projection: NostrEvent;
-    transitionReceipts: RelayReceipt[];
-    projectionReceipts: RelayReceipt[];
-    status:
-      | "staged"
-      | "transition_acknowledged"
-      | "projection_acknowledged"
-      | "committed";
+    receipts: RelayReceipt[];
+    status: "staged" | "acknowledged" | "committed";
     stagedAt: number;
-    transitionAcknowledgedAt: number | null;
-    projectionAcknowledgedAt: number | null;
+    acknowledgedAt: number | null;
     committedAt: number | null;
   } | null;
   createdAt: number;
@@ -228,9 +226,12 @@ export function publicTradeView(session: TradeSession): PublicTradeView {
     role: session.role,
     phase: session.phase,
     orderAddress: session.orderAddress,
-    offeredOrderHead: session.offeredOrderHead,
-    reserveTransitionId: session.reserveTransitionId,
-    fillTransitionId: session.fillTransitionId,
+    offeredProjectionId: session.offeredProjectionId,
+    offeredProjectionRevision: session.offeredProjectionRevision,
+    reserveProjectionId: session.reserveProjectionId,
+    reserveProjectionRevision: session.reserveProjectionRevision,
+    fillProjectionId: session.fillProjectionId,
+    fillProjectionRevision: session.fillProjectionRevision,
     pendingOrderPublication: session.pendingOrderPublication,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
@@ -240,8 +241,10 @@ export function publicTradeView(session: TradeSession): PublicTradeView {
       makerPubkey: session.evidence.makerPubkey,
       commitments: session.evidence.commitments,
       mintStates: session.evidence.mintStates,
-      reserveTransitionId: session.evidence.reserveTransitionId,
-      fillTransitionId: session.evidence.fillTransitionId,
+      reserveProjectionId: session.evidence.reserveProjectionId,
+      reserveProjectionRevision: session.evidence.reserveProjectionRevision,
+      fillProjectionId: session.evidence.fillProjectionId,
+      fillProjectionRevision: session.evidence.fillProjectionRevision,
       reservation: {
         proposalSealId: session.evidence.reservation.proposalSealId,
         takerCommitment: session.evidence.reservation.takerCommitment,

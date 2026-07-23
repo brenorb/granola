@@ -26,11 +26,8 @@ import type {
   DiscoveredTradeInbox,
   NostrTradeTransport
 } from "../nostr/trade-transport.js";
-import type {
-  FillTransitionEvidence,
-  NostrEvent
-} from "../order/events.js";
-import type { PublishedOrderHead } from "../order/service.js";
+import type { NostrEvent } from "../order/events.js";
+import type { PublishedOrderProjection } from "../order/service.js";
 import type {
   OrderOutboxEntry,
   OrderOutboxPort,
@@ -74,11 +71,7 @@ import {
   reconcileProofReplacement
 } from "./wallet-reconcile.js";
 import { verifyEvent } from "nostr-tools/pure";
-import {
-  parseProjectionEvent,
-  parseTransitionEvent
-} from "../order/events.js";
-import { fillOrder } from "../order/model.js";
+import { parseProjectionEvent } from "../order/events.js";
 
 type WithWalletLock = <T>(action: () => Promise<T>) => Promise<T>;
 
@@ -96,13 +89,14 @@ export interface CoordinatorEffectsEntropy {
   outerExpiration(messageExpiration: number): number;
 }
 
-export type { PublishedOrderHead } from "../order/service.js";
+export type { PublishedOrderProjection } from "../order/service.js";
 
 export interface CoordinatorOrderReadPort {
-  loadPublishedHead(
+  loadPublishedProjection(
     address: string,
-    expectedHeadId: string
-  ): Promise<PublishedOrderHead>;
+    expectedProjectionId: string,
+    expectedRevision: string
+  ): Promise<PublishedOrderProjection>;
 }
 
 export interface GranolaCoordinatorEffectsOptions {
@@ -146,7 +140,6 @@ export interface GranolaCoordinatorEffectsOptions {
 }
 
 const EXTERNAL_ACTIONS = new Set<CoordinatorAction["kind"]>([
-  "publish_order_transition",
   "publish_order_projection",
   "commit_order_publication",
   "clear_order_publication",
@@ -371,23 +364,19 @@ function publicationTimes(
   now: number
 ): Pick<
   NonNullable<TradeSession["pendingOrderPublication"]>,
-  "stagedAt" | "transitionAcknowledgedAt" | "projectionAcknowledgedAt" | "committedAt"
+  "stagedAt" | "acknowledgedAt" | "committedAt"
 > {
   const rank: Record<OrderPublicationStatus, number> = {
     staged: 0,
-    transition_acknowledged: 1,
-    projection_acknowledged: 2,
-    committed: 3
+    acknowledged: 1,
+    committed: 2
   };
   return {
     stagedAt: previous?.stagedAt ?? entry.intent.createdAt,
-    transitionAcknowledgedAt: rank[entry.status] >= 1
-      ? previous?.transitionAcknowledgedAt ?? now
+    acknowledgedAt: rank[entry.status] >= 1
+      ? previous?.acknowledgedAt ?? now
       : null,
-    projectionAcknowledgedAt: rank[entry.status] >= 2
-      ? previous?.projectionAcknowledgedAt ?? now
-      : null,
-    committedAt: rank[entry.status] >= 3
+    committedAt: rank[entry.status] >= 2
       ? previous?.committedAt ?? now
       : null
   };
@@ -407,17 +396,14 @@ function exactPendingPublication(
       entry.intent.operation !== "release") ||
     (previous !== null && (
       previous.orderId !== entry.intent.orderId ||
-      previous.transition.id !== entry.publication.transition.id ||
       previous.projection.id !== entry.publication.projection.id
     ))
   ) throw new Error("Order outbox entry conflicts with the trade session");
   return {
     operation: entry.intent.operation,
     orderId: entry.intent.orderId,
-    transition: clone(entry.publication.transition),
     projection: clone(entry.publication.projection),
-    transitionReceipts: clone(entry.publication.transitionReceipts),
-    projectionReceipts: clone(entry.publication.projectionReceipts),
+    receipts: clone(entry.publication.receipts),
     status: entry.status,
     ...publicationTimes(entry, previous, now)
   };
@@ -607,7 +593,6 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         return this.stageOrder(input.session, input.action.kind, input.now);
       case "verify_order_fill":
         return this.verifyOrderFill(input.session, input.now);
-      case "publish_order_transition":
       case "publish_order_projection":
         return this.publishOrderStage(input.session, input.now);
       case "commit_order_publication":
@@ -656,83 +641,53 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     if (
       session.role !== "taker" ||
       session.privateState.transcript.choreography.phase !== "settled" ||
-      session.fillTransitionId === null ||
-      session.evidence.fillTransitionId !== null
+      session.fillProjectionId === null ||
+      session.fillProjectionRevision === null ||
+      session.evidence.fillProjectionId !== null
     ) {
       throw new Error("Taker fill verification is not checkpoint-ready");
     }
-    const expectedFillId = session.fillTransitionId;
-    const published = await this.orderReader.loadPublishedHead(
+    const expectedFillId = session.fillProjectionId;
+    const expectedFillRevision = session.fillProjectionRevision;
+    const published = await this.orderReader.loadPublishedProjection(
       session.orderAddress,
-      expectedFillId
+      expectedFillId,
+      expectedFillRevision
     );
     if (
-      published.headEventId !== expectedFillId ||
-      published.transition.id !== expectedFillId
+      published.eventId !== expectedFillId ||
+      published.revision !== expectedFillRevision ||
+      published.projection.id !== expectedFillId
     ) {
-      throw new Error("Published order head does not match the announced fill");
+      throw new Error("Published order projection does not match the announced fill");
     }
-
-    const predecessor = await parseTransitionEvent(
-      published.predecessor,
-      verifyEvent
-    );
-    const transition = await parseTransitionEvent(
-      published.transition,
-      verifyEvent
-    );
     const projection = await parseProjectionEvent(
       published.projection,
       verifyEvent
     );
     if (
-      predecessor.makerPubkey !== session.evidence.makerPubkey ||
-      transition.makerPubkey !== session.evidence.makerPubkey ||
       projection.makerPubkey !== session.evidence.makerPubkey ||
-      predecessor.address !== session.orderAddress ||
-      transition.address !== session.orderAddress ||
       projection.address !== session.orderAddress
     ) {
       throw new Error("Published fill maker or address does not match the trade");
     }
-    const reservation = predecessor.state.reservation;
     if (
-      predecessor.eventId !== session.reserveTransitionId ||
-      predecessor.operation !== "reserve" ||
-      reservation === null ||
-      reservation.id !== session.reservationId ||
-      reservation.amount !== session.terms.baseAmount
+      session.reserveProjectionRevision === null ||
+      BigInt(projection.state.revision) !==
+        BigInt(session.reserveProjectionRevision) + 1n ||
+      projection.state.status !==
+        (BigInt(projection.state.remaining_amount) === 0n
+          ? "filled"
+          : "partially_filled") ||
+      projection.state.reservation !== null ||
+      projection.state.reserved_amount !== "0"
     ) {
-      throw new Error("Published fill does not spend the exact reservation");
-    }
-    if (transition.operation !== "fill") {
-      throw new Error("Published order head is not a fill");
-    }
-    const fillEvidence = transition.evidence as FillTransitionEvidence;
-    if (
-      transition.previous !== predecessor.eventId ||
-      fillEvidence.settlement_hash !== session.privateState.htlcHash ||
-      fillEvidence.base_token_commitment !==
-        session.evidence.legs.base.tokenCommitment ||
-      fillEvidence.quote_token_commitment !==
-        session.evidence.legs.quote.tokenCommitment
-    ) {
-      throw new Error("Published fill does not match the exact settlement");
-    }
-    const expectedState = fillOrder(predecessor.state, {
-      reservationId: session.reservationId,
-      amount: session.terms.baseAmount
-    });
-    if (
-      canonicalJson(transition.state) !== canonicalJson(expectedState) ||
-      projection.headEventId !== transition.eventId ||
-      canonicalJson(projection.state) !== canonicalJson(transition.state)
-    ) {
-      throw new Error("Published fill projection is not the exact current head");
+      throw new Error("Published fill projection is not the next terminal state");
     }
 
     const next = bump(session, now);
-    next.evidence.fillTransitionId = expectedFillId;
+    next.evidence.fillProjectionId = expectedFillId;
+    next.evidence.fillProjectionRevision = expectedFillRevision;
     return next;
   }
 
@@ -754,7 +709,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       );
       const request: PublishReserveInput = {
         address: session.orderAddress,
-        expectedHeadId: session.offeredOrderHead,
+        expectedProjectionId: session.offeredProjectionId,
+        expectedRevision: session.offeredProjectionRevision,
         reservationId: session.reservationId,
         amount: session.terms.baseAmount,
         expiresAt: session.plan.reservationExpiresAt,
@@ -766,12 +722,19 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       const settlementHash = session.privateState.htlcHash;
       const base = session.evidence.legs.base.tokenCommitment;
       const quote = session.evidence.legs.quote.tokenCommitment;
-      if (!session.reserveTransitionId || !settlementHash || !base || !quote) {
+      if (
+        !session.reserveProjectionId ||
+        !session.reserveProjectionRevision ||
+        !settlementHash ||
+        !base ||
+        !quote
+      ) {
         throw new Error("Fill staging lacks exact settlement evidence");
       }
       const request: PublishFillInput = {
         address: session.orderAddress,
-        expectedHeadId: session.reserveTransitionId,
+        expectedProjectionId: session.reserveProjectionId,
+        expectedRevision: session.reserveProjectionRevision,
         reservationId: session.reservationId,
         amount: session.terms.baseAmount,
         evidence: {
@@ -782,12 +745,13 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       };
       progress = await this.orderApi.ensureFillStaged(request);
     } else {
-      if (!session.reserveTransitionId) {
+      if (!session.reserveProjectionId || !session.reserveProjectionRevision) {
         throw new Error("Release staging lacks the reserve head");
       }
       const request: PublishReleaseInput = {
         address: session.orderAddress,
-        expectedHeadId: session.reserveTransitionId,
+        expectedProjectionId: session.reserveProjectionId,
+        expectedRevision: session.reserveProjectionRevision,
         reservationId: session.reservationId,
         reason: "expired"
       };
@@ -803,12 +767,16 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       if (!takerCommitment || !HEX_32.test(takerCommitment)) {
         throw new Error("Staged reserve lacks the taker commitment");
       }
-      next.reserveTransitionId = entry.publication.transition.id;
-      next.evidence.reserveTransitionId = entry.publication.transition.id;
+      next.reserveProjectionId = entry.publication.projection.id;
+      next.reserveProjectionRevision = entry.publication.state.revision;
+      next.evidence.reserveProjectionId = entry.publication.projection.id;
+      next.evidence.reserveProjectionRevision = entry.publication.state.revision;
       next.evidence.reservation.takerCommitment = takerCommitment;
     } else if (entry.intent.operation === "fill") {
-      next.fillTransitionId = entry.publication.transition.id;
-      next.evidence.fillTransitionId = entry.publication.transition.id;
+      next.fillProjectionId = entry.publication.projection.id;
+      next.fillProjectionRevision = entry.publication.state.revision;
+      next.evidence.fillProjectionId = entry.publication.projection.id;
+      next.evidence.fillProjectionRevision = entry.publication.state.revision;
     }
     return next;
   }
@@ -837,7 +805,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     now: number
   ): Promise<TradeSession> {
     const pending = session.pendingOrderPublication;
-    if (!pending || pending.status !== "projection_acknowledged") {
+    if (!pending || pending.status !== "acknowledged") {
       throw new Error("Order projection is not acknowledged");
     }
     await this.orderApi.clearAcknowledgedOrderPublication(pending.orderId);
@@ -851,12 +819,16 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       if (!takerCommitment || !HEX_32.test(takerCommitment)) {
         throw new Error("Committed reserve lacks the taker commitment");
       }
-      next.reserveTransitionId = entry.publication.transition.id;
-      next.evidence.reserveTransitionId = entry.publication.transition.id;
+      next.reserveProjectionId = entry.publication.projection.id;
+      next.reserveProjectionRevision = entry.publication.state.revision;
+      next.evidence.reserveProjectionId = entry.publication.projection.id;
+      next.evidence.reserveProjectionRevision = entry.publication.state.revision;
       next.evidence.reservation.takerCommitment = takerCommitment;
     } else if (entry.intent.operation === "fill") {
-      next.fillTransitionId = entry.publication.transition.id;
-      next.evidence.fillTransitionId = entry.publication.transition.id;
+      next.fillProjectionId = entry.publication.projection.id;
+      next.fillProjectionRevision = entry.publication.state.revision;
+      next.evidence.fillProjectionId = entry.publication.projection.id;
+      next.evidence.fillProjectionRevision = entry.publication.state.revision;
     } else {
       next.phase = "released";
     }
@@ -959,21 +931,28 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         session_id: session.sessionId,
         reservation_id: session.reservationId,
         order_address: session.orderAddress,
-        order_head: session.reserveTransitionId ?? session.offeredOrderHead,
-        maker_order_pubkey: session.evidence.makerPubkey,
+        order_projection_id:
+          session.fillProjectionId ??
+          session.reserveProjectionId ??
+          session.offeredProjectionId,
+          order_revision:
+          session.fillProjectionRevision ??
+          session.reserveProjectionRevision ??
+          session.offeredProjectionRevision,
+          maker_order_pubkey: session.evidence.makerPubkey,
         author_pubkey: getPublicKey(authorKey),
         recipient_pubkey: recipient,
         sequence: session.privateState.transcript.nextSequence,
         previous_message_id: session.privateState.transcript.lastMessageId,
         previous_transcript_hash:
           session.privateState.transcript.lastTranscriptHash,
-        sent_at: now,
+          sent_at: now,
         expires_at: expiresAt,
         terms_hash: hash,
         ...(type === "reserve_propose" || type === "reserve_accept"
           ? { terms }
           : {}),
-        body
+          body
       };
       const checked = await validateAtomicSwapMessage(message);
       const nextChoreography = await advanceAtomicSwapChoreography(
@@ -1056,7 +1035,11 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           fill_amount: session.terms.baseAmount
         };
       case "reserve_accept":
-        if (!session.reserveTransitionId || !htlcHash) {
+        if (
+          !session.reserveProjectionId ||
+          !session.reserveProjectionRevision ||
+          !htlcHash
+        ) {
           throw new Error("Reserve acceptance lacks committed reserve and settlement hash");
         }
         return {
@@ -1065,7 +1048,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           maker_session_pubkey: localNostrPubkey(session),
           maker_cashu_pubkey: localCashuPubkey(session, "cashu"),
           maker_refund_pubkey: localCashuPubkey(session, "refund"),
-          reserve_transition_id: session.reserveTransitionId,
+          reserve_projection_id: session.reserveProjectionId,
+          reserve_revision: session.reserveProjectionRevision,
           settlement_hash: htlcHash,
           short_locktime: session.plan.shortLocktime,
           maker_claim_cutoff: session.plan.makerClaimCutoff,
@@ -1074,7 +1058,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           reservation_expires_at: session.plan.reservationExpiresAt
         };
       case "session_ack":
-        if (!session.reserveTransitionId || !htlcHash ||
+        if (!session.reserveProjectionId || !session.reserveProjectionRevision || !htlcHash ||
           !transcript.lastMessageId || !transcript.lastTranscriptHash) {
           throw new Error("Session acknowledgement lacks reserve evidence");
         }
@@ -1082,7 +1066,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           schema,
           reserve_accept_message_id: transcript.lastMessageId,
           reserve_accept_transcript_hash: transcript.lastTranscriptHash,
-          reserve_transition_id: session.reserveTransitionId,
+          reserve_projection_id: session.reserveProjectionId,
+          reserve_revision: session.reserveProjectionRevision,
           settlement_hash: htlcHash
         };
       case "base_lock":
@@ -1152,13 +1137,14 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           settlement_hash: htlcHash
         };
       case "settlement_ack":
-        if (!session.fillTransitionId || !base.tokenCommitment ||
+        if (!session.fillProjectionId || !session.fillProjectionRevision || !base.tokenCommitment ||
           !quote.tokenCommitment || !htlcHash) {
           throw new Error("Settlement acknowledgement lacks the committed fill");
         }
         return {
           schema,
-          fill_transition_id: session.fillTransitionId,
+          fill_projection_id: session.fillProjectionId,
+          fill_revision: session.fillProjectionRevision,
           base_token_commitment: base.tokenCommitment,
           quote_token_commitment: quote.tokenCommitment,
           settlement_hash: htlcHash
@@ -1277,16 +1263,24 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         now,
         expectedAuthorPubkey: counterparty,
         expectedOrderAddress: session.orderAddress,
-        expectedOrderHead: session.reserveTransitionId ?? session.offeredOrderHead,
-        expectedTermsHash,
+        ...(transcript.choreography.phase === "awaiting_settlement_ack"
+          ? {}
+          : {
+              expectedOrderProjectionId:
+                session.reserveProjectionId ?? session.offeredProjectionId,
+                expectedOrderRevision:
+                session.reserveProjectionRevision ??
+                session.offeredProjectionRevision
+            }),
+            expectedTermsHash,
         expectedSequence: transcript.nextSequence,
         ...(transcript.lastRumorId === null
           ? {}
           : { expectedPreviousRumorId: transcript.lastRumorId }),
-        ...(transcript.lastMessageId === null
+          ...(transcript.lastMessageId === null
           ? {}
           : { expectedPreviousMessageId: transcript.lastMessageId }),
-        ...(transcript.lastTranscriptHash === null
+          ...(transcript.lastTranscriptHash === null
           ? {}
           : { expectedPreviousTranscriptHash: transcript.lastTranscriptHash })
       });
@@ -1382,7 +1376,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       choreography,
       nextSequence: (BigInt(session.privateState.transcript.nextSequence) + 1n)
         .toString(),
-      lastRumorId: pending.rumor.id,
+        lastRumorId: pending.rumor.id,
       lastMessageId: pending.message.message_id,
       lastTranscriptHash: pending.transcriptHash,
       accepted: [
@@ -1403,15 +1397,17 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       next.plan = {
         anchor: body.short_locktime -
           (locktimeGap === 3 * 86_400 ? 4 * 86_400 : 600),
-        shortLocktime: body.short_locktime,
+          shortLocktime: body.short_locktime,
         makerClaimCutoff: body.maker_claim_cutoff,
         longLocktime: body.long_locktime,
         takerClaimCutoff: body.taker_claim_cutoff,
         reservationExpiresAt: body.reservation_expires_at,
         refundGuardSeconds: 60
       };
-      next.reserveTransitionId = body.reserve_transition_id;
-      next.evidence.reserveTransitionId = body.reserve_transition_id;
+      next.reserveProjectionId = body.reserve_projection_id;
+      next.reserveProjectionRevision = body.reserve_revision;
+      next.evidence.reserveProjectionId = body.reserve_projection_id;
+      next.evidence.reserveProjectionRevision = body.reserve_revision;
       next.evidence.reservation.takerCommitment ??=
         await this.commitment(
           `granola-taker-v1:${session.sessionId}:` +
@@ -1428,7 +1424,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     if (message.type === "settlement_ack") {
       const body = message.body as AtomicSwapBody<"settlement_ack">;
-      next.fillTransitionId = body.fill_transition_id;
+      next.fillProjectionId = body.fill_projection_id;
+      next.fillProjectionRevision = body.fill_revision;
     }
     return next;
   }
@@ -1450,7 +1447,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       choreography: clone(outbox.nextChoreography),
       nextSequence: (BigInt(session.privateState.transcript.nextSequence) + 1n)
         .toString(),
-      lastRumorId: outbox.rumor.id,
+        lastRumorId: outbox.rumor.id,
       lastMessageId: outbox.message.message_id,
       lastTranscriptHash: hash,
       accepted: [

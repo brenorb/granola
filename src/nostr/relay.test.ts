@@ -12,7 +12,6 @@ const EVENT: NostrEvent = {
   tags: [["m", "d".repeat(64)]],
   content: "{}"
 };
-const TRANSITION: NostrEvent = { ...EVENT, id: "e".repeat(64), kind: 78 };
 const ADDRESS = `30078:${"b".repeat(64)}:granola:order:v1:11111111-1111-4111-8111-111111111111`;
 
 class FakePool implements RelayPoolPort {
@@ -35,7 +34,6 @@ class FakePool implements RelayPoolPort {
   ): Promise<NostrEvent[]> {
     this.queries.push({ relays, filter, maxWait: options.maxWait });
     if (relays[0]?.includes("two")) return [];
-    if (Array.isArray(filter.kinds) && filter.kinds.includes(78)) return [TRANSITION, TRANSITION];
     return [EVENT, EVENT];
   }
 
@@ -93,18 +91,18 @@ describe("relay client", () => {
     ]);
   });
 
-  it("queries authoritative transitions by exact order address", async () => {
+  it("queries the replaceable projection by exact order address", async () => {
     const pool = new FakePool();
     const client = new RelayClient({ relays: ["wss://one.example"], pool, maxWait: 3210 });
 
-    await expect(client.queryTransitions([ADDRESS])).resolves.toEqual([TRANSITION]);
+    await expect(client.queryOrder(ADDRESS)).resolves.toEqual([EVENT]);
     expect(pool.queries).toEqual([{
       relays: ["wss://one.example"],
       filter: {
-        kinds: [78],
-        "#t": ["granola-order-transition"],
-        "#a": [ADDRESS],
-        limit: 500
+        kinds: [30078],
+        authors: ["b".repeat(64)],
+        "#d": ["granola:order:v1:11111111-1111-4111-8111-111111111111"],
+        limit: 10
       },
       maxWait: 3210
     }]);

@@ -98,8 +98,7 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
   });
   return {
     address: `30078:${maker}:granola:order:v1:${orderId}`,
-    eventId: "55".repeat(32),
-    headEventId: "44".repeat(32),
+    eventId: "44".repeat(32),
     makerPubkey: maker,
     verified: true,
     state,
@@ -129,7 +128,8 @@ async function proposal(current = order()): Promise<VerifiedInitialReservePropos
     session_id: sessionId,
     reservation_id: reservationId,
     order_address: current.address,
-    order_head: current.headEventId,
+    order_projection_id: current.eventId,
+    order_revision: "0",
     maker_order_pubkey: maker,
     author_pubkey: getPublicKey(takerSecret),
     recipient_pubkey: maker,
@@ -160,7 +160,8 @@ async function proposal(current = order()): Promise<VerifiedInitialReservePropos
   return unwrapInitialReserveProposal(wrapped.wrapper, makerOrderSecret, {
     now,
     expectedOrderAddress: current.address,
-    expectedOrderHead: current.headEventId,
+    expectedOrderProjectionId: current.eventId,
+    expectedOrderRevision: "0",
     expectedTermsHash: message.terms_hash
   });
 }
@@ -340,7 +341,8 @@ describe("trade start API", () => {
   it("delegates list/get/advance through redacted coordinator views", async () => {
     const session = await createTakerSession({
       order: order(),
-      expectedOrderHead: order().headEventId,
+      expectedOrderProjectionId: order().eventId,
+      expectedOrderRevision: "0",
       market: {
         ...market,
         baseKeyset,
@@ -379,7 +381,8 @@ describe("trade start API", () => {
     const view = await api.takeOrder({
       requestId,
       address: current.address,
-      expectedHeadId: current.headEventId,
+      expectedProjectionId: current.eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     });
 
@@ -392,7 +395,8 @@ describe("trade start API", () => {
       {
         requestId,
         address: current.address,
-        expectedHeadId: current.headEventId,
+        expectedProjectionId: current.eventId,
+        expectedRevision: "0",
         fillBaseAmount: "1000"
       },
       expect.objectContaining({ revision: 0, role: "taker" })
@@ -407,16 +411,33 @@ describe("trade start API", () => {
   });
 
   it("rejects missing, stale, unverified, and non-sell orders before preflight", async () => {
-    const cases: Array<[string, OrderRecord | null, { address: string; expectedHeadId: string }]> = [
-      ["missing", null, { address: order().address, expectedHeadId: order().headEventId }],
-      ["stale", order(), { address: order().address, expectedHeadId: "99".repeat(32) }],
+    const cases: Array<[string, OrderRecord | null, {
+      address: string;
+      expectedProjectionId: string;
+      expectedRevision: string;
+    }]> = [
+      ["missing", null, {
+        address: order().address,
+        expectedProjectionId: order().eventId,
+        expectedRevision: "0"
+      }],
+      ["stale", order(), {
+        address: order().address,
+        expectedProjectionId: "99".repeat(32),
+        expectedRevision: "0"
+      }],
       ["unverified", order({ verified: false }), {
         address: order().address,
-        expectedHeadId: order().headEventId
+        expectedProjectionId: order().eventId,
+        expectedRevision: "0"
       }],
       ["non-sell", order({
         state: { ...order().state, side: "buy" }
-      }), { address: order().address, expectedHeadId: order().headEventId }]
+      }), {
+        address: order().address,
+        expectedProjectionId: order().eventId,
+        expectedRevision: "0"
+      }]
     ];
     for (const [, current, request] of cases) {
       const { api, books, mints, sessions } = options();
@@ -459,7 +480,8 @@ describe("trade start API", () => {
       await expect(api.takeOrder({
         requestId,
         address: order().address,
-        expectedHeadId: order().headEventId,
+        expectedProjectionId: order().eventId,
+        expectedRevision: "0",
         fillBaseAmount: "1000"
       })).rejects.toThrow();
       expect(sessions.save).not.toHaveBeenCalled();
@@ -473,7 +495,8 @@ describe("trade start API", () => {
     await expect(api.takeOrder({
       requestId,
       address: order().address,
-      expectedHeadId: order().headEventId,
+      expectedProjectionId: order().eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     })).rejects.toThrow(/quote.*fund/i);
     expect(mints.inspectTradeMint).toHaveBeenCalledTimes(2);
@@ -496,7 +519,8 @@ describe("trade start API", () => {
     await expect(enough.api.takeOrder({
       requestId,
       address: order().address,
-      expectedHeadId: order().headEventId,
+      expectedProjectionId: order().eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     })).resolves.toMatchObject({ role: "taker" });
     expect(spendable.inspectTradeSpendability.mock.calls[0]?.[0].proofs
@@ -519,7 +543,8 @@ describe("trade start API", () => {
     await expect(short.api.takeOrder({
       requestId,
       address: order().address,
-      expectedHeadId: order().headEventId,
+      expectedProjectionId: order().eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     })).rejects.toThrow(/quote.*fund/i);
     expect(short.sessions.createTakerForRequest).not.toHaveBeenCalled();
@@ -602,7 +627,8 @@ describe("trade start API", () => {
     const request = {
       requestId,
       address: current.address,
-      expectedHeadId: current.headEventId,
+      expectedProjectionId: current.eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     };
     let generated = 0;
@@ -647,7 +673,8 @@ describe("trade start API", () => {
     const request = {
       requestId,
       address: current.address,
-      expectedHeadId: current.headEventId,
+      expectedProjectionId: current.eventId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     };
     let currentWallet = wallet(quoteMint, "usd", "20");
@@ -661,7 +688,7 @@ describe("trade start API", () => {
       fixture.spendability.inspectTradeSpendability.mock.calls.length;
 
     fixture.books.current = order({
-      headEventId: "99".repeat(32),
+      eventId: "99".repeat(32),
       state: {
         ...current.state,
         status: "reserved",

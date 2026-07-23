@@ -93,6 +93,37 @@ export interface ReleaseOrderInput {
   abortEventId?: string;
 }
 
+export function cancelOrder(state: OrderState): OrderState {
+  assertMutable(state);
+  if (state.reservation !== null) {
+    throw new Error("Reserved orders must be released before cancellation");
+  }
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: "0",
+    status: "canceled",
+    reservation: null
+  };
+}
+
+export function expireOrder(state: OrderState, expiredAt: number): OrderState {
+  assertMutable(state);
+  if (!Number.isSafeInteger(expiredAt) || expiredAt < state.expires_at) {
+    throw new Error("Order is not expired");
+  }
+  if (state.reservation !== null) {
+    throw new Error("Reserved orders must be released before expiry");
+  }
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: "0",
+    status: "expired",
+    reservation: null
+  };
+}
+
 export interface ExactMarket {
   baseUnit: string;
   baseMint: string;
@@ -103,7 +134,6 @@ export interface ExactMarket {
 export interface OrderRecord {
   address: string;
   eventId: string;
-  headEventId: string;
   makerPubkey: string;
   verified: boolean;
   state: OrderState;

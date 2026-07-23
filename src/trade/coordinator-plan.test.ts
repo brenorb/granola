@@ -15,9 +15,12 @@ function session(
     role,
     phase: "negotiating",
     orderAddress: `30078:${"22".repeat(32)}:granola:order:v1:22222222-2222-4222-8222-222222222222`,
-    offeredOrderHead: "33".repeat(32),
-    reserveTransitionId: null,
-    fillTransitionId: null,
+    offeredProjectionId: "33".repeat(32),
+    offeredProjectionRevision: "0",
+    reserveProjectionId: null,
+    reserveProjectionRevision: null,
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     pendingOrderPublication: null,
     createdAt: 1_800_000_000,
     updatedAt: 1_800_000_000,
@@ -45,8 +48,10 @@ function session(
       makerPubkey: "22".repeat(32),
       commitments: [],
       mintStates: [],
-      reserveTransitionId: null,
-      fillTransitionId: null,
+      reserveProjectionId: null,
+      reserveProjectionRevision: null,
+      fillProjectionId: null,
+      fillProjectionRevision: null,
       reservation: {
         proposalSealId: null,
         takerCommitment: null,
@@ -194,19 +199,28 @@ function markPostExpiryUnspent(
 function setCommittedPublication(
   current: TradeSession,
   operation: "reserve" | "fill" | "release",
-  transitionId: string
+  projectionId: string
 ): void {
   current.pendingOrderPublication = {
     operation,
+    orderId: "22222222-2222-4222-8222-222222222222",
+    projection: { id: projectionId },
+    receipts: [{ relay: "wss://relay.example", ok: true, message: "stored" }],
     status: "committed",
-    transition: { id: transitionId }
+    stagedAt: 1_800_000_000,
+    acknowledgedAt: 1_800_000_001,
+    committedAt: 1_800_000_002
   } as TradeSession["pendingOrderPublication"];
   if (operation === "reserve") {
-    current.reserveTransitionId = transitionId;
-    current.evidence.reserveTransitionId = transitionId;
+    current.reserveProjectionId = projectionId;
+    current.reserveProjectionRevision = "1";
+    current.evidence.reserveProjectionId = projectionId;
+    current.evidence.reserveProjectionRevision = "1";
   } else if (operation === "fill") {
-    current.fillTransitionId = transitionId;
-    current.evidence.fillTransitionId = transitionId;
+    current.fillProjectionId = projectionId;
+    current.fillProjectionRevision = "2";
+    current.evidence.fillProjectionId = projectionId;
+    current.evidence.fillProjectionRevision = "2";
   } else {
     current.phase = "released";
   }
@@ -289,13 +303,9 @@ describe("atomic swap coordinator action planning", () => {
       status: "staged"
     } as TradeSession["pendingOrderPublication"];
     expect(nextCoordinatorAction(current, 1_800_000_100)).toEqual({
-      kind: "publish_order_transition"
-    });
-    current.pendingOrderPublication!.status = "transition_acknowledged";
-    expect(nextCoordinatorAction(current, 1_800_000_100)).toEqual({
       kind: "publish_order_projection"
     });
-    current.pendingOrderPublication!.status = "projection_acknowledged";
+    current.pendingOrderPublication!.status = "acknowledged";
     expect(nextCoordinatorAction(current, 1_800_000_100)).toEqual({
       kind: "commit_order_publication"
     });
@@ -423,11 +433,11 @@ describe("atomic swap coordinator action planning", () => {
 
   it("stages each protocol message only after its durable prerequisite exists", () => {
     const reserve = session("maker", "awaiting_reserve_accept");
-    reserve.reserveTransitionId = "44".repeat(32);
-    reserve.evidence.reserveTransitionId = reserve.reserveTransitionId;
+    reserve.reserveProjectionId = "44".repeat(32);
+    reserve.evidence.reserveProjectionId = reserve.reserveProjectionId;
     expect(nextCoordinatorAction(reserve, 1_800_000_100).kind)
       .toBe("enter_recovery");
-    setCommittedPublication(reserve, "reserve", reserve.reserveTransitionId);
+    setCommittedPublication(reserve, "reserve", reserve.reserveProjectionId);
     expect(nextCoordinatorAction(reserve, 1_800_000_100).kind)
       .toBe("stage_reserve_accept");
 
@@ -479,7 +489,7 @@ describe("atomic swap coordinator action planning", () => {
       .toBe("stage_fill_request");
 
     const makerFill = session("maker", "awaiting_settlement_ack");
-    makerFill.reserveTransitionId = "88".repeat(32);
+    makerFill.reserveProjectionId = "88".repeat(32);
     makerFill.privateState.legs.base.token = "cashuBbase";
     makerFill.privateState.legs.quote.token = "cashuBquote";
     expect(nextCoordinatorAction(makerFill, 1_800_000_100).kind).toBe("observe_quote");
@@ -539,13 +549,13 @@ describe("atomic swap coordinator action planning", () => {
   it("continues to the private settlement acknowledgement after public fill", () => {
     const current = session("maker", "awaiting_settlement_ack");
     current.phase = "filled";
-    current.fillTransitionId = "99".repeat(32);
-    current.evidence.fillTransitionId = current.fillTransitionId;
+    current.fillProjectionId = "99".repeat(32);
+    current.evidence.fillProjectionId = current.fillProjectionId;
     markSpent(current, "base");
     markSpent(current, "quote");
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
       .toBe("enter_recovery");
-    setCommittedPublication(current, "fill", current.fillTransitionId);
+    setCommittedPublication(current, "fill", current.fillProjectionId);
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
       .toBe("stage_settlement_ack");
   });
@@ -633,17 +643,17 @@ describe("atomic swap coordinator action planning", () => {
   it("requires a taker to verify the maker fill before settlement is terminal", () => {
     const current = session("taker", "settled");
     current.phase = "filled";
-    current.fillTransitionId = "cc".repeat(32);
+    current.fillProjectionId = "cc".repeat(32);
     markSpent(current, "base");
     markSpent(current, "quote", 1_800_000_101);
 
     expect(nextCoordinatorAction(current, 1_800_000_102).kind)
       .toBe("verify_order_fill");
 
-    current.evidence.fillTransitionId = current.fillTransitionId;
+    current.evidence.fillProjectionId = current.fillProjectionId;
     expect(nextCoordinatorAction(current, 1_800_000_102).kind).toBe("none");
 
-    current.evidence.fillTransitionId = "dd".repeat(32);
+    current.evidence.fillProjectionId = "dd".repeat(32);
     expect(nextCoordinatorAction(current, 1_800_000_102).kind)
       .toBe("enter_recovery");
   });

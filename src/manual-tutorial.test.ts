@@ -12,7 +12,7 @@ describe("manual testnet swap tutorial", () => {
     expect(tutorial).toContain("Enable maker inbox");
     expect(tutorial).toContain("20 SAT");
     expect(tutorial).toContain("50,000.00");
-    expect(tutorial).toContain("Retry same signed events");
+    expect(tutorial).toContain("Retry same signed projection");
     expect(tutorial).toContain("Take ask");
     expect(tutorial).toContain("runUntilSettled");
     expect(tutorial).toContain("Advance safely");

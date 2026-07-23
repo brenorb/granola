@@ -90,8 +90,7 @@ function record(overrides: Partial<OrderRecord> = {}): OrderRecord {
   const head = "44".repeat(32);
   return {
     address: `30078:${maker}:granola:order:v1:${orderId}`,
-    eventId: "55".repeat(32),
-    headEventId: head,
+    eventId: head,
     makerPubkey: maker,
     verified: true,
     state,
@@ -134,7 +133,8 @@ async function wrappedProposal(
     session_id: sessionId,
     reservation_id: reservationId,
     order_address: order.address,
-    order_head: order.headEventId,
+    order_projection_id: order.eventId,
+    order_revision: "0",
     maker_order_pubkey: maker,
     author_pubkey: takerNostr,
     recipient_pubkey: maker,
@@ -170,7 +170,8 @@ async function wrappedProposal(
       {
         now,
         expectedOrderAddress: message.order_address,
-        expectedOrderHead: message.order_head,
+        expectedOrderProjectionId: message.order_projection_id,
+        expectedOrderRevision: "0",
         expectedTermsHash: message.terms_hash
       }
     ),
@@ -186,7 +187,8 @@ describe("trade session factory", () => {
   it("creates an encrypted-journal-ready taker session while preserving the offered head", async () => {
     const session = await createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
@@ -203,8 +205,9 @@ describe("trade session factory", () => {
       revision: 0,
       role: "taker",
       phase: "negotiating",
-      offeredOrderHead: "44".repeat(32),
-      reserveTransitionId: null,
+      offeredProjectionId: "44".repeat(32),
+      reserveProjectionId: null,
+      reserveProjectionRevision: null,
       terms: { baseAmount: "1000", quoteAmount: "20" },
       privateState: {
         preimage: null,
@@ -244,7 +247,7 @@ describe("trade session factory", () => {
       reservationId,
       role: "maker",
       phase: "negotiating",
-      offeredOrderHead: "44".repeat(32),
+      offeredProjectionId: "44".repeat(32),
       evidence: {
         commitments: [entropy(3).htlcMaterial().hash],
         reservation: {
@@ -330,7 +333,8 @@ describe("trade session factory", () => {
       {
         now,
         expectedOrderAddress: opened.message.order_address,
-        expectedOrderHead: opened.message.order_head,
+        expectedOrderProjectionId: opened.message.order_projection_id,
+        expectedOrderRevision: "0",
         expectedTermsHash: opened.message.terms_hash
       }
     )).rejects.toThrow(/signature/i);
@@ -364,7 +368,7 @@ describe("trade session factory", () => {
 
   it.each([
     ["unverified", { verified: false }],
-    ["stale", { headEventId: "66".repeat(32) }],
+    ["stale", { eventId: "66".repeat(32) }],
     ["expired", { state: { ...record().state, expires_at: now } }],
     ["reserved", {
       state: {
@@ -384,7 +388,8 @@ describe("trade session factory", () => {
   ])("rejects a %s order", async (_label, override) => {
     await expect(createTakerSession({
       order: record(override as Partial<OrderRecord>),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
@@ -394,28 +399,32 @@ describe("trade session factory", () => {
   it("rejects bids, wrong mints, unsafe clocks, and non-canonical keysets", async () => {
     await expect(createTakerSession({
       order: record({ state: { ...record().state, side: "buy" } }),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
     }, entropy())).rejects.toThrow(/sell/i);
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market: { ...market, quoteMint: "https://other.example" },
       fillBaseAmount: "1000",
       clocks
     }, entropy())).rejects.toThrow(/quote mint/i);
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks: { ...clocks, baseMintNow: now + 31 }
     }, entropy())).rejects.toThrow(/clock/i);
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market: { ...market, baseKeyset: "UPPERCASE" },
       fillBaseAmount: "1000",
       clocks
@@ -427,7 +436,8 @@ describe("trade session factory", () => {
           offered: { unit: "sat", mint: `${baseMint}/` }
         }
       }),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
@@ -437,7 +447,8 @@ describe("trade session factory", () => {
   it("rejects invalid all-or-none fills and partial-fill dust", async () => {
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "500",
       clocks
@@ -452,7 +463,8 @@ describe("trade session factory", () => {
     });
     await expect(createTakerSession({
       order: partial,
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "800",
       clocks
@@ -467,7 +479,8 @@ describe("trade session factory", () => {
     };
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
@@ -490,7 +503,8 @@ describe("trade session factory", () => {
     };
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
@@ -513,7 +527,8 @@ describe("trade session factory", () => {
     };
     await expect(createTakerSession({
       order: record(),
-      expectedOrderHead: "44".repeat(32),
+      expectedOrderProjectionId: "44".repeat(32),
+      expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks

@@ -1,7 +1,6 @@
 import type { TradeSession } from "./session.js";
 
 export type CoordinatorAction =
-  | { kind: "publish_order_transition" }
   | { kind: "publish_order_projection" }
   | { kind: "commit_order_publication" }
   | { kind: "clear_order_publication" }
@@ -78,24 +77,24 @@ function bothLegsSpent(session: TradeSession): boolean {
 function hasCommittedPublication(
   session: TradeSession,
   operation: "reserve" | "fill" | "release",
-  transitionId: string | null = null
+  projectionId: string | null = null
 ): boolean {
   const publication = session.pendingOrderPublication;
   return publication !== null &&
     publication.operation === operation &&
     publication.status === "committed" &&
-    (transitionId === null || publication.transition.id === transitionId);
+    (projectionId === null || publication.projection.id === projectionId);
 }
 
 function exactCommittedFill(session: TradeSession): boolean {
-  return session.fillTransitionId !== null &&
-    session.evidence.fillTransitionId === session.fillTransitionId &&
-    hasCommittedPublication(session, "fill", session.fillTransitionId);
+  return session.fillProjectionId !== null &&
+    session.evidence.fillProjectionId === session.fillProjectionId &&
+    hasCommittedPublication(session, "fill", session.fillProjectionId);
 }
 
 function exactVerifiedTakerFill(session: TradeSession): boolean {
-  return session.fillTransitionId !== null &&
-    session.evidence.fillTransitionId === session.fillTransitionId;
+  return session.fillProjectionId !== null &&
+    session.evidence.fillProjectionId === session.fillProjectionId;
 }
 
 function exactCommittedRelease(session: TradeSession): boolean {
@@ -111,7 +110,7 @@ function terminal(session: TradeSession): boolean {
   }
   if (session.phase === "released") return exactCommittedRelease(session);
   if (session.phase === "frozen") {
-    return session.reserveTransitionId === null &&
+    return session.reserveProjectionId === null &&
       session.privateState.legs.base.token === null &&
       session.privateState.legs.quote.token === null;
   }
@@ -268,7 +267,7 @@ export function nextCoordinatorAction(
   if (cashu?.status === "wallet_applied") {
     const releasableRefund =
       session.role === "maker" &&
-      session.reserveTransitionId !== null &&
+      session.reserveProjectionId !== null &&
       walletAppliedRefund(session, "base");
     if (!releasableRefund) return { kind: "clear_cashu_operation" };
     if (publication === null) return { kind: "stage_order_release" };
@@ -286,10 +285,8 @@ export function nextCoordinatorAction(
   if (publication !== null && publication.status !== "committed") {
     switch (publication.status) {
       case "staged":
-        return { kind: "publish_order_transition" };
-      case "transition_acknowledged":
         return { kind: "publish_order_projection" };
-      case "projection_acknowledged":
+      case "acknowledged":
         return { kind: "commit_order_publication" };
     }
   }
@@ -335,8 +332,8 @@ export function nextCoordinatorAction(
   if (
     session.privateState.transcript.choreography.phase === "settled" &&
     session.role === "taker" &&
-    session.fillTransitionId !== null &&
-    session.evidence.fillTransitionId === null
+    session.fillProjectionId !== null &&
+    session.evidence.fillProjectionId === null
   ) return { kind: "verify_order_fill" };
   if (terminal(session)) return { kind: "none" };
   if (session.privateState.transcript.choreography.phase === "settled") {
@@ -354,9 +351,9 @@ export function nextCoordinatorAction(
       if (
         phase === "awaiting_reserve_accept" &&
         session.role === "maker" &&
-        session.reserveTransitionId !== null &&
-        session.evidence.reserveTransitionId === session.reserveTransitionId &&
-        publication.transition.id === session.reserveTransitionId
+        session.reserveProjectionId !== null &&
+        session.evidence.reserveProjectionId === session.reserveProjectionId &&
+        publication.projection.id === session.reserveProjectionId
       ) return { kind: "stage_reserve_accept" };
       return { kind: "clear_order_publication" };
     }
@@ -379,7 +376,7 @@ export function nextCoordinatorAction(
     case "awaiting_reserve_accept":
       if (now >= session.plan.makerClaimCutoff) return { kind: "enter_recovery" };
       return session.role === "maker"
-        ? session.reserveTransitionId === null
+        ? session.reserveProjectionId === null
           ? { kind: "stage_order_reserve" }
           : { kind: "enter_recovery" }
         : { kind: "poll_inbox" };
@@ -447,7 +444,7 @@ export function nextCoordinatorAction(
       if (!independentlySpent(session, "base")) {
         return { kind: "observe_base" };
       }
-      return session.fillTransitionId === null
+      return session.fillProjectionId === null
         ? { kind: "stage_order_fill" }
         : { kind: "enter_recovery" };
     case "refunding":

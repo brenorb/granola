@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildOrderBook,
+  cancelOrder,
   createOrderState,
   eligibleMarketIds,
+  expireOrder,
   fillOrder,
   marketId,
   releaseOrder,
@@ -132,8 +134,7 @@ describe("Granola order model", () => {
     const bidHigh = "88888888-8888-4888-8888-888888888888";
     const record = (orderId: string, side: "buy" | "sell", numerator: string): OrderRecord => ({
       address: `30078:maker:${orderId}`,
-      eventId: `${orderId}-event`,
-      headEventId: `${orderId}-head`,
+      eventId: `${orderId}-head`,
       makerPubkey: `maker-${orderId}`,
       verified: true,
       state: createOrderState({
@@ -146,10 +147,10 @@ describe("Granola order model", () => {
         offered: side === "sell"
           ? { unit: "sat", mint: testnut }
           : { unit: "usd", mint: nofee },
-        requested: side === "sell"
+          requested: side === "sell"
           ? { unit: "usd", acceptableMints: [nofee] }
           : { unit: "sat", acceptableMints: [testnut] },
-        amount: "2000",
+          amount: "2000",
         price: { numerator, denominator: "2000" }
       })
     });
@@ -307,5 +308,34 @@ describe("Granola order model", () => {
       reason: "abort",
       releasedAt: 1_700_000_200
     })).toThrow(/abort event/i);
+  });
+
+  it("cancels or expires only an unreserved projection", () => {
+    const initial = createOrderState({
+      orderId: askOne,
+      createdAt: 1_700_000_000,
+      expiresAt: 1_700_001_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "20",
+      price: { numerator: "1", denominator: "20" }
+    });
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "20",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_000_900,
+      proposalEventId: "a".repeat(64),
+      takerCommitment: "b".repeat(64)
+    });
+
+    expect(cancelOrder(initial)).toMatchObject({ revision: "1", status: "canceled" });
+    expect(expireOrder(initial, 1_700_001_000))
+      .toMatchObject({ revision: "1", status: "expired" });
+    expect(() => cancelOrder(reserved)).toThrow(/released/i);
+    expect(() => expireOrder(reserved, 1_700_001_000)).toThrow(/released/i);
   });
 });

@@ -2,6 +2,7 @@ import { OrderApi } from "../src/api/order-api.js";
 import { MakerIdentity } from "../src/nostr/identity.js";
 import { PUBLIC_RELAYS, RelayClient, type RelayReadback } from "../src/nostr/relay.js";
 import { NostrOrderService } from "../src/order/service.js";
+import { OrderOutboxRepository } from "../src/storage/order-outbox.js";
 import { MemoryStorageDriver } from "../src/storage/wallet-repository.js";
 
 interface SeedOrder {
@@ -34,9 +35,9 @@ async function confirmedReadback(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await sleep(750 * (attempt + 1));
     result = await client.readback(event);
-    if (result.filter((receipt) => receipt.found).length >= 2) return result;
+    if (result.some((receipt) => receipt.found)) return result;
   }
-  throw new Error(`Event ${event.id} did not read back from two relays`);
+  throw new Error(`Event ${event.id} did not read back from a configured relay`);
 }
 
 const relayClient = new RelayClient({ maxWait: 8_000 });
@@ -45,20 +46,22 @@ const publications = [];
 
 try {
   for (const seed of seeds) {
-    const identity = new MakerIdentity(new MemoryStorageDriver());
+    const driver = new MemoryStorageDriver();
+    const identity = new MakerIdentity(driver);
     const service = new NostrOrderService(identity, relayClient);
-    const api = new OrderApi(identity, service, undefined, () => crypto.randomUUID());
+    const api = new OrderApi(
+      identity,
+      service,
+      undefined,
+      () => crypto.randomUUID(),
+      new OrderOutboxRepository(driver)
+    );
     const result = await api.publishOrder({
       side: seed.side,
       amount: seed.amount,
       price: { numerator: seed.numerator, denominator: seed.denominator },
       execution: "all_or_none"
     });
-    const transitionReadback = await confirmedReadback(relayClient, servicePublicationEvent(
-      result.transitionId,
-      result.makerPubkey,
-      78
-    ));
     const projectionReadback = await confirmedReadback(relayClient, servicePublicationEvent(
       result.projectionId,
       result.makerPubkey,
@@ -68,11 +71,9 @@ try {
       ...seed,
       orderId: result.orderId,
       makerPubkey: result.makerPubkey,
-      transitionId: result.transitionId,
       projectionId: result.projectionId,
-      transitionReceipts: result.transitionReceipts,
-      projectionReceipts: result.projectionReceipts,
-      transitionReadback,
+      revision: result.revision,
+      receipts: result.receipts,
       projectionReadback
     });
   }
@@ -85,7 +86,7 @@ console.log(JSON.stringify({
   startedAt,
   completedAt: new Date().toISOString(),
   relays: PUBLIC_RELAYS,
-  quorum: 2,
+  acknowledgementsRequired: 1,
   publications
 }, null, 2));
 

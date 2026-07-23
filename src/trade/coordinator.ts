@@ -107,25 +107,14 @@ function externalArtifact(
   const cashu = session.privateState.cashuOperation;
 
   switch (action.kind) {
-    case "publish_order_transition":
-      if (
-        publication?.status !== "staged" ||
-        !publication.transition?.id
-      ) checkpointError(action);
-      return {
-        operation: publication.operation,
-        orderId: publication.orderId,
-        transition: publication.transition
-      };
     case "publish_order_projection":
       if (
-        publication?.status !== "transition_acknowledged" ||
+        publication?.status !== "staged" ||
         !publication.projection?.id
       ) checkpointError(action);
       return {
         operation: publication.operation,
         orderId: publication.orderId,
-        transitionId: publication.transition.id,
         projection: publication.projection
       };
     case "publish_inbox_registration":
@@ -264,7 +253,7 @@ function externalArtifact(
           keysetId: leg === "base"
             ? session.terms.baseKeyset
             : session.terms.quoteKeyset,
-          amount: leg === "base" ? session.terms.baseAmount : session.terms.quoteAmount
+            amount: leg === "base" ? session.terms.baseAmount : session.terms.quoteAmount
         },
         expected,
         tokenCommitment: session.evidence.legs[leg].tokenCommitment
@@ -276,7 +265,7 @@ function externalArtifact(
       return {
         operation: action.kind.replace("stage_order_", ""),
         orderAddress: session.orderAddress,
-        orderHead: session.reserveTransitionId ?? session.offeredOrderHead,
+        orderProjectionId: session.reserveProjectionId ?? session.offeredProjectionId,
         reservationId: session.reservationId,
         terms: session.terms,
         settlementTranscriptHash: session.privateState.settlementTranscriptHash,
@@ -286,15 +275,15 @@ function externalArtifact(
     case "verify_order_fill":
       if (
         session.role !== "taker" ||
-        session.fillTransitionId === null ||
-        session.evidence.fillTransitionId !== null ||
+        session.fillProjectionId === null ||
+        session.evidence.fillProjectionId !== null ||
         session.privateState.transcript.choreography.phase !== "settled"
       ) checkpointError(action);
       return {
         orderAddress: session.orderAddress,
         reservationId: session.reservationId,
-        reserveTransitionId: session.reserveTransitionId,
-        fillTransitionId: session.fillTransitionId,
+        reserveProjectionId: session.reserveProjectionId,
+        fillProjectionId: session.fillProjectionId,
         transcript: {
           lastMessageId: session.privateState.transcript.lastMessageId,
           lastTranscriptHash: session.privateState.transcript.lastTranscriptHash,
@@ -307,7 +296,6 @@ function externalArtifact(
       return {
         operation: publication.operation,
         orderId: publication.orderId,
-        transitionId: publication.transition.id,
         projectionId: publication.projection.id,
         status: publication.status
       };
@@ -326,7 +314,7 @@ function externalArtifact(
       }
       return {
         role: session.role,
-        orderHead: session.reserveTransitionId ?? session.offeredOrderHead,
+        orderProjectionId: session.reserveProjectionId ?? session.offeredProjectionId,
         terms: session.terms,
         plan: session.plan,
         publicEvidence: session.evidence,
