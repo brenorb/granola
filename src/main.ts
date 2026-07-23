@@ -20,6 +20,7 @@ import { OrderOutboxRepository } from "./storage/order-outbox.js";
 import { IndexedDbStorageDriver, WalletRepository } from "./storage/wallet-repository.js";
 import { renderDashboard } from "./ui/dashboard.js";
 import { formatUnitAmount } from "./ui/format.js";
+import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
 import { renderTrades } from "./ui/trades.js";
@@ -297,6 +298,51 @@ function startMakerInbox(): Promise<void> {
   return makerInboxStartPromise;
 }
 
+function defaultMintForUnit(unit: QuickMintRequest["unit"]): string {
+  return unit === "usd"
+    ? "https://nofee.testnut.cashu.space"
+    : "https://testnut.cashu.space";
+}
+
+async function requestAndClaimMint(input: {
+  mintUrl: string;
+  unit: string;
+  amount: string;
+}): Promise<void> {
+  const quote = await granola.requestMint(input);
+  const quoteBox = byId("quote");
+  quoteBox.hidden = false;
+  quoteBox.replaceChildren();
+  const heading = document.createElement("strong");
+  heading.textContent = `${formatUnitAmount(quote.amount, quote.unit)} · ${quote.state}`;
+  const invoice = document.createElement("code");
+  invoice.textContent = quote.request;
+  quoteBox.append(heading, invoice);
+  log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
+  report("Quote created; waiting for the fake mint to mark it paid");
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const state = await granola.claimMint(quote.ref);
+    await refresh(state);
+    const current = state.quotes.find((item) => item.ref === quote.ref);
+    if (current) heading.textContent = `${formatUnitAmount(current.amount, current.unit)} · ${current.state}`;
+    if (current?.state === "ISSUED") {
+      log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
+      report("Fake test tokens added to this browser wallet");
+      return;
+    }
+  }
+  throw new Error("The quote did not become paid within 60 seconds");
+}
+
+renderMintActions(byId("mint-actions"), (request) => {
+  void requestAndClaimMint({
+    ...request,
+    mintUrl: defaultMintForUnit(request.unit)
+  }).catch((error: unknown) => report(messageOf(error), true));
+});
+
 function runAgentSettlement(sessionId: string): void {
   const root = document.documentElement;
   if (!/^[0-9a-f]{64}$/.test(sessionId)) {
@@ -451,33 +497,8 @@ byId<HTMLFormElement>("mint-form").addEventListener("submit", (event) => {
   const mintUrl = String(form.get("mintUrl"));
   const unit = String(form.get("unit"));
   const amount = String(form.get("amount"));
-  void (async () => {
-    const quote = await granola.requestMint({ mintUrl, unit, amount });
-    const quoteBox = byId("quote");
-    quoteBox.hidden = false;
-    quoteBox.replaceChildren();
-    const heading = document.createElement("strong");
-    heading.textContent = `${formatUnitAmount(quote.amount, quote.unit)} · ${quote.state}`;
-    const invoice = document.createElement("code");
-    invoice.textContent = quote.request;
-    quoteBox.append(heading, invoice);
-    log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
-    report("Quote created; waiting for the fake mint to mark it paid");
-
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      const state = await granola.claimMint(quote.ref);
-      await refresh(state);
-      const current = state.quotes.find((item) => item.ref === quote.ref);
-      if (current) heading.textContent = `${formatUnitAmount(current.amount, current.unit)} · ${current.state}`;
-      if (current?.state === "ISSUED") {
-        log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
-        report("Fake test tokens added to this browser wallet");
-        return;
-      }
-    }
-    throw new Error("The quote did not become paid within 60 seconds");
-  })().catch((error: unknown) => report(messageOf(error), true));
+  void requestAndClaimMint({ mintUrl, unit, amount })
+    .catch((error: unknown) => report(messageOf(error), true));
 });
 
 const tokenInput = byId<HTMLTextAreaElement>("token");

@@ -29,7 +29,10 @@
       <section class="ledger" aria-labelledby="balances-title">
         <div class="section-heading">
           <div><p class="eyebrow">01 / Wallet</p><h2 id="balances-title">Balances &amp; liabilities</h2></div>
-          <button id="refresh" class="quiet" type="button">Refresh</button>
+          <div class="section-actions">
+            <div id="mint-actions" class="mint-actions" aria-label="Quick mint fake tokens"></div>
+            <button id="refresh" class="quiet" type="button">Refresh</button>
+          </div>
         </div>
         <div id="dashboard"></div>
       </section>
@@ -95,21 +98,25 @@
         <section class="panel" aria-labelledby="mint-title">
           <p class="eyebrow">02 / Acquire</p>
           <h2 id="mint-title">Mint fake tokens</h2>
-          <form id="mint-form">
-            <label>Test mint
-              <select id="mint-url" name="mintUrl">
-                <option value="https://testnut.cashu.space">Testnut / fee test</option>
-                <option value="https://nofee.testnut.cashu.space">Testnut / no fee</option>
-              </select>
-            </label>
-            <div class="field-pair">
-              <label>Unit<select id="mint-unit" name="unit"><option value="sat">SAT</option><option value="usd">USD</option></select></label>
-              <label>Minor units<input name="amount" inputmode="numeric" pattern="[1-9][0-9]*" value="100" required /></label>
-            </div>
-            <p class="hint">SAT is satoshis. USD uses cents. The mint advertises the available units and limits.</p>
-            <button type="submit">Request &amp; claim quote</button>
-          </form>
-          <div id="quote" class="quote" hidden></div>
+          <p class="hint">Use the compact SAT or USD actions above for a 10,000-unit issue, or open the full form for another amount or mint.</p>
+          <details id="mint-details">
+            <summary>Open custom mint form</summary>
+            <form id="mint-form">
+              <label>Test mint
+                <select id="mint-url" name="mintUrl">
+                  <option value="https://testnut.cashu.space">Testnut / fee test</option>
+                  <option value="https://nofee.testnut.cashu.space">Testnut / no fee</option>
+                </select>
+              </label>
+              <div class="field-pair">
+                <label>Unit<select id="mint-unit" name="unit"><option value="sat">SAT</option><option value="usd">USD</option></select></label>
+                <label>Minor units<input name="amount" inputmode="numeric" pattern="[1-9][0-9]*" value="10000" required /></label>
+              </div>
+              <p class="hint">SAT is satoshis. USD uses cents. The mint advertises the available units and limits.</p>
+              <button type="submit">Request &amp; claim quote</button>
+            </form>
+            <div id="quote" class="quote" hidden></div>
+          </details>
         </section>
 
         <section class="panel" aria-labelledby="receive-title">
