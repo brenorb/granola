@@ -1,4 +1,5 @@
 import {
+  addProofs,
   normalizeMintUrl,
   replaceProofs,
   type WalletPocket,
@@ -9,8 +10,86 @@ export interface PreparedProofReplacement extends WalletPocket {
   spentSecrets: string[];
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === undefined) throw new Error("Proof data cannot contain undefined values");
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
+    .join(",")}}`;
+}
+
 function sameProof(left: WalletPocket["proofs"][number], right: WalletPocket["proofs"][number]): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+/**
+ * Adds the exact outputs from a completed claim/refund. An exact retry is a
+ * no-op; partial presence, changed proof data, and cross-pocket collisions are
+ * crash/corruption ambiguity and fail closed.
+ */
+export function reconcileExactProofOutputs(
+  state: WalletState,
+  output: WalletPocket
+): WalletState {
+  const mintUrl = normalizeMintUrl(output.mintUrl);
+  const unit = output.unit.trim().toLowerCase();
+  if (!unit) throw new Error("Cashu output unit is required");
+  if (output.proofs.length === 0) throw new Error("Exact proof outputs cannot be empty");
+  // Reuse the wallet domain's proof validation without mutating the live state.
+  addProofs({ version: 1, revision: 0, pockets: [] }, {
+    mintUrl,
+    unit,
+    proofs: output.proofs
+  });
+  const expectedSecrets = new Set<string>();
+  for (const proof of output.proofs) {
+    if (!proof.secret || expectedSecrets.has(proof.secret)) {
+      throw new Error("Exact proof output secrets must be unique");
+    }
+    expectedSecrets.add(proof.secret);
+  }
+
+  const durable = new Map<string, {
+    proof: WalletPocket["proofs"][number];
+    mintUrl: string;
+    unit: string;
+  }>();
+  for (const pocket of state.pockets) {
+    for (const proof of pocket.proofs) {
+      if (durable.has(proof.secret)) {
+        throw new Error("Wallet has duplicate proof secrets");
+      }
+      durable.set(proof.secret, {
+        proof,
+        mintUrl: pocket.mintUrl,
+        unit: pocket.unit
+      });
+    }
+  }
+
+  const present = output.proofs
+    .map((proof) => durable.get(proof.secret))
+    .filter((item): item is NonNullable<typeof item> => item !== undefined);
+  if (present.length > 0 && present.length < output.proofs.length) {
+    throw new Error("Exact proof output reconciliation is partial");
+  }
+  if (present.length === output.proofs.length) {
+    output.proofs.forEach((expected) => {
+      const current = durable.get(expected.secret);
+      if (!current) throw new Error("Exact proof output reconciliation is partial");
+      if (current.mintUrl !== mintUrl || current.unit !== unit) {
+        throw new Error("Exact proof output exists in a different pocket");
+      }
+      if (!sameProof(current.proof, expected)) {
+        throw new Error("Exact proof output has conflicting durable data");
+      }
+    });
+    return state;
+  }
+  return addProofs(state, { mintUrl, unit, proofs: output.proofs });
 }
 
 /**
