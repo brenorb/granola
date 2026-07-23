@@ -29,7 +29,7 @@ const QUICK_MINT_ACTIONS: ReadonlyArray<{
 
 export function renderMintActions(
   root: HTMLElement,
-  onIssue: (request: QuickMintRequest) => void
+  onIssue: (request: QuickMintRequest, button: HTMLButtonElement) => void
 ): void {
   root.replaceChildren();
 
@@ -47,10 +47,11 @@ export function renderMintActions(
     symbol.textContent = action.symbol;
 
     const label = document.createElement("span");
+    label.dataset.buttonLabel = "true";
     label.textContent = action.label;
     button.append(symbol, label);
     button.addEventListener("click", () => {
-      onIssue({ unit: action.unit, amount: QUICK_MINT_AMOUNT });
+      onIssue({ unit: action.unit, amount: QUICK_MINT_AMOUNT }, button);
     });
     root.append(button);
   }
