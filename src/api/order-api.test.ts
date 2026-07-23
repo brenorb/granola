@@ -504,7 +504,9 @@ describe("order browser API", () => {
     const projected = await api.retryOrderPublication(ORDER_ID);
     expect(projected.status).toBe("projection_acknowledged");
     expect(orders.publishCalls).toBe(3);
-    await api.clearAcknowledgedOrderPublication(ORDER_ID);
+    const committed = await api.retryOrderPublication(ORDER_ID);
+    expect(committed.status).toBe("committed");
+    expect(orders.publishCalls).toBe(3);
     await expect(api.getPendingOrderPublications()).resolves.toEqual([]);
   });
 

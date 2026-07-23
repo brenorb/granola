@@ -324,6 +324,10 @@ export class OrderApi {
   }
 
   async retryOrderPublication(orderId: string): Promise<OrderPublicationProgress> {
+    const acknowledged = await this.loadAcknowledgedOrderPublication(orderId);
+    if (acknowledged) {
+      return this.clearAcknowledgedOrderPublication(orderId);
+    }
     return this.publishNextStage(orderId);
   }
 
