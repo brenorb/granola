@@ -30,14 +30,20 @@ For a maker selling base for quote:
 For the testnet demonstration, after confirming each mint clock is within 30 seconds of local time, use:
 
 - `anchor = max(local clock, both mint clocks)`;
-- `T_short = anchor + 600 seconds`;
+- `T_short = anchor + 4 days`;
 - maker claim cutoff `= T_short - 120 seconds`;
-- `T_long = anchor + 1200 seconds`;
+- `T_long = anchor + 7 days`;
 - taker claim cutoff `= T_long - 120 seconds`;
-- reservation expiry at least `anchor + 1800 seconds` and no later than order expiry;
+- reservation expiry at `anchor + 8 days` and no later than order expiry;
 - refund attempts only after the relevant mint confirms expiry plus 60 seconds.
 
 Receiver spending remains possible after a NUT-14 locktime, so expiry creates a receiver/refunder race rather than revoking receiver authority. Implementations stop initiating claims at the cutoffs and enter recovery mode. They do not treat equality with a locktime as safe.
+
+New sessions use this 4/7-day profile. Persisted prototype sessions using the
+earlier 10/20-minute profile remain readable and resumable; peers cannot mix the
+two profiles within a session because every accepted deadline is signed,
+validated as a complete profile, and persisted before either Cashu leg is
+created.
 
 ## Exact validation before acknowledging a lock
 
