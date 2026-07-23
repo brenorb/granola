@@ -3,20 +3,27 @@ import { verifyEvent } from "nostr-tools/pure";
 import type { RelayReceipt } from "../nostr/relay.js";
 import {
   createProjectionTemplate,
+  createStateTransitionTemplate,
   createTransitionTemplate,
-  parseCreateTransitionEvent,
   parseProjectionEvent,
+  parseTransitionEvent,
   type NostrEvent,
+  type TransitionEvidence,
+  type TransitionRecord,
   type UnsignedNostrEvent
 } from "./events.js";
 import {
   buildOrderBook,
+  fillOrder,
   marketId,
+  reserveOrder,
   type ExactMarket,
   type OrderBook,
   type OrderRecord,
   type OrderState
 } from "./model.js";
+
+export type SuccessorOperation = "reserve" | "fill";
 
 export interface OrderSigner {
   publicKey(): Promise<string>;
@@ -77,6 +84,60 @@ function mergeReceipts(previous: RelayReceipt[], current: RelayReceipt[]): Relay
   return [...byRelay.values()];
 }
 
+function sameState(left: OrderState, right: OrderState): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function assertSuccessorState(
+  previous: TransitionRecord,
+  operation: SuccessorOperation,
+  state: OrderState
+): void {
+  if (state.order_id !== previous.state.order_id) throw new Error("Successor order ID changed");
+  if (BigInt(state.revision) !== BigInt(previous.revision) + 1n) {
+    throw new Error("Successor revision is not monotonic");
+  }
+  let expected: OrderState;
+  if (operation === "reserve") {
+    const reservation = state.reservation;
+    if (!reservation) throw new Error("Reserve successor is missing reservation state");
+    expected = reserveOrder(previous.state, {
+      reservationId: reservation.id,
+      amount: reservation.amount,
+      acceptedAt: reservation.accepted_at,
+      expiresAt: reservation.expires_at,
+      proposalEventId: reservation.proposal_event_id,
+      takerCommitment: reservation.taker_commitment
+    });
+  } else {
+    const reservation = previous.state.reservation;
+    if (!reservation) throw new Error("Fill predecessor has no reservation");
+    expected = fillOrder(previous.state, {
+      reservationId: reservation.id,
+      amount: reservation.amount
+    });
+  }
+  if (!sameState(expected, state)) throw new Error(`Invalid ${operation} state transition`);
+}
+
+function assertLinearStep(
+  previous: { event: NostrEvent; record: TransitionRecord },
+  current: { event: NostrEvent; record: TransitionRecord }
+): void {
+  if (current.record.previous !== previous.event.id) throw new Error("Transition predecessor is stale");
+  if (
+    current.record.address !== previous.record.address ||
+    current.record.makerPubkey !== previous.record.makerPubkey
+  ) {
+    throw new Error("Transition authority changed");
+  }
+  if (current.event.created_at < previous.event.created_at) throw new Error("Transition timestamp regressed");
+  if (current.record.operation !== "reserve" && current.record.operation !== "fill") {
+    throw new Error("Unsupported successor transition operation");
+  }
+  assertSuccessorState(previous.record, current.record.operation, current.record.state);
+}
+
 export class NostrOrderService {
   constructor(
     private readonly signer: OrderSigner,
@@ -110,15 +171,52 @@ export class NostrOrderService {
     };
   }
 
+  async stageSuccessor(
+    state: OrderState,
+    operation: SuccessorOperation,
+    previous: NostrEvent,
+    evidence?: TransitionEvidence,
+    createdAt?: number
+  ): Promise<StagedOrderPublication> {
+    const maker = await this.signer.publicKey();
+    const previousRecord = parseTransitionEvent(previous, this.verify);
+    if (previousRecord.makerPubkey !== maker) throw new Error("Previous transition belongs to another maker");
+    assertSuccessorState(previousRecord, operation, state);
+    const transition = await this.signer.sign(
+      createStateTransitionTemplate(
+        state,
+        maker,
+        this.operationId(),
+        operation,
+        previous,
+        evidence,
+        createdAt
+      )
+    );
+    assertMaker(transition, maker);
+    const projection = await this.signer.sign(
+      await createProjectionTemplate(state, transition)
+    );
+    assertMaker(projection, maker);
+    return {
+      schema: "granola/order-publication/v1",
+      state,
+      transition,
+      transitionReceipts: [],
+      projection,
+      projectionReceipts: []
+    };
+  }
+
   async publishStaged(staged: StagedOrderPublication): Promise<OrderPublication> {
-    const transitionRecord = parseCreateTransitionEvent(staged.transition, this.verify);
+    const transitionRecord = parseTransitionEvent(staged.transition, this.verify);
     const projectionRecord = await parseProjectionEvent(staged.projection, this.verify);
     if (
       staged.schema !== "granola/order-publication/v1" ||
       transitionRecord.eventId !== staged.projection.tags.find((tag) => tag[0] === "e")?.[1] ||
       transitionRecord.makerPubkey !== projectionRecord.makerPubkey ||
-      JSON.stringify(transitionRecord.state) !== JSON.stringify(staged.state) ||
-      JSON.stringify(projectionRecord.state) !== JSON.stringify(staged.state)
+      !sameState(transitionRecord.state, staged.state) ||
+      !sameState(projectionRecord.state, staged.state)
     ) {
       throw new Error("Staged order publication is inconsistent");
     }
@@ -194,14 +292,18 @@ export class NostrOrderService {
     );
     const transitions = new Map<
       string,
-      Map<string, ReturnType<typeof parseCreateTransitionEvent>>
+      Map<string, { event: NostrEvent; record: TransitionRecord }>
     >();
     for (const event of transitionEvents) {
       try {
-        const transition = parseCreateTransitionEvent(event, this.verify);
-        const roots = transitions.get(transition.address) ?? new Map();
-        roots.set(transition.eventId, transition);
-        transitions.set(transition.address, roots);
+        const transition = parseTransitionEvent(event, this.verify);
+        const eventsById = transitions.get(transition.address) ?? new Map();
+        const existing = eventsById.get(transition.eventId);
+        if (existing && JSON.stringify(existing.event) !== JSON.stringify(event)) {
+          throw new Error("Conflicting events reuse one transition ID");
+        }
+        eventsById.set(transition.eventId, { event, record: transition });
+        transitions.set(transition.address, eventsById);
       } catch {
         rejected += 1;
       }
@@ -209,22 +311,50 @@ export class NostrOrderService {
 
     const records: OrderRecord[] = [];
     for (const candidate of candidates) {
-      const roots = transitions.get(candidate.record.address) ?? new Map();
-      if (roots.size !== 1) {
-        rejected += Math.max(1, roots.size);
-        continue;
+      const eventsById = transitions.get(candidate.record.address) ?? new Map();
+      try {
+        if (eventsById.size === 0) throw new Error("Order transition chain is missing");
+        const roots = [...eventsById.values()].filter(({ record }) => record.previous === null);
+        if (roots.length !== 1 || roots[0]?.record.operation !== "create") {
+          throw new Error("Order transition chain has competing or invalid roots");
+        }
+        const children = new Map<string, Array<{ event: NostrEvent; record: TransitionRecord }>>();
+        for (const item of eventsById.values()) {
+          if (item.record.previous === null) continue;
+          const successors = children.get(item.record.previous) ?? [];
+          successors.push(item);
+          children.set(item.record.previous, successors);
+        }
+        if ([...children.values()].some((successors) => successors.length !== 1)) {
+          throw new Error("Order transition chain forked");
+        }
+
+        const visited = new Set<string>();
+        const operationIds = new Set<string>();
+        let current = roots[0]!;
+        while (true) {
+          if (visited.has(current.event.id)) throw new Error("Order transition chain cycles");
+          if (operationIds.has(current.record.operationId)) throw new Error("Order operation ID was replayed");
+          visited.add(current.event.id);
+          operationIds.add(current.record.operationId);
+          const successors = children.get(current.event.id) ?? [];
+          if (successors.length === 0) break;
+          const next = successors[0]!;
+          assertLinearStep(current, next);
+          current = next;
+        }
+        if (visited.size !== eventsById.size) throw new Error("Order transition chain contains an orphan or stale fork");
+        if (
+          current.event.id !== candidate.head ||
+          current.record.makerPubkey !== candidate.record.makerPubkey ||
+          !sameState(current.record.state, candidate.record.state)
+        ) {
+          throw new Error("Projection does not match the authoritative chain head");
+        }
+        records.push({ ...candidate.record, verified: true });
+      } catch {
+        rejected += Math.max(1, eventsById.size);
       }
-      const transition = roots.values().next().value;
-      if (
-        !transition ||
-        transition.eventId !== candidate.head ||
-        transition.makerPubkey !== candidate.record.makerPubkey ||
-        JSON.stringify(transition.state) !== JSON.stringify(candidate.record.state)
-      ) {
-        rejected += 1;
-        continue;
-      }
-      records.push({ ...candidate.record, verified: true });
     }
 
     return {

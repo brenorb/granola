@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { NostrEvent, UnsignedNostrEvent } from "./events.js";
-import { createTransitionTemplate } from "./events.js";
-import { createOrderState, type ExactMarket } from "./model.js";
+import {
+  createProjectionTemplate,
+  createStateTransitionTemplate,
+  createTransitionTemplate
+} from "./events.js";
+import { createOrderState, fillOrder, reserveOrder, type ExactMarket } from "./model.js";
 import {
   NostrOrderService,
   PublicationQuorumError,
@@ -36,6 +40,23 @@ function order() {
   });
 }
 
+function reserved(initial = order()) {
+  return reserveOrder(initial, {
+    reservationId: "99999999-9999-4999-8999-999999999999",
+    amount: "2000",
+    acceptedAt: 1_700_000_100,
+    expiresAt: 1_700_001_900,
+    proposalEventId: "1".repeat(64),
+    takerCommitment: "2".repeat(64)
+  });
+}
+
+const evidence = {
+  settlement_hash: "3".repeat(64),
+  base_token_commitment: "4".repeat(64),
+  quote_token_commitment: "5".repeat(64)
+};
+
 class FakeSigner implements OrderSigner {
   signed: NostrEvent[] = [];
 
@@ -44,10 +65,11 @@ class FakeSigner implements OrderSigner {
   }
 
   async sign(template: UnsignedNostrEvent): Promise<NostrEvent> {
+    const ids = ["a", "d", "e", "f", "6", "7"];
     const event: NostrEvent = {
       ...template,
       tags: template.tags.map((tag) => [...tag]),
-      id: (this.signed.length === 0 ? "a" : "d").repeat(64),
+      id: (ids[this.signed.length] ?? "8").repeat(64),
       pubkey: MAKER,
       sig: "c".repeat(128)
     };
@@ -83,6 +105,133 @@ class FakeRelay implements OrderRelayPort {
 }
 
 describe("Nostr order service", () => {
+  it("stages and publishes reserve then fill successors against exact heads", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
+    const created = await service.publish(order());
+    const reservePublication = await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    const filled = fillOrder(reserved(), {
+      reservationId: reserved().reservation!.id,
+      amount: "2000"
+    });
+    const fillPublication = await service.publishStaged(
+      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    );
+
+    expect(relay.published.map((event) => event.kind)).toEqual([78, 30078, 78, 30078, 78, 30078]);
+    expect(reservePublication.transition.tags).toEqual(expect.arrayContaining([
+      ["op", "reserve"], ["e", created.transition.id]
+    ]));
+    expect(fillPublication.transition.tags).toEqual(expect.arrayContaining([
+      ["op", "fill"], ["e", reservePublication.transition.id]
+    ]));
+    expect(JSON.parse(fillPublication.transition.content).evidence).toEqual(evidence);
+    expect(JSON.parse(fillPublication.projection.content).head).toBe(fillPublication.transition.id);
+  });
+
+  it("verifies a complete create-to-fill chain and excludes its filled projection", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
+    const created = await service.publish(order());
+    const reservePublication = await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    const filled = fillOrder(reserved(), {
+      reservationId: reserved().reservation!.id,
+      amount: "2000"
+    });
+    const fillPublication = await service.publishStaged(
+      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    );
+    relay.events = [fillPublication.projection];
+
+    const result = await service.loadBook(MARKET, 1_700_000_200);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.book.bids).toEqual([]);
+    expect(result.rejected).toBe(0);
+  });
+
+  it("rejects successor equivocation from one authoritative head", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
+    const created = await service.publish(order());
+    const accepted = await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    const fork: NostrEvent = {
+      ...createStateTransitionTemplate(reserved(), MAKER, "fork-op", "reserve", created.transition),
+      id: "9".repeat(64),
+      pubkey: MAKER,
+      sig: "c".repeat(128)
+    };
+    relay.events = [accepted.projection];
+    relay.transitions = [created.transition, accepted.transition, fork];
+
+    const result = await service.loadBook(MARKET, 1_700_000_200);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.rejected).toBeGreaterThanOrEqual(3);
+  });
+
+  it("rejects a stale projection when a later linear successor exists", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => `operation-${signer.signed.length}`, 2, () => true);
+    const created = await service.publish(order());
+    const reservePublication = await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    const filled = fillOrder(reserved(), {
+      reservationId: reserved().reservation!.id,
+      amount: "2000"
+    });
+    await service.publishStaged(
+      await service.stageSuccessor(filled, "fill", reservePublication.transition, evidence)
+    );
+    relay.events = [reservePublication.projection];
+
+    const result = await service.loadBook(MARKET, 1_700_000_200);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.rejected).toBeGreaterThanOrEqual(3);
+  });
+
+  it("rejects a cryptographically valid successor with an invalid economic delta", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(signer, relay, () => "operation", 2, () => true);
+    const created = await service.publish(order());
+    const invalidState = {
+      ...reserved(),
+      limit_price: { numerator: "1", denominator: "1" }
+    };
+    const invalidTransition: NostrEvent = {
+      ...createStateTransitionTemplate(invalidState, MAKER, "invalid-op", "reserve", created.transition),
+      id: "9".repeat(64),
+      pubkey: MAKER,
+      sig: "c".repeat(128)
+    };
+    const invalidProjection: NostrEvent = {
+      ...await createProjectionTemplate(invalidState, invalidTransition),
+      id: "8".repeat(64),
+      pubkey: MAKER,
+      sig: "c".repeat(128)
+    };
+    relay.events = [invalidProjection];
+    relay.transitions = [created.transition, invalidTransition];
+
+    const result = await service.loadBook(MARKET, 1_700_000_200);
+
+    expect(result.book.asks).toEqual([]);
+    expect(result.rejected).toBeGreaterThanOrEqual(2);
+  });
+
   it("publishes the signed transition before its signed current projection", async () => {
     const signer = new FakeSigner();
     const relay = new FakeRelay();
