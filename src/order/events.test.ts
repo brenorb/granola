@@ -86,6 +86,7 @@ describe("Granola Nostr order events", () => {
     expect(record).toMatchObject({
       address: `30078:${maker}:granola:order:v1:${orderId}`,
       eventId: event.id,
+      headEventId: transitionId,
       makerPubkey: maker,
       verified: false,
       state: { order_id: orderId, status: "open" }

@@ -120,6 +120,7 @@ describe("Granola order model", () => {
     const record = (orderId: string, side: "buy" | "sell", numerator: string): OrderRecord => ({
       address: `30078:maker:${orderId}`,
       eventId: `${orderId}-event`,
+      headEventId: `${orderId}-head`,
       makerPubkey: `maker-${orderId}`,
       verified: true,
       state: createOrderState({

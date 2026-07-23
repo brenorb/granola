@@ -96,6 +96,7 @@ export interface ExactMarket {
 export interface OrderRecord {
   address: string;
   eventId: string;
+  headEventId: string;
   makerPubkey: string;
   verified: boolean;
   state: OrderState;

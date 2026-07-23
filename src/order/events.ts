@@ -471,6 +471,7 @@ export async function parseProjectionEvent(
   return {
     address: orderAddress(event.pubkey, state.order_id),
     eventId: event.id,
+    headEventId: head,
     makerPubkey: event.pubkey,
     verified: false,
     state
