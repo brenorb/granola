@@ -16,8 +16,16 @@ a consensus database. The wire format must not imply atomic compare-and-set or
 globally consistent state where none exists.
 
 The current Nostr specifications use the terms `regular` and `addressable`
-events in [NIP-01]. NIP-16 and NIP-33 now point to NIP-01 rather than defining
-separate behavior.
+events in [NIP-01]. NIP-16 and the historical NIP-33 document now point to
+NIP-01 rather than defining separate behavior; NIP-33 is not a separate wire
+protocol Granola should cite as its event model.
+
+Granola is privacy-first. Cashu blinded signatures hide the relationship
+between issuance and spending, and fresh per-reservation keys prevent one
+trade from becoming a durable identity link. Public Nostr events are only a
+short-lived order-book rendezvous. They must not become a receipt ledger or
+contain bearer tokens, proofs, preimages, private keys, or unnecessary identity
+metadata.
 
 ## Decision
 

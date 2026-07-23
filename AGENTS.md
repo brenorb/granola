@@ -17,3 +17,9 @@
   duplicate reservation, disconnect, mint outage, and mid-swap abort.
 - `nostr-tools@2.23.3` NIP-17 unwrap only decrypts; validate both signatures,
   both kinds, tags, rumor hash, recipient, and seal/rumor author match yourself.
+- Granola is privacy-first: use ephemeral per-reservation keys and Cashu's
+  blinded-signature model so relays and counterparties learn as little as the
+  protocol requires.
+- Public Nostr data is an ephemeral order-book rendezvous, not a transaction
+  ledger. Do not add receipt histories, bearer material, payment proofs,
+  preimages, or unnecessary identity/linkability metadata to public events.
