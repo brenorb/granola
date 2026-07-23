@@ -101,6 +101,31 @@ const PEER_WAIT_MESSAGES = new Set([
   "No next private trade message is available"
 ]);
 
+const MAKER_PHASE_PROGRESS: Record<PublicTradeView["phase"], number> = {
+  negotiating: 0,
+  reserved: 10,
+  base_locked: 20,
+  quote_locked: 30,
+  quote_claimed: 40,
+  base_claimed: 50,
+  waiting_quote_refund: 60,
+  waiting_base_refund: 60,
+  waiting_base_claim: 60,
+  released: 70,
+  filled: 70,
+  frozen: 70
+};
+
+function makerProgress(trade: PublicTradeView): number {
+  const pending = trade.pendingOrderPublication?.operation;
+  const pendingProgress = pending === "reserve"
+    ? 5
+    : pending === "fill" || pending === "release"
+      ? 55
+      : 0;
+  return Math.max(MAKER_PHASE_PROGRESS[trade.phase], pendingProgress);
+}
+
 export class BrowserTradeController {
   private readonly api: BrowserTradeControllerOptions["api"];
   private readonly sessions: BrowserTradeControllerOptions["sessions"];
@@ -120,6 +145,8 @@ export class BrowserTradeController {
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
   private readonly makerSettlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
+  private readonly makerSettlementOrders = new Map<string, string>();
+  private readonly subscriptionReconnects = new Map<string, Promise<void>>();
   private makerSubscriptionKeys = new Set<string>();
   private readonly subscriptionStarts = new Map<string, Promise<void>>();
   private subscriptionGeneration = 0;
@@ -172,7 +199,7 @@ export class BrowserTradeController {
     await Promise.all(trades.map(async (trade) => {
       await this.ensureSessionSubscription(trade.sessionId);
       if (makerWinners.has(trade.sessionId)) {
-        this.startMakerSettlementInBackground(trade.sessionId);
+        this.startMakerSettlementInBackground(trade);
       }
     }));
     return trades;
@@ -259,10 +286,8 @@ export class BrowserTradeController {
       const current = winners.get(trade.orderAddress);
       if (
         current === undefined ||
-        (trade.pendingOrderPublication !== null &&
-          current.pendingOrderPublication === null) ||
-        ((trade.pendingOrderPublication !== null) ===
-          (current.pendingOrderPublication !== null) &&
+        makerProgress(trade) > makerProgress(current) ||
+        (makerProgress(trade) === makerProgress(current) &&
           (trade.updatedAt > current.updatedAt ||
             (trade.updatedAt === current.updatedAt &&
               trade.createdAt > current.createdAt)))
@@ -273,19 +298,41 @@ export class BrowserTradeController {
     return new Set([...winners.values()].map((trade) => trade.sessionId));
   }
 
-  private startMakerSettlementInBackground(sessionId: string): void {
-    if (this.makerSettlementRuns.has(sessionId)) return;
-    const run = this.runUntilSettled(sessionId, this.onMakerError);
-    this.makerSettlementRuns.set(sessionId, run);
+  private startMakerSettlementInBackground(trade: PublicTradeView): void {
+    if (
+      this.makerSettlementRuns.has(trade.sessionId) ||
+      this.makerSettlementOrders.has(trade.orderAddress)
+    ) return;
+    const run = this.runUntilSettled(trade.sessionId, this.onMakerError);
+    this.makerSettlementRuns.set(trade.sessionId, run);
+    this.makerSettlementOrders.set(trade.orderAddress, trade.sessionId);
     void run
       .catch((error: unknown) => {
         this.onMakerError(messageOf(error));
       })
       .finally(() => {
-        if (this.makerSettlementRuns.get(sessionId) === run) {
-          this.makerSettlementRuns.delete(sessionId);
+        if (this.makerSettlementRuns.get(trade.sessionId) === run) {
+          this.makerSettlementRuns.delete(trade.sessionId);
+        }
+        if (
+          this.makerSettlementOrders.get(trade.orderAddress) === trade.sessionId
+        ) {
+          this.makerSettlementOrders.delete(trade.orderAddress);
         }
       });
+  }
+
+  private async startWinningMakerSettlement(orderAddress: string): Promise<void> {
+    const trades = await this.api.listTrades();
+    const winnerIds = this.makerSettlementWinners(trades);
+    const winner = trades.find(
+      (trade) =>
+        trade.orderAddress === orderAddress &&
+        winnerIds.has(trade.sessionId)
+    );
+    if (winner === undefined) return;
+    await this.ensureSessionSubscription(winner.sessionId);
+    this.startMakerSettlementInBackground(winner);
   }
 
   async enableMaker(): Promise<MakerInboxStatus> {
@@ -329,10 +376,9 @@ export class BrowserTradeController {
                 )
               );
               const trade = await this.api.acceptReserveProposal(proposal);
-              await this.ensureSessionSubscription(trade.sessionId);
               this.onMakerAccepted(trade);
               this.onChange(trade);
-              this.startMakerSettlementInBackground(trade.sessionId);
+              await this.startWinningMakerSettlement(trade.orderAddress);
             } catch (error) {
               this.onMakerError(messageOf(error));
             }
@@ -449,15 +495,52 @@ export class BrowserTradeController {
     restart: () => Promise<void>,
     reportError: (message: string) => void = this.onError
   ): void {
-    reportError(error.message);
-    if (error.kind !== "relay_closed") return;
-    const subscription = this.subscriptions.get(key);
-    if (subscription === undefined) return;
-    subscription.stop();
-    this.subscriptions.delete(key);
-    void restart().catch((restartError: unknown) => {
-      reportError(messageOf(restartError));
+    if (error.kind === "relay_start") return;
+    if (error.kind !== "relay_closed") {
+      reportError(error.message);
+      return;
+    }
+    this.reconnectSubscription(key, restart, reportError);
+  }
+
+  private reconnectSubscription(
+    key: string,
+    restart: () => Promise<void>,
+    reportError: (message: string) => void
+  ): void {
+    if (this.subscriptionReconnects.has(key)) return;
+    const generation = this.subscriptionGeneration;
+    let reconnect!: Promise<void>;
+    reconnect = (async () => {
+      const starting = this.subscriptionStarts.get(key);
+      if (starting !== undefined) {
+        await starting.catch(() => undefined);
+      }
+      if (this.subscriptionGeneration !== generation) return;
+      this.subscriptions.get(key)?.stop();
+      this.subscriptions.delete(key);
+      let attempts = 0;
+      while (this.subscriptionGeneration === generation) {
+        if (attempts > 0) {
+          await this.wait(Math.min(10_000, 250 * (2 ** Math.min(attempts, 5))));
+          if (this.subscriptionGeneration !== generation) return;
+        }
+        try {
+          await restart();
+          return;
+        } catch {
+          attempts += 1;
+          if (attempts === 4) {
+            reportError("Inbox relay is unavailable; reconnecting automatically");
+          }
+        }
+      }
+    })().finally(() => {
+      if (this.subscriptionReconnects.get(key) === reconnect) {
+        this.subscriptionReconnects.delete(key);
+      }
     });
+    this.subscriptionReconnects.set(key, reconnect);
   }
 
   private sessionPubkey(session: TradeSession): string {
