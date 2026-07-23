@@ -15,8 +15,8 @@ describe("manual testnet swap tutorial", () => {
     expect(tutorial).toContain("50,000.00");
     expect(tutorial).toContain("Retry same signed projection");
     expect(tutorial).toContain("Take ask");
-    expect(tutorial).toContain("runUntilSettled");
-    expect(tutorial).toContain("Advance safely");
+    expect(tutorial).not.toContain("runUntilSettled");
+    expect(tutorial).not.toContain("Advance safely");
     expect(tutorial).toContain("filled");
     expect(tutorial).toContain("4-day");
     expect(tutorial).toContain("7-day");

@@ -2,10 +2,6 @@ import { nip19 } from "nostr-tools";
 
 import type { PublicTradeView } from "../trade/session.js";
 
-export interface TradeRenderOptions {
-  onAdvance?: (sessionId: string) => void;
-}
-
 function element<K extends keyof HTMLElementTagNameMap>(
   name: K,
   text?: string
@@ -45,8 +41,7 @@ function identity(label: string, value: string | null): HTMLElement {
 
 export function renderTrades(
   root: HTMLElement,
-  trades: PublicTradeView[],
-  options: TradeRenderOptions = {}
+  trades: PublicTradeView[]
 ): void {
   root.replaceChildren();
   root.setAttribute("aria-live", "polite");
@@ -97,12 +92,6 @@ export function renderTrades(
     protocol.append(messages);
     card.append(protocol);
 
-    const advance = element("button", "Advance safely");
-    advance.type = "button";
-    advance.dataset.advanceTrade = "true";
-    advance.disabled = options.onAdvance === undefined || ["filled", "released", "frozen"].includes(trade.phase);
-    if (options.onAdvance) advance.addEventListener("click", () => options.onAdvance?.(trade.sessionId));
-    card.append(advance);
     root.append(card);
   }
 }

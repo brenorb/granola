@@ -135,6 +135,8 @@ function orderRow(
   if (options.onTake) take.addEventListener("click", () => {
     validateTakeAmount(amount, order);
     if (!amount.reportValidity()) return;
+    take.disabled = true;
+    take.textContent = "Settling…";
     options.onTake?.(order, amount.value);
   });
   action.append(amount, take);
