@@ -310,18 +310,8 @@ if (!hasNativeWebLocks()) {
 let makerInboxStartPromise: Promise<void> | undefined;
 let makerInboxResyncQueued = false;
 
-async function refreshMakerPublicKeys(): Promise<string[]> {
-  const publicKeys = await granola.getMakerPublicKeys();
-  const publicKey = publicKeys[0] ?? "";
-  byId("maker-pubkey").textContent = publicKey
-    ? `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`
-    : "none (publish an order to become a maker)";
-  byId("maker-pubkey").title = publicKeys.join("\n");
-  return publicKeys;
-}
-
 async function syncMakerInboxes(): Promise<void> {
-  const publicKeys = await refreshMakerPublicKeys();
+  const publicKeys = await granola.getMakerPublicKeys();
   if (publicKeys.length === 0) {
     byId("maker-inbox-state").textContent = "idle";
     return;

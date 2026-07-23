@@ -54,10 +54,6 @@ caption { padding: .65rem 0; text-align: left; font-weight: 700; text-transform:
 th, td { padding: .7rem; border: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .empty-state { padding: 3rem; border: 1px dashed var(--ink); text-align: center; }
-.market-tape { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: 1.5rem 0; border: 1px solid var(--ink); background: var(--ink); gap: 1px; }
-.market-tape p { min-width: 0; margin: 0; padding: .8rem; background: var(--paper); }
-.market-tape span, .market-tape strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: .66rem/1.5 "Courier New", monospace; }
-.market-tape span { color: #696c62; text-transform: uppercase; }
 .market-wallet { display: flex; align-items: stretch; gap: 1px; margin: 1.5rem 0 0; border: 1px solid var(--ink); background: var(--ink); }
 .wallet-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); flex: 1; }
 .wallet-summary__balance { display: grid; gap: .25rem; min-width: 0; padding: .8rem 1rem; background: var(--paper); }
@@ -155,7 +151,6 @@ code { font-family: "Courier New", monospace; }
   .work-grid { grid-template-columns: 1fr; }
   .panel:nth-child(odd) { border-right: 0; }
   .field-pair { grid-template-columns: 1fr; }
-  .market-tape { grid-template-columns: 1fr 1fr; }
   .market-wallet { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
   .market-wallet > #wallet-summary { grid-column: 1 / -1; min-width: 0; }
   .market-wallet .wallet-summary { width: 100%; }

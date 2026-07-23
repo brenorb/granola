@@ -29,9 +29,10 @@ describe("manual testnet swap tutorial", () => {
     expect(html).toContain('id="order-settlement-hint"');
   });
 
-  it("advertises the one-relay public order acknowledgement policy", () => {
-    expect(html).toContain("1 of 3 acknowledgements");
-    expect(html).not.toContain("2 of 3 acknowledgements");
+  it("keeps the public market header focused on the wallet and order book", () => {
+    expect(html).not.toContain('class="market-tape"');
+    expect(html).not.toContain("Base issuer");
+    expect(html).not.toContain("Active order keys");
   });
 
   it("keeps minimum fill out of the current order form", () => {
