@@ -32,7 +32,6 @@ const quote = await window.granola.requestMint({
 const next = await window.granola.claimMint(quote.ref);
 
 await window.granola.receiveToken("cashuB...");
-await window.granola.receiveToken("cashuB...", { acceptMint: true });
 
 const backup = await window.granola.createBackup();
 await window.granola.clearWallet("DELETE TEST WALLET");
@@ -57,6 +56,7 @@ The default Testnut mints automatically mark fake BOLT11 quotes paid. Call
 with a bounded timeout is sufficient for tests. An unpaid result changes no
 wallet balance.
 
-The app trusts the two configured Testnut hosts by default. Receiving from any
-other mint requires `{ acceptMint: true }` so automation cannot silently add a
-new issuer liability.
+The public app has a fixed network allowlist matching its Content Security
+Policy: `https://testnut.cashu.space` and
+`https://nofee.testnut.cashu.space`. `inspectMint`, `requestMint`, and
+`receiveToken` reject every other issuer before making a network request.

@@ -17,10 +17,18 @@ import type {
 } from "../storage/wallet-repository.js";
 
 const QUOTE_KEY = "granola.quotes.v1";
-const DEFAULT_TRUSTED_MINTS = new Set([
+const ALLOWED_TEST_MINTS = new Set([
   "https://testnut.cashu.space",
   "https://nofee.testnut.cashu.space"
 ]);
+
+function allowedTestMint(mintUrl: string): string {
+  const normalized = normalizeMintUrl(mintUrl);
+  if (!ALLOWED_TEST_MINTS.has(normalized)) {
+    throw new Error(`Mint is not allowed in this test wallet: ${normalized}`);
+  }
+  return normalized;
+}
 
 interface StoredQuote {
   ref: string;
@@ -133,8 +141,8 @@ export class GranolaApi {
     };
   }
 
-  inspectMint(mintUrl: string): Promise<MintCapabilities> {
-    return this.cashu.inspectMint(mintUrl);
+  async inspectMint(mintUrl: string): Promise<MintCapabilities> {
+    return await this.cashu.inspectMint(allowedTestMint(mintUrl));
   }
 
   inspectToken(token: string): TokenSummary {
@@ -146,7 +154,10 @@ export class GranolaApi {
     unit: string;
     amount: string;
   }): Promise<PublicQuote> {
-    const quote = await this.cashu.createMintQuote(input);
+    const quote = await this.cashu.createMintQuote({
+      ...input,
+      mintUrl: allowedTestMint(input.mintUrl)
+    });
     const stored: StoredQuote = { ref: this.createRef(), quote };
     const quotes = await this.quotes.load();
     if (quotes.some((item) => item.ref === stored.ref)) {
@@ -172,15 +183,9 @@ export class GranolaApi {
     return this.getState();
   }
 
-  async receiveToken(
-    token: string,
-    options: { acceptMint?: boolean } = {}
-  ): Promise<GranolaState> {
+  async receiveToken(token: string): Promise<GranolaState> {
     const summary = this.cashu.inspectToken(token);
-    const mintUrl = normalizeMintUrl(summary.mintUrl);
-    if (!DEFAULT_TRUSTED_MINTS.has(mintUrl) && options.acceptMint !== true) {
-      throw new Error(`Explicit mint trust is required for ${mintUrl}`);
-    }
+    allowedTestMint(summary.mintUrl);
     const batch = await this.cashu.receiveToken(token);
     const wallet = addProofs(await this.wallets.load(), batch);
     await this.wallets.save(wallet);

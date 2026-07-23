@@ -66,7 +66,7 @@ const granola: GranolaBrowserFacade = {
   inspectToken: api.inspectToken.bind(api),
   requestMint: (input) => locked(() => api.requestMint(input)),
   claimMint: (ref) => locked(() => api.claimMint(ref)),
-  receiveToken: (token, options) => locked(() => api.receiveToken(token, options)),
+  receiveToken: (token) => locked(() => api.receiveToken(token)),
   createBackup: () => locked(() => api.createBackup()),
   clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation))
 };
@@ -128,7 +128,7 @@ byId<HTMLFormElement>("receive-form").addEventListener("submit", (event) => {
   void (async () => {
     const token = tokenInput.value;
     const summary = api.inspectToken(token);
-    const state = await granola.receiveToken(token, { acceptMint: byId<HTMLInputElement>("accept-mint").checked });
+    const state = await granola.receiveToken(token);
     tokenInput.value = "";
     byId("token-preview").textContent = "Token received and rotated into fresh proofs.";
     await refresh(state);

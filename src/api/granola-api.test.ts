@@ -110,7 +110,7 @@ describe("Granola agent API", () => {
     expect(JSON.stringify(state)).not.toContain("bearer-secret");
   });
 
-  it("requires explicit trust before receiving from an unknown mint", async () => {
+  it("rejects mints outside the browser CSP allowlist before network access", async () => {
     const driver = new MemoryStorageDriver();
     const cashu = fakeCashu();
     const summary: TokenSummary = {
@@ -127,11 +127,31 @@ describe("Granola agent API", () => {
     );
 
     await expect(api.receiveToken("cashuBunknown")).rejects.toThrow(
-      "Explicit mint trust is required"
+      "Mint is not allowed in this test wallet"
     );
-    await api.receiveToken("cashuBunknown", { acceptMint: true });
+    expect(cashu.receiveToken).not.toHaveBeenCalled();
+    expect((await api.getState()).wallet.balances).toEqual([]);
+  });
 
-    expect((await api.getState()).wallet.balances[0]?.unit).toBe("eur");
+  it("rejects unknown mint network calls through the agent API", async () => {
+    const driver = new MemoryStorageDriver();
+    const cashu = fakeCashu();
+    const api = new GranolaApi(
+      new WalletRepository(driver),
+      new QuoteRepository(driver),
+      cashu
+    );
+
+    await expect(api.inspectMint("https://unknown-mint.test")).rejects.toThrow(
+      "Mint is not allowed in this test wallet"
+    );
+    await expect(api.requestMint({
+      mintUrl: "https://unknown-mint.test",
+      unit: "sat",
+      amount: "1"
+    })).rejects.toThrow("Mint is not allowed in this test wallet");
+    expect(cashu.inspectMint).not.toHaveBeenCalled();
+    expect(cashu.createMintQuote).not.toHaveBeenCalled();
   });
 
   it("exports bearer backups and refuses accidental deletion", async () => {
