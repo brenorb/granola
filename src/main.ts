@@ -1,6 +1,7 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, TEST_MARKET, type PublishOrderInput } from "./api/order-api.js";
 import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
+import { nip19 } from "nostr-tools";
 import {
   hasNativeWebLocks,
   withOrderOutboxLock,
@@ -28,6 +29,12 @@ import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
 import { renderTrades } from "./ui/trades.js";
+import {
+  renderActivityLog,
+  type ActivityDetail,
+  type ActivityEntry
+} from "./ui/activity-log.js";
+import type { PublicTradeView } from "./trade/session.js";
 
 interface GranolaBrowserFacade {
   getState: BrowserGranolaApi["getState"];
@@ -112,13 +119,79 @@ const status = byId("status");
 const orderSettlementHint = byId("order-settlement-hint");
 const activity = byId<HTMLOListElement>("activity-log");
 let tradeControllerPromise: Promise<BrowserTradeController> | undefined;
+const activityEntries: ActivityEntry[] = [];
+const tracedTradeMessages = new Set<string>();
+const tracedTradeCheckpoints = new Set<string>();
 
 function log(message: string): void {
-  const item = document.createElement("li");
-  const time = document.createElement("time");
-  time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  item.append(time, document.createTextNode(message));
-  activity.prepend(item);
+  trace("Activity", message);
+}
+
+function trace(label: string, title: string, details: ActivityDetail[] = []): void {
+  activityEntries.unshift({ at: Date.now(), label, title, details });
+  activityEntries.splice(100);
+  renderActivityLog(activity, activityEntries);
+}
+
+function shortIdentifier(value: string): ActivityDetail {
+  return { label: "id", value: `${value.slice(0, 8)}…`, title: value };
+}
+
+function publicNpub(label: string, pubkey: string): ActivityDetail {
+  const npub = nip19.npubEncode(pubkey);
+  return { label, value: `${npub.slice(0, 12)}…${npub.slice(-8)}`, title: npub };
+}
+
+function tradeTrace(trade: PublicTradeView): void {
+  const checkpointKey = `${trade.sessionId}:${trade.revision}:${trade.phase}`;
+  if (!tracedTradeCheckpoints.has(checkpointKey)) {
+    tracedTradeCheckpoints.add(checkpointKey);
+    trace("Protocol", "Trade checkpoint accepted", [
+      { label: "role", value: trade.role },
+      { label: "phase", value: trade.phase },
+      shortIdentifier(trade.sessionId),
+      shortIdentifier(trade.reservationId),
+      { label: "order address", value: `${trade.orderAddress.slice(0, 22)}…`, title: trade.orderAddress },
+      shortIdentifier(trade.offeredProjectionId),
+      ...(trade.protocol.localNostrPubkey === null
+        ? []
+        : [publicNpub("local npub", trade.protocol.localNostrPubkey)]),
+      publicNpub("order npub", trade.protocol.orderAuthorityPubkey),
+      ...(trade.protocol.counterpartyNostrPubkey === null
+        ? []
+        : [publicNpub("counterparty", trade.protocol.counterpartyNostrPubkey)])
+    ]);
+  }
+
+  const inboxKey = `${trade.sessionId}:${trade.protocol.inbox.registrationEventId}:${trade.protocol.inbox.status}`;
+  if (!tracedTradeCheckpoints.has(inboxKey) && trade.protocol.inbox.status !== "unregistered") {
+    tracedTradeCheckpoints.add(inboxKey);
+    trace("Inbox", "Private inbox checkpoint", [
+      { label: "status", value: trade.protocol.inbox.status },
+      ...(trade.protocol.inbox.registrationEventId === null
+        ? []
+        : [shortIdentifier(trade.protocol.inbox.registrationEventId)]),
+      { label: "relays", value: String(trade.protocol.inbox.relayCount) },
+      { label: "acks", value: String(trade.protocol.inbox.acknowledgements) },
+      ...(trade.protocol.localNostrPubkey === null
+        ? []
+        : [publicNpub("recipient", trade.protocol.localNostrPubkey)])
+    ]);
+  }
+
+  for (const message of trade.protocol.messages) {
+    const messageKey = `${trade.sessionId}:${message.messageId}`;
+    if (tracedTradeMessages.has(messageKey)) continue;
+    tracedTradeMessages.add(messageKey);
+    trace("DM", `${message.type ?? "Private message"} accepted`, [
+      { label: "sequence", value: message.sequence },
+      shortIdentifier(message.messageId),
+      shortIdentifier(message.rumorId),
+      shortIdentifier(message.transcriptHash),
+      ...(message.authorPubkey === undefined ? [] : [publicNpub("from", message.authorPubkey)]),
+      ...(message.recipientPubkey === undefined ? [] : [publicNpub("to", message.recipientPubkey)])
+    ]);
+  }
 }
 
 function report(message: string, error = false): void {
@@ -155,9 +228,6 @@ async function refreshOrderBook(): Promise<void> {
         canCancel: (order) => identities.includes(order.makerPubkey)
       }
     );
-    if (result.rejected > 0) {
-      log(`Ignored ${result.rejected} invalid or conflicting public order event(s)`);
-    }
   } catch (error) {
     renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
     throw error;
@@ -192,7 +262,7 @@ function advanceTrade(sessionId: string): void {
   void granola.advanceTrade(sessionId)
     .then(async (trade) => {
       await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
-      log(`Advanced ${trade.role} swap ${trade.reservationId.slice(0, 8)}… to ${trade.phase}`);
+      tradeTrace(trade);
       report(`Completed one checkpointed ${trade.role} action`);
     })
     .catch((error: unknown) => report(messageOf(error), true));
@@ -201,6 +271,7 @@ function advanceTrade(sessionId: string): void {
 async function refreshTrades(): Promise<void> {
   const controller = await tradeController();
   const current = await controller.resume();
+  current.forEach(tradeTrace);
   renderTrades(trades, current, { onAdvance: advanceTrade });
 }
 
@@ -222,7 +293,7 @@ function takeOrderFromBook(
   }).then(async (trade) => {
     takeRequestIds.delete(retryKey);
     await refreshTrades();
-    log(`Opened taker swap ${trade.reservationId.slice(0, 8)}… for ${fillBaseAmount} ${trade.terms.baseUnit.toUpperCase()}`);
+    tradeTrace(trade);
     report("Swap session persisted; advance one verified action at a time");
   }).catch((error: unknown) => report(messageOf(error), true));
 }
@@ -330,7 +401,11 @@ function startMakerInbox(): Promise<void> {
       if (!makerPubkey) {
         return;
       }
-      log(`Maker listener ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
+      trace("Nostr", "Maker listener ready", [
+        { label: "meaning", value: "public order authority for maker inbox discovery" },
+        publicNpub("order npub", makerPubkey),
+        { label: "relay", value: new URL(inboxRelay).host }
+      ]);
       report("Maker listener is authenticated and listening");
     })
     .catch((error: unknown) => {
@@ -507,7 +582,14 @@ orderForm.addEventListener("submit", (event) => {
     };
     const publication = await granola.publishOrder(input);
     const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;
-    log(`Published ${side} order ${publication.orderId.slice(0, 8)}… to ${acknowledgements} relay(s)`);
+    trace("Order", "Public order published", [
+      { label: "side", value: side },
+      shortIdentifier(publication.orderId),
+      shortIdentifier(publication.projectionId),
+      { label: "revision", value: publication.revision },
+      publicNpub("order npub", publication.makerPubkey),
+      { label: "relay acks", value: String(acknowledgements) }
+    ]);
     await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
     report(`Order published with ${acknowledgements} relay acknowledgements`);
   })().catch(async (error: unknown) => {

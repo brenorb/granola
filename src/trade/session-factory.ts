@@ -495,7 +495,10 @@ export async function createMakerSession(
         sequence: "0",
         messageId: message.message_id,
         rumorId: input.proposal.rumor.id,
-        transcriptHash: input.proposal.transcriptHash
+        transcriptHash: input.proposal.transcriptHash,
+        type: message.type,
+        authorPubkey: message.author_pubkey,
+        recipientPubkey: message.recipient_pubkey
       }]
     },
     evidence,

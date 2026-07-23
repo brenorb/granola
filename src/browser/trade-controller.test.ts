@@ -57,6 +57,18 @@ function view(revision = 0): PublicTradeView {
     pendingOrderPublication: null,
     createdAt: 1_800_000_000,
     updatedAt: 1_800_000_000,
+    protocol: {
+      localNostrPubkey: null,
+      orderAuthorityPubkey: "66".repeat(32),
+      counterpartyNostrPubkey: null,
+      inbox: {
+        status: "unregistered",
+        registrationEventId: null,
+        relayCount: 0,
+        acknowledgements: 0
+      },
+      messages: []
+    },
     terms: {
       baseMint: "https://testnut.cashu.space",
       baseUnit: "sat",

@@ -19,6 +19,18 @@ const trade: PublicTradeView = {
   pendingOrderPublication: null,
   createdAt: 1_700_000_000,
   updatedAt: 1_700_000_010,
+  protocol: {
+    localNostrPubkey: null,
+    orderAuthorityPubkey: "22".repeat(32),
+    counterpartyNostrPubkey: "aa".repeat(32),
+    inbox: {
+      status: "registered",
+      registrationEventId: "bb".repeat(32),
+      relayCount: 3,
+      acknowledgements: 3
+    },
+    messages: []
+  },
   terms: {
     baseMint: "https://testnut.cashu.space",
     baseUnit: "sat",

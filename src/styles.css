@@ -129,8 +129,22 @@ summary { cursor: pointer; font: 700 .72rem "Courier New", monospace; text-trans
 details form { margin-top: 1rem; }
 .danger { color: white; background: var(--orange); }
 .log-panel ol { max-height: 280px; margin: 0; padding: 0; overflow: auto; list-style: none; border-top: 1px solid var(--line); }
-.log-panel li { display: grid; grid-template-columns: 6rem 1fr; padding: .7rem 0; border-bottom: 1px solid var(--line); font: .72rem/1.4 "Courier New", monospace; }
+.log-panel li { display: grid; grid-template-columns: 6rem 1fr; gap: .8rem; padding: .7rem 0; border-bottom: 1px solid var(--line); font: .72rem/1.4 "Courier New", monospace; }
 .log-panel time { color: var(--orange); }
+.activity-entry__heading { display: flex; flex-wrap: wrap; gap: .6rem; align-items: baseline; }
+.activity-entry__heading span { color: var(--orange); font-size: .64rem; letter-spacing: .08em; text-transform: uppercase; }
+.activity-entry__heading strong { font: inherit; }
+.activity-entry dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem .7rem; margin: .35rem 0 0; color: var(--muted); }
+.activity-entry dt { color: var(--ink); }
+.activity-entry dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trade-protocol-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem 1rem; margin: 1rem 0; padding: .7rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); list-style: none; font: .72rem/1.4 "Courier New", monospace; }
+.trade-protocol-summary li { display: grid; gap: .2rem; }
+.trade-protocol-summary span { color: var(--muted); }
+.trade-protocol-summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) {
+  .log-panel li { grid-template-columns: 4.5rem 1fr; }
+  .trade-protocol-summary { grid-template-columns: 1fr; }
+}
 .agent-strip { margin-top: 3rem; padding: clamp(2rem,6vw,5rem); color: var(--paper); background: var(--ink); }
 .agent-strip h2 { max-width: 10em; font-size: clamp(2.5rem,6vw,6rem); }
 .agent-strip p:not(.eyebrow) { max-width: 42rem; line-height: 1.5; }
