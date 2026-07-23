@@ -30,14 +30,12 @@ describe("ephemeral maker order identity", () => {
     expect([...borrowed]).toEqual(new Array(32).fill(0));
   });
 
-  it("deletes legacy profile identity records and rejects corrupt order storage", async () => {
+  it("rejects corrupt order storage", async () => {
     const driver = new MemoryStorageDriver();
-    await driver.set("granola.nostr.identity.v1", { version: 1, secret_key: "not-a-secret-key" });
     await driver.set("granola.nostr.order-keys.v1", { version: 1, keys: { [ORDER_A]: "bad" } });
     await expect(new MakerIdentity(driver).listOrderIds()).rejects.toThrow("Order key storage is corrupt");
     await driver.set("granola.nostr.order-keys.v1", { version: 1, keys: {} });
     await new MakerIdentity(driver).listOrderIds();
-    expect(await driver.get("granola.nostr.identity.v1")).toBeUndefined();
   });
 
   it("erases a completed order key and generates a new key only on explicit reuse", async () => {

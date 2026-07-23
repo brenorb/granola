@@ -9,7 +9,6 @@ import {
 import type { StorageDriver } from "../storage/wallet-repository.js";
 
 const ORDER_KEYS_KEY = "granola.nostr.order-keys.v1";
-const LEGACY_IDENTITY_KEY = "granola.nostr.identity.v1";
 const HEX_SECRET = /^[0-9a-f]{64}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -63,11 +62,7 @@ export class MakerIdentity {
   }
 
   private async withStoredKeys<T>(action: (stored: StoredOrderKeys) => Promise<T>): Promise<T> {
-    return this.runExclusive(async () => {
-      const legacy = await this.driver.get(LEGACY_IDENTITY_KEY);
-      if (legacy !== undefined && legacy !== null) await this.driver.delete(LEGACY_IDENTITY_KEY);
-      return action(await this.readStoredKeys());
-    });
+    return this.runExclusive(async () => action(await this.readStoredKeys()));
   }
 
   private async secretKey(orderId: string): Promise<Uint8Array> {
