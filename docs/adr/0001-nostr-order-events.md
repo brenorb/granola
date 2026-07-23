@@ -121,19 +121,33 @@ The current projection has kind `30078` and these tags:
   ["v", "1"],
   ["s", "open"],
   ["side", "sell"],
-  ["base", "sat", "https://testnut.cashu.space"],
-  ["quote", "usd", "https://nofee.testnut.cashu.space"],
+  ["m", "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"],
+  ["m", "8b232677c9edc17ccae45cf226fda181d314a83426212ee0ffada7f92d10dbad"],
   ["expires_at", "1780000000"],
   ["expiration", "1780604800"],
   ["e", "<current-transition-id>"]
 ]
 ```
 
-`base` and `quote` tags are repeated once for every exact mint pair in which an
-order is eligible to appear. An order requesting several acceptable mints can
-therefore appear in several issuer-specific books. Clients must not aggregate
-different mint liabilities into one top-of-book price unless the user explicitly
-chooses that view.
+Each single-letter `m` tag identifies one exact issuer-specific market. Its
+value is lowercase hex SHA-256 of this UTF-8 string with no final newline:
+
+```text
+granola-market-v1\n<base-unit>\n<base-mint>\n<quote-unit>\n<quote-mint>
+```
+
+The tag is repeated for every exact mint pair in which the order is eligible to
+appear. NIP-01 requires relays to index single-letter tags and filters on their
+second value, which makes an exact market subscription possible:
+
+```json
+{"kinds":[30078],"#t":["granola-order"],"#m":["79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"]}
+```
+
+Clients recompute all `m` values from signed content and reject mismatches. An
+order requesting several acceptable mints can appear in several issuer-specific
+books. Clients must not aggregate different mint liabilities into one
+top-of-book price unless the user explicitly chooses that view.
 
 The `content` is a JSON object:
 
@@ -146,15 +160,15 @@ The `content` is a JSON object:
   "created_at": 1777408000,
   "expires_at": 1780000000,
   "side": "sell",
-  "base": { "unit": "sat", "mint": "https://testnut.cashu.space" },
-  "quote": {
-    "unit": "usd",
-    "acceptable_mints": ["https://nofee.testnut.cashu.space"]
-  },
+  "base_unit": "sat",
+  "quote_unit": "usd",
   "offered": { "unit": "sat", "mint": "https://testnut.cashu.space" },
   "requested": {
     "unit": "usd",
-    "acceptable_mints": ["https://nofee.testnut.cashu.space"]
+    "acceptable_mints": [
+      "https://nofee.testnut.cashu.space",
+      "https://testnut.cashu.space"
+    ]
   },
   "original_amount": "1000",
   "remaining_amount": "1000",
@@ -169,6 +183,44 @@ The `content` is a JSON object:
 }
 ```
 
+A complete bid uses the same cardinality without reversing the schema:
+
+```json
+{
+  "schema": "granola/order/v1",
+  "order_id": "019...bid",
+  "revision": "0",
+  "head": "<current-transition-id>",
+  "created_at": 1777408000,
+  "expires_at": 1780000000,
+  "side": "buy",
+  "base_unit": "sat",
+  "quote_unit": "usd",
+  "offered": { "unit": "usd", "mint": "https://nofee.testnut.cashu.space" },
+  "requested": {
+    "unit": "sat",
+    "acceptable_mints": [
+      "https://nofee.testnut.cashu.space",
+      "https://testnut.cashu.space"
+    ]
+  },
+  "original_amount": "1000",
+  "remaining_amount": "1000",
+  "reserved_amount": "0",
+  "limit_price": { "numerator": "5", "denominator": "1" },
+  "minimum_fill_amount": "100",
+  "execution": "partial",
+  "status": "open",
+  "reservation": null,
+  "replaces": null,
+  "replaced_by": null
+}
+```
+
+Its `m` tags are
+`af826c2cddbdba30d2fa196180ce8a0111618e002eec2a1e644cbddd9935797e`
+and `79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b`.
+
 All amounts are canonical non-negative integer strings in the base asset's
 minor unit; original amount and minimum fill are positive. Price is the reduced
 positive rational number of quote minor units per base minor unit.
@@ -176,10 +228,12 @@ Implementations must not use binary floating point. A fill is valid only when
 `base_fill * numerator` is exactly divisible by `denominator`, so both
 settlement amounts remain integers.
 
-`side` is `sell` for an ask and `buy` for a bid. For a sell, the maker offers
-the base asset and requests quote. For a buy, the maker offers quote and requests
-base. `offered` and `requested` make that direction explicit and must agree with
-`side`, `base`, and `quote`.
+`base_unit` and `quote_unit` are side-neutral and do not carry mint cardinality.
+`side` is `sell` for an ask and `buy` for a bid. For a sell, `offered.unit` must
+equal `base_unit` and `requested.unit` must equal `quote_unit`. For a buy,
+`offered.unit` must equal `quote_unit` and `requested.unit` must equal
+`base_unit`. Offered always has exactly one mint; requested always has a
+non-empty acceptable-mint set.
 
 Mint URLs are normalized HTTPS URLs without queries, fragments, or trailing
 slashes. Units are lowercase. Acceptable mints are normalized, sorted, and
@@ -218,7 +272,7 @@ timestamp, relay count, or lexicographic event ID.
 
 ## Lifecycle
 
-The public states are:
+The public effective states are:
 
 - `open`: no fill and no live reservation;
 - `partially_filled`: some quantity filled, remainder available;
@@ -229,8 +283,10 @@ The public states are:
   canceled.
 
 State is derived in this priority order: `filled`, `canceled`, `expired`, live
-`reserved`, `partially_filled`, `open`. Relays may retain expired events, so
-clients enforce time locally.
+`reserved`, `partially_filled`, `open`. A signed snapshot can still contain a
+just-expired reservation; the effective state then derives to `open` or
+`partially_filled` until the maker publishes a release transition. Relays may
+retain expired events, so clients enforce time locally.
 
 The wire always carries an explicit `expires_at`. If the maker does not choose
 one, the creating client sets it to creation time plus 2,592,000 seconds
@@ -252,19 +308,42 @@ terms, requested base amount, and a unique reservation ID. A reservation exists
 only after a maker-signed acceptance transition. A proposal alone has no effect.
 
 Version 1 permits one live reservation per order. The default reservation is
-120 seconds and must include `expires_at`. Reservation does not reduce
-`remaining_amount`; it sets `reserved_amount`. The available amount is
-`remaining_amount - reserved_amount`.
+120 seconds. Its state object is:
+
+```json
+{
+  "id": "<random-reservation-id>",
+  "amount": "1000",
+  "accepted_at": 1777408120,
+  "expires_at": 1777408240,
+  "proposal_event_id": "<signed-private-proposal-id>",
+  "taker_commitment": "<32-byte-lowercase-hex>"
+}
+```
+
+The amount is positive and no greater than remaining; `accepted_at` equals the
+reserve transition's Nostr `created_at`; expiry is later than acceptance and no
+later than order expiry; proposal ID is a valid signed private message event;
+the commitment is opaque and does not reveal the taker. `reserved_amount` must
+equal `reservation.amount` when reservation is non-null and must be zero when
+it is null. Reservation does not reduce `remaining_amount`.
+
+Effective available amount is `remaining_amount - reserved_amount` while the
+reservation is live, and `remaining_amount` after local reservation expiry.
 
 All-or-none requires the reservation and fill to equal the entire remaining
 amount. Partial execution requires each fill to meet `minimum_fill_amount`,
 except a final fill may equal the smaller entire remainder. A non-final fill
 must not leave positive dust below the minimum.
 
-Reservation expiry is derived locally. The maker publishes a release projection
-before accepting another reservation. A cancel operation is rejected while a
-reservation is live unless the taker signs an abort; otherwise the maker waits
-for reservation expiry.
+Reservation expiry is derived locally, but clearing signed state requires an
+internal `release` transition. Release clears `reservation` and
+`reserved_amount`, then publishes an exact projection of that transition state.
+Its reason is either `expired`, valid only at or after reservation expiry, or
+`abort`, which references the taker's signed private abort event. A maker must
+publish release before accepting another reservation. A cancel operation is
+rejected while a reservation is live unless it first consumes a signed abort;
+otherwise the maker waits for expiry and releases it.
 
 ### Fill
 
@@ -282,12 +361,17 @@ order cannot reopen.
 
 Economic replacement is cancel-and-create, not merely Nostr's addressable-event
 replacement. Price, total quantity, side, asset, mint, execution condition, or
-expiry changes create a new order ID and reset time priority.
+expiry changes create a new order ID.
 
-One maker-signed `replace` transition binds the terminal old order and new order
-IDs. The old projection contains `replaced_by`; the new projection contains
-`replaces`. Relays cannot publish the two projections atomically, so clients use
-the signed cross-links to recognize temporary divergence.
+One logical Replace produces two maker-signed transition events with the same
+random `operation_id`: a `replace` successor on the old chain that makes it
+terminal and records `replaced_by`, and revision-zero `create` on the new chain
+that records `replaces`. Cross-links use stable order addresses, not the two
+transition IDs, avoiding a circular hash dependency. The old and new projections
+point to their respective transition IDs. Relays cannot publish the pair
+atomically, so clients use author, operation ID, and signed cross-links to
+recognize temporary divergence. A new order is displayed only after its paired
+old transition is available or with an explicit unverified-replacement warning.
 
 Ordinary lifecycle snapshots keep the same order ID and are technical Nostr
 replacements, not the economic Replace operation.
@@ -297,21 +381,25 @@ replacements, not the economic Replace operation.
 An exchange view selects an exact base `(unit, mint)` and quote `(unit, mint)`.
 It includes only orders compatible with both issuer liabilities.
 
-- asks sort by lowest exact rational price, then original creation time, then
-  stable order address;
-- bids sort by highest exact rational price, then original creation time, then
-  stable order address;
+- asks sort by lowest exact rational price, then stable order address;
+- bids sort by highest exact rational price, then stable order address;
 - reserved quantity is excluded from displayed available depth;
 - terminal and locally expired orders are excluded.
 
-Nostr publication time does not grant economic priority. Replacement with a new
-order ID resets priority.
+Neither maker-asserted creation time nor Nostr publication time grants economic
+priority. They are informational because a maker can backdate an event and
+relays do not establish global order. The stable-address tie-break only makes UI
+output deterministic and grants no execution right; a maker can also choose
+that address. Competing reservations are resolved solely by a maker-signed
+acceptance against one exact head.
 
 ## Consistency and replay rules
 
 - Validate event ID, Schnorr signature, maker author, schema, and invariants.
 - Reject an unknown version instead of guessing.
 - Reject a stale predecessor or non-monotonic revision.
+- Require original `created_at` to equal the create transition timestamp, but
+  never use it as a fairness or priority oracle.
 - Reject transitions after a terminal state.
 - Reject far-future timestamps outside the client's clock-skew policy.
 - Treat the addressable projection as unverified if its `head` transition is
@@ -319,6 +407,8 @@ order ID resets priority.
 - Query multiple relays. NIP-67 `finish` can prove one relay exhausted its
   stored result; absence of the hint requires pagination and does not prove
   completeness.
+- Publish NIP-40 projections only to relays advertising NIP-40. Do not strip
+  `expiration` per relay, because that would create different signed event IDs.
 - A live reservation acceptance is the maker's signed private response tied to
   one exact head. Public relay state alone never proves exclusive reservation.
 
