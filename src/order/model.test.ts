@@ -1,0 +1,128 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  buildOrderBook,
+  createOrderState,
+  eligibleMarketIds,
+  marketId,
+  type OrderRecord
+} from "./model.js";
+
+const testnut = "https://testnut.cashu.space";
+const nofee = "https://nofee.testnut.cashu.space";
+
+describe("Granola order model", () => {
+  it("creates a canonical ask with explicit 30-day expiry and indexed markets", async () => {
+    const state = createOrderState({
+      orderId: "ask-1",
+      createdAt: 1_700_000_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [testnut, nofee, nofee] },
+      amount: "2000",
+      price: { numerator: "101", denominator: "2000" }
+    });
+
+    expect(state.expires_at).toBe(1_702_592_000);
+    expect(state.execution).toBe("all_or_none");
+    expect(state.minimum_fill_amount).toBe("2000");
+    expect(state.requested.acceptable_mints).toEqual([nofee, testnut]);
+    await expect(eligibleMarketIds(state)).resolves.toEqual([
+      "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b",
+      "8b232677c9edc17ccae45cf226fda181d314a83426212ee0ffada7f92d10dbad"
+    ]);
+  });
+
+  it("models a bid without reversing offered/requested mint cardinality", async () => {
+    const state = createOrderState({
+      orderId: "bid-1",
+      createdAt: 1_700_000_000,
+      side: "buy",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "usd", mint: nofee },
+      requested: { unit: "sat", acceptableMints: [testnut, nofee] },
+      amount: "2000",
+      price: { numerator: "99", denominator: "2000" },
+      execution: "partial",
+      minimumFillAmount: "1000"
+    });
+
+    expect(state.offered).toEqual({ unit: "usd", mint: nofee });
+    expect(state.requested.acceptable_mints).toEqual([nofee, testnut]);
+    await expect(eligibleMarketIds(state)).resolves.toEqual([
+      "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b",
+      "af826c2cddbdba30d2fa196180ce8a0111618e002eec2a1e644cbddd9935797e"
+    ]);
+  });
+
+  it("rejects inexact prices and side/asset mismatches", () => {
+    expect(() => createOrderState({
+      orderId: "bad-price",
+      createdAt: 1,
+      side: "buy",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "usd", mint: nofee },
+      requested: { unit: "sat", acceptableMints: [testnut] },
+      amount: "1",
+      price: { numerator: "1", denominator: "2" }
+    })).toThrow("integer settlement amounts");
+
+    expect(() => createOrderState({
+      orderId: "bad-side",
+      createdAt: 1,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "usd", mint: nofee },
+      requested: { unit: "sat", acceptableMints: [testnut] },
+      amount: "2",
+      price: { numerator: "1", denominator: "2" }
+    })).toThrow("Sell orders must offer the base unit");
+  });
+
+  it("sorts an issuer-specific book and makes the top bid and ask explicit", async () => {
+    const record = (orderId: string, side: "buy" | "sell", numerator: string): OrderRecord => ({
+      address: `30078:maker:${orderId}`,
+      eventId: `${orderId}-event`,
+      makerPubkey: `maker-${orderId}`,
+      verified: true,
+      state: createOrderState({
+        orderId,
+        createdAt: 1_700_000_000,
+        expiresAt: 1_800_000_000,
+        side,
+        baseUnit: "sat",
+        quoteUnit: "usd",
+        offered: side === "sell"
+          ? { unit: "sat", mint: testnut }
+          : { unit: "usd", mint: nofee },
+        requested: side === "sell"
+          ? { unit: "usd", acceptableMints: [nofee] }
+          : { unit: "sat", acceptableMints: [testnut] },
+        amount: "2000",
+        price: { numerator, denominator: "2000" }
+      })
+    });
+    const market = { baseUnit: "sat", baseMint: testnut, quoteUnit: "usd", quoteMint: nofee };
+    const records = [
+      record("ask-51000", "sell", "102"),
+      record("bid-49000", "buy", "98"),
+      record("ask-50500", "sell", "101"),
+      record("bid-49500", "buy", "99")
+    ];
+
+    const book = await buildOrderBook(records, market, 1_700_000_100);
+
+    expect(book.asks.map((order) => order.state.order_id)).toEqual(["ask-50500", "ask-51000"]);
+    expect(book.bids.map((order) => order.state.order_id)).toEqual(["bid-49500", "bid-49000"]);
+    expect(book.topAsk?.state.order_id).toBe("ask-50500");
+    expect(book.topBid?.state.order_id).toBe("bid-49500");
+    await expect(marketId(market)).resolves.toBe(
+      "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"
+    );
+  });
+});

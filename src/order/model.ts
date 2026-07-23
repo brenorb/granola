@@ -1,0 +1,280 @@
+import { normalizeMintUrl } from "../core/wallet.js";
+
+export type OrderSide = "buy" | "sell";
+export type ExecutionCondition = "all_or_none" | "partial";
+export type OrderStatus =
+  | "open"
+  | "partially_filled"
+  | "reserved"
+  | "filled"
+  | "canceled"
+  | "expired";
+
+export interface OfferedAsset {
+  unit: string;
+  mint: string;
+}
+
+export interface RequestedAsset {
+  unit: string;
+  acceptable_mints: string[];
+}
+
+export interface RationalPrice {
+  numerator: string;
+  denominator: string;
+}
+
+export interface ReservationState {
+  id: string;
+  amount: string;
+  accepted_at: number;
+  expires_at: number;
+  proposal_event_id: string;
+  taker_commitment: string;
+}
+
+export interface OrderState {
+  schema: "granola/order/v1";
+  order_id: string;
+  revision: string;
+  created_at: number;
+  expires_at: number;
+  side: OrderSide;
+  base_unit: string;
+  quote_unit: string;
+  offered: OfferedAsset;
+  requested: RequestedAsset;
+  original_amount: string;
+  remaining_amount: string;
+  reserved_amount: string;
+  limit_price: RationalPrice;
+  minimum_fill_amount: string;
+  execution: ExecutionCondition;
+  status: OrderStatus;
+  reservation: ReservationState | null;
+  replaces: string | null;
+  replaced_by: string | null;
+}
+
+export interface CreateOrderInput {
+  orderId: string;
+  createdAt: number;
+  expiresAt?: number;
+  side: OrderSide;
+  baseUnit: string;
+  quoteUnit: string;
+  offered: { unit: string; mint: string };
+  requested: { unit: string; acceptableMints: string[] };
+  amount: string;
+  price: RationalPrice;
+  execution?: ExecutionCondition;
+  minimumFillAmount?: string;
+}
+
+export interface ExactMarket {
+  baseUnit: string;
+  baseMint: string;
+  quoteUnit: string;
+  quoteMint: string;
+}
+
+export interface OrderRecord {
+  address: string;
+  eventId: string;
+  makerPubkey: string;
+  verified: boolean;
+  state: OrderState;
+}
+
+export interface OrderBook {
+  market: ExactMarket;
+  marketId: string;
+  asks: OrderRecord[];
+  bids: OrderRecord[];
+  topAsk?: OrderRecord;
+  topBid?: OrderRecord;
+}
+
+function canonicalUnit(value: string): string {
+  const unit = value.trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(unit)) {
+    throw new Error("Cashu unit must be a lowercase identifier");
+  }
+  return unit;
+}
+
+function integer(value: string, label: string, allowZero = false): bigint {
+  const pattern = allowZero ? /^(0|[1-9]\d*)$/ : /^[1-9]\d*$/;
+  if (!pattern.test(value)) throw new Error(`${label} must be a canonical integer string`);
+  return BigInt(value);
+}
+
+function gcd(left: bigint, right: bigint): bigint {
+  while (right !== 0n) [left, right] = [right, left % right];
+  return left;
+}
+
+function canonicalPrice(price: RationalPrice): RationalPrice {
+  const numerator = integer(price.numerator, "Price numerator");
+  const denominator = integer(price.denominator, "Price denominator");
+  const divisor = gcd(numerator, denominator);
+  return {
+    numerator: (numerator / divisor).toString(),
+    denominator: (denominator / divisor).toString()
+  };
+}
+
+export function createOrderState(input: CreateOrderInput): OrderState {
+  const baseUnit = canonicalUnit(input.baseUnit);
+  const quoteUnit = canonicalUnit(input.quoteUnit);
+  const offeredUnit = canonicalUnit(input.offered.unit);
+  const requestedUnit = canonicalUnit(input.requested.unit);
+  if (baseUnit === quoteUnit) throw new Error("Base and quote units must differ");
+  if (input.side === "sell" && (offeredUnit !== baseUnit || requestedUnit !== quoteUnit)) {
+    throw new Error("Sell orders must offer the base unit and request the quote unit");
+  }
+  if (input.side === "buy" && (offeredUnit !== quoteUnit || requestedUnit !== baseUnit)) {
+    throw new Error("Buy orders must offer the quote unit and request the base unit");
+  }
+  if (!input.orderId.trim()) throw new Error("Order ID is required");
+  if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
+    throw new Error("Creation time must be a Unix timestamp");
+  }
+
+  const expiresAt = input.expiresAt ?? input.createdAt + 2_592_000;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= input.createdAt) {
+    throw new Error("Order expiry must be after creation");
+  }
+  const amount = integer(input.amount, "Order amount");
+  const price = canonicalPrice(input.price);
+  if ((amount * BigInt(price.numerator)) % BigInt(price.denominator) !== 0n) {
+    throw new Error("Order amount and limit price must produce integer settlement amounts");
+  }
+
+  const execution = input.execution ?? "all_or_none";
+  const minimum = input.minimumFillAmount ?? (execution === "all_or_none" ? input.amount : "");
+  const minimumValue = integer(minimum, "Minimum fill amount");
+  if (minimumValue > amount) throw new Error("Minimum fill cannot exceed order amount");
+  if (execution === "all_or_none" && minimumValue !== amount) {
+    throw new Error("All-or-none minimum fill must equal the order amount");
+  }
+
+  const acceptableMints = [...new Set(
+    input.requested.acceptableMints.map(normalizeMintUrl)
+  )].sort();
+  if (acceptableMints.length === 0) throw new Error("At least one requested mint is required");
+
+  return {
+    schema: "granola/order/v1",
+    order_id: input.orderId.trim(),
+    revision: "0",
+    created_at: input.createdAt,
+    expires_at: expiresAt,
+    side: input.side,
+    base_unit: baseUnit,
+    quote_unit: quoteUnit,
+    offered: { unit: offeredUnit, mint: normalizeMintUrl(input.offered.mint) },
+    requested: { unit: requestedUnit, acceptable_mints: acceptableMints },
+    original_amount: amount.toString(),
+    remaining_amount: amount.toString(),
+    reserved_amount: "0",
+    limit_price: price,
+    minimum_fill_amount: minimumValue.toString(),
+    execution,
+    status: "open",
+    reservation: null,
+    replaces: null,
+    replaced_by: null
+  };
+}
+
+function marketPreimage(market: ExactMarket): string {
+  return [
+    "granola-market-v1",
+    canonicalUnit(market.baseUnit),
+    normalizeMintUrl(market.baseMint),
+    canonicalUnit(market.quoteUnit),
+    normalizeMintUrl(market.quoteMint)
+  ].join("\n");
+}
+
+export async function marketId(market: ExactMarket): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(marketPreimage(market))
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function eligibleMarketIds(state: OrderState): Promise<string[]> {
+  const markets: ExactMarket[] = state.requested.acceptable_mints.map((mint) =>
+    state.side === "sell"
+      ? {
+          baseUnit: state.base_unit,
+          baseMint: state.offered.mint,
+          quoteUnit: state.quote_unit,
+          quoteMint: mint
+        }
+      : {
+          baseUnit: state.base_unit,
+          baseMint: mint,
+          quoteUnit: state.quote_unit,
+          quoteMint: state.offered.mint
+        }
+  );
+  return (await Promise.all(markets.map(marketId))).sort();
+}
+
+function effectiveAvailable(state: OrderState, now: number): bigint {
+  const remaining = integer(state.remaining_amount, "Remaining amount", true);
+  if (state.reservation && now < state.reservation.expires_at) {
+    return remaining - integer(state.reserved_amount, "Reserved amount", true);
+  }
+  return remaining;
+}
+
+function comparePrice(left: OrderRecord, right: OrderRecord): number {
+  const leftPrice = left.state.limit_price;
+  const rightPrice = right.state.limit_price;
+  const leftCross = BigInt(leftPrice.numerator) * BigInt(rightPrice.denominator);
+  const rightCross = BigInt(rightPrice.numerator) * BigInt(leftPrice.denominator);
+  return leftCross < rightCross ? -1 : leftCross > rightCross ? 1 : 0;
+}
+
+export async function buildOrderBook(
+  records: OrderRecord[],
+  market: ExactMarket,
+  now: number
+): Promise<OrderBook> {
+  const selectedMarketId = await marketId(market);
+  const eligible: OrderRecord[] = [];
+  for (const record of records) {
+    if (!record.verified) continue;
+    if (["filled", "canceled", "expired"].includes(record.state.status)) continue;
+    if (now >= record.state.expires_at) continue;
+    if (effectiveAvailable(record.state, now) <= 0n) continue;
+    if (!(await eligibleMarketIds(record.state)).includes(selectedMarketId)) continue;
+    eligible.push(record);
+  }
+
+  const tie = (left: OrderRecord, right: OrderRecord): number =>
+    left.address.localeCompare(right.address);
+  const asks = eligible
+    .filter((record) => record.state.side === "sell")
+    .sort((left, right) => comparePrice(left, right) || tie(left, right));
+  const bids = eligible
+    .filter((record) => record.state.side === "buy")
+    .sort((left, right) => -comparePrice(left, right) || tie(left, right));
+
+  return {
+    market,
+    marketId: selectedMarketId,
+    asks,
+    bids,
+    ...(asks[0] ? { topAsk: asks[0] } : {}),
+    ...(bids[0] ? { topBid: bids[0] } : {})
+  };
+}
