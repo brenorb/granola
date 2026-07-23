@@ -502,6 +502,18 @@ describe("trade session v2 repository", () => {
       .toEqual(first);
   });
 
+  it("idempotently returns one maker session for an exact proposal retry", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+
+    const [first, retried] = await Promise.all([
+      repository.createMakerForOrder(session),
+      repository.createMakerForOrder(structuredClone(session))
+    ]);
+
+    expect(retried).toEqual(first);
+    expect(await repository.list()).toEqual([session]);
+  });
+
   it("rejects unknown or bearer fields in the exact request-binding store", async () => {
     const driver = new MemoryStorageDriver();
     const candidate = await revisionZeroTaker();

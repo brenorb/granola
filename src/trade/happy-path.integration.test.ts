@@ -447,8 +447,6 @@ describe("two-party coordinator happy path", () => {
       priceCentsPerBtc: "5000000",
       expiresAt: NOW + 9 * 86_400
     });
-    await orderApi.publishNextStage(create.orderId);
-    await orderApi.clearAcknowledgedOrderPublication(create.orderId);
     const order = (await orderService.loadBook(selectedMarket, NOW)).book.asks[0]!;
 
     const transport = new MemoryTradeTransport();

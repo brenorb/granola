@@ -168,9 +168,13 @@ export class BrowserTradeController {
 
   async resume(): Promise<PublicTradeView[]> {
     const trades = await this.api.listTrades();
-    await Promise.all(trades.map((trade) =>
-      this.resumeTrade(trade)
-    ));
+    const makerWinners = this.makerSettlementWinners(trades);
+    await Promise.all(trades.map(async (trade) => {
+      await this.ensureSessionSubscription(trade.sessionId);
+      if (makerWinners.has(trade.sessionId)) {
+        this.startMakerSettlementInBackground(trade.sessionId);
+      }
+    }));
     return trades;
   }
 
@@ -243,16 +247,30 @@ export class BrowserTradeController {
     });
   }
 
-  private async resumeTrade(trade: PublicTradeView): Promise<void> {
-    await this.ensureSessionSubscription(trade.sessionId);
-    if (
-      trade.role === "maker" &&
-      trade.phase !== "filled" &&
-      trade.phase !== "frozen" &&
-      trade.phase !== "released"
-    ) {
-      this.startMakerSettlementInBackground(trade.sessionId);
+  private makerSettlementWinners(trades: PublicTradeView[]): Set<string> {
+    const winners = new Map<string, PublicTradeView>();
+    for (const trade of trades) {
+      if (
+        trade.role !== "maker" ||
+        trade.phase === "filled" ||
+        trade.phase === "frozen" ||
+        trade.phase === "released"
+      ) continue;
+      const current = winners.get(trade.orderAddress);
+      if (
+        current === undefined ||
+        (trade.pendingOrderPublication !== null &&
+          current.pendingOrderPublication === null) ||
+        ((trade.pendingOrderPublication !== null) ===
+          (current.pendingOrderPublication !== null) &&
+          (trade.updatedAt > current.updatedAt ||
+            (trade.updatedAt === current.updatedAt &&
+              trade.createdAt > current.createdAt)))
+      ) {
+        winners.set(trade.orderAddress, trade);
+      }
     }
+    return new Set([...winners.values()].map((trade) => trade.sessionId));
   }
 
   private startMakerSettlementInBackground(sessionId: string): void {

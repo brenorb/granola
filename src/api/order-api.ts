@@ -212,8 +212,15 @@ export class OrderApi {
     if (entries.length > 1) {
       throw new Error("Order has conflicting pending projections");
     }
-    const existing = entries[0];
+    let existing = entries[0];
     if (!existing) return undefined;
+    if (
+      existing.status === "acknowledged" &&
+      existing.intent.operation === "create" &&
+      operation !== "create"
+    ) {
+      existing = await this.outbox.clearAcknowledged(existing.intent.orderId);
+    }
     if (
       existing.intent.operation !== operation ||
       existing.intent.expectedProjectionId !== binding.expectedProjectionId ||
@@ -301,6 +308,15 @@ export class OrderApi {
     return publicProgress(cleared);
   }
 
+  private async finalizeAcknowledgedCreate(
+    progress: OrderPublicationProgress
+  ): Promise<OrderPublicationProgress> {
+    if (progress.status !== "acknowledged") return progress;
+    const entry = await this.outbox.load(progress.orderId);
+    if (entry?.intent.operation !== "create") return progress;
+    return this.clearAcknowledgedOrderPublication(progress.orderId);
+  }
+
   async pruneCommittedOrderPublication(orderId: string): Promise<void> {
     await this.outbox.pruneCommitted(orderId);
   }
@@ -309,7 +325,7 @@ export class OrderApi {
     const acknowledged = await this.loadAcknowledgedOrderPublication(orderId);
     return acknowledged
       ? this.clearAcknowledgedOrderPublication(orderId)
-      : this.publishNextStage(orderId);
+      : this.finalizeAcknowledgedCreate(await this.publishNextStage(orderId));
   }
 
   async publishOrder(input: PublishOrderInput): Promise<OrderPublicationProgress> {
@@ -358,7 +374,9 @@ export class OrderApi {
       evidence: null,
       createdAt
     }, () => this.orders.stage(state));
-    return this.publishNextStage(entry.intent.orderId);
+    return this.finalizeAcknowledgedCreate(
+      await this.publishNextStage(entry.intent.orderId)
+    );
   }
 
   private async stageSuccessor(
