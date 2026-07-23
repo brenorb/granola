@@ -11,6 +11,7 @@ import {
   settlementAmountGuidance,
   settlementAmountRounding
 } from "./order/human-price.js";
+import { assertOrderFunding } from "./order/funding.js";
 import type { OrderRecord } from "./order/model.js";
 import { NostrOrderService } from "./order/service.js";
 import { MakerIdentity } from "./nostr/identity.js";
@@ -74,6 +75,11 @@ const orderApi = new OrderApi(
   () => crypto.randomUUID(),
   orderOutbox
 );
+
+async function publishOrderWithFunding(input: PublishOrderInput) {
+  assertOrderFunding((await api.getState()).wallet, input.side, input.amount, input.price);
+  return orderApi.publishOrder(input);
+}
 const dashboard = byId("dashboard");
 const orderbook = byId("orderbook");
 const pendingPublications = byId("pending-publications");
@@ -219,7 +225,7 @@ const granola: GranolaBrowserFacade = {
   clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation)),
   getMakerIdentity: orderApi.getMakerIdentity.bind(orderApi),
   getOrderBook: orderApi.getOrderBook.bind(orderApi),
-  publishOrder: orderApi.publishOrder.bind(orderApi),
+  publishOrder: publishOrderWithFunding,
   getPendingOrderPublications: orderApi.getPendingOrderPublications.bind(orderApi),
   retryOrderPublication: orderApi.retryOrderPublication.bind(orderApi),
   listTrades: async () => (await tradeController()).listTrades(),
