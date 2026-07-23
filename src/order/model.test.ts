@@ -6,6 +6,7 @@ import {
   eligibleMarketIds,
   fillOrder,
   marketId,
+  releaseOrder,
   reserveOrder,
   type OrderRecord
 } from "./model.js";
@@ -241,5 +242,58 @@ describe("Granola order model", () => {
       reservation: null,
       status: "filled"
     });
+  });
+
+  it("releases only the matching reservation after expiry or a signed abort", () => {
+    const initial = createOrderState({
+      orderId: askOne,
+      createdAt: 1_700_000_000,
+      expiresAt: 1_700_010_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "20",
+      price: { numerator: "1", denominator: "20" }
+    });
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "20",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_900,
+      proposalEventId: "a".repeat(64),
+      takerCommitment: "b".repeat(64)
+    });
+
+    expect(() => releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "expired",
+      releasedAt: 1_700_001_899
+    })).toThrow(/not expired/i);
+
+    expect(releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "expired",
+      releasedAt: 1_700_001_900
+    })).toMatchObject({
+      revision: "2",
+      remaining_amount: "20",
+      reserved_amount: "0",
+      reservation: null,
+      status: "open"
+    });
+
+    expect(releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "abort",
+      releasedAt: 1_700_000_200,
+      abortEventId: "c".repeat(64)
+    })).toMatchObject({ revision: "2", status: "open", reservation: null });
+    expect(() => releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "abort",
+      releasedAt: 1_700_000_200
+    })).toThrow(/abort event/i);
   });
 });

@@ -86,6 +86,13 @@ export interface FillOrderInput {
   amount: string;
 }
 
+export interface ReleaseOrderInput {
+  reservationId: string;
+  reason: "expired" | "abort";
+  releasedAt: number;
+  abortEventId?: string;
+}
+
 export interface ExactMarket {
   baseUnit: string;
   baseMint: string;
@@ -304,6 +311,44 @@ export function fillOrder(state: OrderState, input: FillOrderInput): OrderState 
     remaining_amount: nextRemaining.toString(),
     reserved_amount: "0",
     status: nextRemaining === 0n ? "filled" : "partially_filled",
+    reservation: null
+  };
+}
+
+export function releaseOrder(state: OrderState, input: ReleaseOrderInput): OrderState {
+  assertMutable(state);
+  const reservation = state.reservation;
+  if (!reservation || state.status !== "reserved") {
+    throw new Error("Release requires a live reservation");
+  }
+  if (input.reservationId !== reservation.id) {
+    throw new Error("Release reservation ID does not match");
+  }
+  if (!Number.isSafeInteger(input.releasedAt) || input.releasedAt < reservation.accepted_at) {
+    throw new Error("Reservation release time is invalid");
+  }
+  if (input.reason === "expired") {
+    if (input.releasedAt < reservation.expires_at) {
+      throw new Error("Reservation is not expired");
+    }
+    if (input.abortEventId !== undefined) {
+      throw new Error("Expired release cannot reference an abort event");
+    }
+  } else if (input.reason === "abort") {
+    if (!input.abortEventId || !HEX_32.test(input.abortEventId)) {
+      throw new Error("Abort release requires a signed abort event ID");
+    }
+  } else {
+    throw new Error("Reservation release reason is invalid");
+  }
+  const status = state.remaining_amount === state.original_amount
+    ? "open"
+    : "partially_filled";
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: "0",
+    status,
     reservation: null
   };
 }
