@@ -5,6 +5,8 @@ import type {
 } from "../order/model.js";
 import { beginButtonFeedback } from "./button-feedback.js";
 
+const COLLAPSED_ORDER_COUNT = 3;
+
 export type OrderBookRenderState =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -46,10 +48,11 @@ function priceLabel(market: ExactMarket): string {
 function priceCell(order: OrderRecord, market: ExactMarket): HTMLTableCellElement {
   const cell = element("td");
   const price = order.state.price_cents_per_btc;
-  const displayed = element("data", `${fiatPerBtc(price)} ${priceLabel(market)}`);
+  const displayed = element("data", fiatPerBtc(price));
   displayed.dataset.price = "true";
   displayed.dataset.priceCentsPerBtc = price;
   displayed.setAttribute("value", price);
+  displayed.title = `${fiatPerBtc(price)} ${priceLabel(market)}`;
   cell.append(displayed);
   return cell;
 }
@@ -144,11 +147,17 @@ function orderRow(
   row.append(
     element(
       "td",
-      `${groupedInteger(order.state.remaining_amount)} ${market.baseUnit.toUpperCase()}`
+      groupedInteger(order.state.remaining_amount)
     )
+  );
+  row.cells[1]?.setAttribute(
+    "title",
+    `${groupedInteger(order.state.remaining_amount)} ${market.baseUnit.toUpperCase()} remaining`
   );
   const action = element("td");
   action.className = "order-action";
+  const controls = element("div");
+  controls.className = "order-action__controls";
   const amount = element("input");
   amount.type = "text";
   amount.inputMode = "numeric";
@@ -161,11 +170,15 @@ function orderRow(
   );
   const take = element(
     "button",
-    order.state.side === "sell" ? "Take ask" : "Sell into bid"
+    order.state.side === "sell" ? "Buy" : "Sell"
   );
   take.type = "button";
   take.className = "quiet";
   take.dataset.takeOrder = "true";
+  take.setAttribute(
+    "aria-label",
+    `${order.state.side === "sell" ? "Buy from ask" : "Sell into bid"}`
+  );
   take.disabled = !order.verified || options.onTake === undefined;
   if (options.onTake) take.addEventListener("click", () => {
     validateTakeAmount(amount, order);
@@ -173,13 +186,14 @@ function orderRow(
     beginButtonFeedback(take, "Settling…");
     options.onTake?.(order, amount.value, take);
   });
-  action.append(amount, take);
-  action.append(orderInfo(
+  controls.append(amount, take);
+  controls.append(orderInfo(
     order,
     options.canCancel?.(order) && options.onCancel
       ? (cancel) => options.onCancel?.(order, cancel)
       : undefined
   ));
+  action.append(controls);
   row.append(action);
   return row;
 }
@@ -205,12 +219,6 @@ function renderSummary(book: OrderBook): HTMLElement {
   const summary = element("dl");
   summary.className = "orderbook-summary";
 
-  summary.append(element("dt", "Best bid"));
-  summary.append(summaryValue("best-bid", book.topBid, book.market));
-  summary.append(element("dt", "Best ask"));
-  summary.append(summaryValue("best-ask", book.topAsk, book.market));
-  summary.append(element("dt", "Spread"));
-
   const spreadValue = element("dd", "—");
   spreadValue.dataset.summary = "spread";
   if (book.topAsk && book.topBid) {
@@ -220,16 +228,17 @@ function renderSummary(book: OrderBook): HTMLElement {
     spreadValue.textContent = `${fiatPerBtc(spread.toString())} ${priceLabel(book.market)}`;
     spreadValue.dataset.spreadCentsPerBtc = spread.toString();
   }
-  summary.append(spreadValue);
+  const entries: Array<[string, HTMLElement]> = [
+    ["Best ask", summaryValue("best-ask", book.topAsk, book.market)],
+    ["Spread", spreadValue],
+    ["Best bid", summaryValue("best-bid", book.topBid, book.market)]
+  ];
+  for (const [label, value] of entries) {
+    const item = element("div");
+    item.append(element("dt", label), value);
+    summary.append(item);
+  }
   return summary;
-}
-
-function midpointText(book: OrderBook): string {
-  if (!book.topAsk || !book.topBid) return "Inside market unavailable";
-  const spread =
-    BigInt(book.topAsk.state.price_cents_per_btc) -
-    BigInt(book.topBid.state.price_cents_per_btc);
-  return `Spread ${fiatPerBtc(spread.toString())} ${priceLabel(book.market)}`;
 }
 
 function renderSideTable(
@@ -246,7 +255,11 @@ function renderSideTable(
   table.append(element("caption", label));
   const head = element("thead");
   const headers = element("tr");
-  for (const headerLabel of ["Limit price", "Remaining", "Action"]) {
+  for (const headerLabel of [
+    `Limit (${priceLabel(market)})`,
+    "Left",
+    "Trade"
+  ]) {
     const header = element("th", headerLabel);
     header.scope = "col";
     headers.append(header);
@@ -257,20 +270,55 @@ function renderSideTable(
   const body = element("tbody");
   body.className = `orderbook-${label.toLowerCase()}`;
   body.setAttribute("aria-label", label);
-  for (const order of orders) {
-    body.append(orderRow(
+  const overflowRows: HTMLTableRowElement[] = [];
+  orders.forEach((order, index) => {
+    const row = orderRow(
       order,
       market,
       order.address === best?.address ? label === "Asks" ? "ask" : "bid" : undefined,
       options
-    ));
-  }
+    );
+    if (index >= COLLAPSED_ORDER_COUNT) {
+      row.hidden = true;
+      overflowRows.push(row);
+    }
+    body.append(row);
+  });
   table.append(body);
 
   const scroller = element("div");
   scroller.className = "table-scroll";
   scroller.append(table);
   section.append(scroller);
+  if (overflowRows.length > 0) {
+    const footer = element("footer");
+    footer.className = "orderbook-side__footer";
+    const count = element(
+      "small",
+      `${COLLAPSED_ORDER_COUNT} / ${orders.length} shown`
+    );
+    const toggle = element(
+      "button",
+      "See more"
+    );
+    toggle.type = "button";
+    toggle.className = "quiet orderbook-toggle";
+    toggle.dataset.orderbookToggle = label.toLowerCase();
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      for (const row of overflowRows) row.hidden = expanded;
+      toggle.setAttribute("aria-expanded", String(!expanded));
+      toggle.textContent = expanded
+        ? "See more"
+        : "See less";
+      count.textContent = expanded
+        ? `${COLLAPSED_ORDER_COUNT} / ${orders.length} shown`
+        : `${orders.length} / ${orders.length} shown`;
+    });
+    footer.append(count, toggle);
+    section.append(footer);
+  }
   return section;
 }
 
@@ -284,21 +332,21 @@ function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRende
     return;
   }
 
+  const frame = element("div");
+  frame.className = "orderbook-frame";
+  const marketStrip = element("aside");
+  marketStrip.className = "orderbook-market-strip";
+  marketStrip.dataset.bookMidpoint = "true";
+  marketStrip.setAttribute("aria-label", "Inside market");
+  marketStrip.append(renderSummary(book));
   const columns = element("div");
   columns.className = "orderbook-columns";
   columns.append(
-    renderSideTable("Asks", book.asks, book.topAsk, book.market, options)
+    renderSideTable("Asks", book.asks, book.topAsk, book.market, options),
+    renderSideTable("Bids", book.bids, book.topBid, book.market, options)
   );
-
-  const midpoint = element("aside");
-  midpoint.className = "orderbook-midpoint";
-  midpoint.dataset.bookMidpoint = "true";
-  midpoint.append(renderSummary(book));
-  midpoint.append(element("p", midpointText(book)));
-  columns.append(midpoint);
-
-  columns.append(renderSideTable("Bids", book.bids, book.topBid, book.market, options));
-  root.append(columns);
+  frame.append(marketStrip, columns);
+  root.append(frame);
 }
 
 export function renderOrderBook(
