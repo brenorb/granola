@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fiatPerBtcPrice,
-  settlementAmountGuidance
+  settlementQuoteGuidance
 } from "./human-price.js";
 
 describe("human fiat/BTC price", () => {
@@ -17,20 +17,14 @@ describe("human fiat/BTC price", () => {
       expect(() => fiatPerBtcPrice(value)).toThrow("Price must");
   });
 
-  it("explains compatible SAT sizes when a price produces fractional cents", () => {
-    expect(settlementAmountGuidance("2000", fiatPerBtcPrice("49600.00")))
+  it("shows the truncated quote settlement without changing the SAT amount", () => {
+    expect(settlementQuoteGuidance("200", fiatPerBtcPrice("49500.00")))
       .toEqual({
-        baseMultiple: "625",
-        currentQuoteNumerator: "496",
-        currentQuoteDenominator: "5",
-        lowerCompatibleAmount: "1875",
-        lowerQuoteAmount: "93",
-        higherCompatibleAmount: "2500",
-        higherQuoteAmount: "124"
+        exactQuoteNumerator: "99",
+        exactQuoteDenominator: "10",
+        settlementQuoteAmount: "9"
       });
-    expect(settlementAmountGuidance("1875", fiatPerBtcPrice("49600.00")))
-      .toBeNull();
-    expect(settlementAmountGuidance("2000", fiatPerBtcPrice("50500.00")))
+    expect(settlementQuoteGuidance("2000", fiatPerBtcPrice("50500.00")))
       .toBeNull();
   });
 

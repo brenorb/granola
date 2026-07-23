@@ -1,13 +1,12 @@
-import type { RationalPrice } from "./model.js";
+import {
+  quoteAmountForSettlement,
+  type RationalPrice
+} from "./model.js";
 
-export interface SettlementAmountGuidance {
-  baseMultiple: string;
-  currentQuoteNumerator: string;
-  currentQuoteDenominator: string;
-  lowerCompatibleAmount: string;
-  lowerQuoteAmount: string;
-  higherCompatibleAmount: string;
-  higherQuoteAmount: string;
+export interface SettlementQuoteGuidance {
+  exactQuoteNumerator: string;
+  exactQuoteDenominator: string;
+  settlementQuoteAmount: string;
 }
 
 function gcd(left: bigint, right: bigint): bigint {
@@ -32,15 +31,10 @@ export function fiatPerBtcPrice(value: string): RationalPrice {
   };
 }
 
-/**
- * Return exact compatible base sizes when a rational price cannot settle the
- * requested base amount in integer quote minor units. A null result means the
- * amount already produces an integer quote amount.
- */
-export function settlementAmountGuidance(
+export function settlementQuoteGuidance(
   baseAmount: string,
   price: RationalPrice
-): SettlementAmountGuidance | null {
+): SettlementQuoteGuidance | null {
   if (!/^[1-9]\d*$/.test(baseAmount)) return null;
   const amount = BigInt(baseAmount);
   const numerator = BigInt(price.numerator);
@@ -50,20 +44,12 @@ export function settlementAmountGuidance(
   const reducedNumerator = numerator / divisor;
   const reducedDenominator = denominator / divisor;
   if ((amount * reducedNumerator) % reducedDenominator === 0n) return null;
-  const lower = (amount / reducedDenominator) * reducedDenominator;
-  const higher = lower + reducedDenominator;
-  const currentQuoteNumerator = amount * reducedNumerator;
-  const currentQuoteDenominator = reducedDenominator;
-  const currentQuoteDivisor = gcd(currentQuoteNumerator, currentQuoteDenominator);
-  const lowerQuoteAmount = (lower * reducedNumerator) / reducedDenominator;
-  const higherQuoteAmount = (higher * reducedNumerator) / reducedDenominator;
+  const exactQuoteNumerator = amount * reducedNumerator;
+  const exactQuoteDenominator = reducedDenominator;
+  const exactQuoteDivisor = gcd(exactQuoteNumerator, exactQuoteDenominator);
   return {
-    baseMultiple: reducedDenominator.toString(),
-    currentQuoteNumerator: (currentQuoteNumerator / currentQuoteDivisor).toString(),
-    currentQuoteDenominator: (currentQuoteDenominator / currentQuoteDivisor).toString(),
-    lowerCompatibleAmount: lower > 0n ? lower.toString() : "",
-    lowerQuoteAmount: lowerQuoteAmount.toString(),
-    higherCompatibleAmount: higher.toString(),
-    higherQuoteAmount: higherQuoteAmount.toString()
+    exactQuoteNumerator: (exactQuoteNumerator / exactQuoteDivisor).toString(),
+    exactQuoteDenominator: (exactQuoteDenominator / exactQuoteDivisor).toString(),
+    settlementQuoteAmount: quoteAmountForSettlement(baseAmount, price)
   };
 }

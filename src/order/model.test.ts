@@ -6,6 +6,7 @@ import {
   eligibleMarketIds,
   fillOrder,
   marketId,
+  quoteAmountForSettlement,
   releaseOrder,
   reserveOrder,
   type OrderRecord
@@ -63,7 +64,28 @@ describe("Granola order model", () => {
     ]);
   });
 
-  it("rejects inexact prices and side/asset mismatches", () => {
+  it("preserves the exact base amount and truncates only fractional quote units", () => {
+    const state = createOrderState({
+      orderId: "33333333-3333-4333-8333-333333333333",
+      createdAt: 1,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "200",
+      price: { numerator: "99", denominator: "2000" }
+    });
+    expect(state.original_amount).toBe("200");
+    expect(state.remaining_amount).toBe("200");
+    expect(quoteAmountForSettlement("200", state.limit_price)).toBe("9");
+    expect(quoteAmountForSettlement("2000", {
+      numerator: "31",
+      denominator: "625"
+    })).toBe("99");
+  });
+
+  it("rejects zero-quote orders and side/asset mismatches", () => {
     expect(() => createOrderState({
       orderId: "33333333-3333-4333-8333-333333333333",
       createdAt: 1,
@@ -74,19 +96,7 @@ describe("Granola order model", () => {
       requested: { unit: "sat", acceptableMints: [testnut] },
       amount: "1",
       price: { numerator: "1", denominator: "2" }
-    })).toThrow("integer settlement amounts");
-
-    expect(() => createOrderState({
-      orderId: "99999999-9999-4999-8999-999999999999",
-      createdAt: 1,
-      side: "sell",
-      baseUnit: "sat",
-      quoteUnit: "usd",
-      offered: { unit: "sat", mint: testnut },
-      requested: { unit: "usd", acceptableMints: [nofee] },
-      amount: "2000",
-      price: { numerator: "31", denominator: "625" }
-    })).toThrow("Base amount must be a multiple of 625");
+    })).toThrow("at least one quote unit");
 
     expect(() => createOrderState({
       orderId: "44444444-4444-4444-8444-444444444444",

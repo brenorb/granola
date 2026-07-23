@@ -287,8 +287,13 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   exactKeys(price, ["numerator", "denominator"], "Limit price");
   const numerator = positiveInteger(price.numerator, "Price numerator");
   const denominator = positiveInteger(price.denominator, "Price denominator");
-  if (base * numerator !== quote * denominator) {
-    throw new Error("Trade amounts do not equal the exact rational price");
+  const quoteNumerator = base * numerator;
+  const expectedQuote = quoteNumerator / denominator;
+  if (expectedQuote === 0n) {
+    throw new Error("Trade quote amount must be at least one quote unit");
+  }
+  if (quote !== expectedQuote) {
+    throw new Error("Trade terms quote amount does not match truncated settlement");
   }
 }
 

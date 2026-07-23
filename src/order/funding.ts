@@ -1,5 +1,9 @@
 import type { WalletView } from "../core/wallet.js";
-import type { OrderSide, RationalPrice } from "./model.js";
+import {
+  quoteAmountForSettlement,
+  type OrderSide,
+  type RationalPrice
+} from "./model.js";
 
 const OFFERED_ASSETS = {
   sell: { mintUrl: "https://testnut.cashu.space", unit: "sat" },
@@ -30,11 +34,9 @@ export function assertOrderFunding(
   if (!/^[1-9]\d*$/.test(amount)) return;
   const asset = OFFERED_ASSETS[side];
   const baseAmount = BigInt(amount);
-  const numerator = BigInt(price.numerator);
-  const denominator = BigInt(price.denominator);
-  const offeredNumerator = side === "sell" ? baseAmount : baseAmount * numerator;
-  if (offeredNumerator % denominator !== 0n) return;
-  const requested = side === "sell" ? baseAmount : offeredNumerator / denominator;
+  const requested = side === "sell"
+    ? baseAmount
+    : BigInt(quoteAmountForSettlement(amount, price));
   const available = BigInt(availableOrderBalance(wallet, side));
   if (requested > available) {
     throw new Error(

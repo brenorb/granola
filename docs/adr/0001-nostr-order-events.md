@@ -232,9 +232,10 @@ and `79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b`.
 All amounts are canonical non-negative integer strings in the base asset's
 minor unit; original amount and minimum fill are positive. Price is the reduced
 positive rational number of quote minor units per base minor unit.
-Implementations must not use binary floating point. A fill is valid only when
-`base_fill * numerator` is exactly divisible by `denominator`, so both
-settlement amounts remain integers.
+Implementations must not use binary floating point. The base fill is exact.
+When the rational price produces a fractional quote minor unit, the quote
+settlement is truncated according to ADR 0005:
+`floor(base_fill * numerator / denominator)`. The result must be positive.
 
 `base_unit` and `quote_unit` are side-neutral and do not carry mint cardinality.
 `side` is `sell` for an ask and `buy` for a bid. For a sell, `offered.unit` must

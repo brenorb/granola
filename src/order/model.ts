@@ -150,6 +150,26 @@ function canonicalPrice(price: RationalPrice): RationalPrice {
   };
 }
 
+/**
+ * Convert an exact base amount and rational price into the integer quote amount
+ * supported by the quote mint. Fractional quote minor units are truncated;
+ * the exact base amount is never changed.
+ */
+export function quoteAmountForSettlement(
+  baseAmount: string,
+  priceInput: RationalPrice
+): string {
+  const base = integer(baseAmount, "Base amount");
+  const price = canonicalPrice(priceInput);
+  const numerator = base * BigInt(price.numerator);
+  const denominator = BigInt(price.denominator);
+  const quote = numerator / denominator;
+  if (quote === 0n) {
+    throw new Error("Order amount and limit price must produce at least one quote unit");
+  }
+  return quote.toString();
+}
+
 export function createOrderState(input: CreateOrderInput): OrderState {
   if (input.side !== "buy" && input.side !== "sell") {
     throw new Error("Order side must be buy or sell");
@@ -178,12 +198,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   }
   const amount = integer(input.amount, "Order amount");
   const price = canonicalPrice(input.price);
-  if ((amount * BigInt(price.numerator)) % BigInt(price.denominator) !== 0n) {
-    throw new Error(
-      `Order amount and limit price must produce integer settlement amounts. ` +
-      `Base amount must be a multiple of ${price.denominator}`
-    );
-  }
+  quoteAmountForSettlement(amount.toString(), price);
 
   const execution = input.execution ?? "all_or_none";
   if (execution !== "all_or_none" && execution !== "partial") {
@@ -251,12 +266,7 @@ function validateFillShape(state: OrderState, amount: bigint, remaining: bigint)
       throw new Error("Fill would leave dust below the order minimum");
     }
   }
-  if ((amount * BigInt(state.limit_price.numerator)) % BigInt(state.limit_price.denominator) !== 0n) {
-    throw new Error(
-      `Fill amount and limit price must produce an integer quote amount. ` +
-      `Base fill amount must be a multiple of ${state.limit_price.denominator}`
-    );
-  }
+  quoteAmountForSettlement(amount.toString(), state.limit_price);
 }
 
 export function reserveOrder(state: OrderState, input: ReserveOrderInput): OrderState {

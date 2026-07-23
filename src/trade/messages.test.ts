@@ -85,6 +85,21 @@ function expected(message: GranolaTradeMessage, extra: Partial<Parameters<typeof
 }
 
 describe("strict Granola NIP-17 messages", () => {
+  it("binds a fractional rational price to the truncated quote amount", async () => {
+    await expect(termsHash({
+      ...terms,
+      base_amount: "200",
+      quote_amount: "9",
+      limit_price: { numerator: "99", denominator: "2000" }
+    })).resolves.toMatch(/^[0-9a-f]{64}$/);
+    await expect(termsHash({
+      ...terms,
+      base_amount: "200",
+      quote_amount: "10",
+      limit_price: { numerator: "99", denominator: "2000" }
+    })).rejects.toThrow("truncated settlement");
+  });
+
   it("authenticates an initially unknown taker only for a sequence-zero proposal", async () => {
     const message = await proposal();
     const rumor = await createTradeRumor(message, takerKey);

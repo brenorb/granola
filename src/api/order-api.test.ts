@@ -429,6 +429,30 @@ describe("order browser API", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
   });
 
+  it("publishes 200 SAT unchanged when the quote settlement truncates to 9 cents", async () => {
+    const orders = new FakeOrders();
+    const api = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_000,
+      () => ORDER_ID,
+      testOutbox()
+    );
+
+    await api.publishOrder({
+      side: "sell",
+      amount: "200",
+      price: { numerator: "99", denominator: "2000" }
+    });
+
+    expect(orders.state?.original_amount).toBe("200");
+    expect(orders.state?.remaining_amount).toBe("200");
+    expect(orders.state?.limit_price).toEqual({
+      numerator: "99",
+      denominator: "2000"
+    });
+  });
+
   it("maps a buy to offered USD and requested SAT", async () => {
     const orders = new FakeOrders();
     const api = new OrderApi(

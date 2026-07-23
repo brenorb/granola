@@ -130,6 +130,8 @@ Every message binds the schema and deployment, stable order address, exact
 current head, session and reservation IDs, sender and receiver, monotonic
 direction-specific sequence, expiry, predecessor, running transcript hash, both
 mint URLs and keyset IDs, units, integer amounts, and exact rational price.
+When that price maps the exact base amount to a fractional quote minor unit,
+`quote_amount` is the deterministic truncated settlement defined by ADR 0005.
 
 The proposal and acceptance include the complete canonical terms. Later messages
 include the same `terms_hash`. JSON is canonicalized with [RFC 8785] before it is

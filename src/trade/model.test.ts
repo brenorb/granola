@@ -64,7 +64,23 @@ describe("Granola settlement model", () => {
       price: { numerator: "1", denominator: "20" },
       execution: "partial",
       minimumFillAmount: "5"
-    })).toThrow("integer quote amount");
+    })).toThrow("at least one quote unit");
+
+    expect(settlementAmounts({
+      remainingBaseAmount: "200",
+      fillBaseAmount: "200",
+      price: { numerator: "99", denominator: "2000" },
+      execution: "all_or_none",
+      minimumFillAmount: "200"
+    })).toEqual({ base: "200", quote: "9" });
+
+    expect(settlementAmounts({
+      remainingBaseAmount: "20",
+      fillBaseAmount: "10",
+      price: { numerator: "3", denominator: "20" },
+      execution: "partial",
+      minimumFillAmount: "5"
+    })).toEqual({ base: "10", quote: "1" });
   });
 
   it("allows only the persisted happy-path sequence", () => {

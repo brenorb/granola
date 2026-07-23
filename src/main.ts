@@ -8,7 +8,7 @@ import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import {
   fiatPerBtcPrice,
-  settlementAmountGuidance
+  settlementQuoteGuidance
 } from "./order/human-price.js";
 import { assertOrderFunding } from "./order/funding.js";
 import type { OrderRecord } from "./order/model.js";
@@ -331,17 +331,17 @@ function updateOrderSettlementHint(): void {
   orderSettlementHint.textContent = defaultOrderSettlementHint;
   try {
     const price = fiatPerBtcPrice(orderPriceInput.value);
-    const guidance = settlementAmountGuidance(orderAmountInput.value, price);
+    const guidance = settlementQuoteGuidance(orderAmountInput.value, price);
     if (guidance === null) return;
-    const currentQuote = decimalMinorUnits(
-      guidance.currentQuoteNumerator,
-      guidance.currentQuoteDenominator
+    const exactQuote = decimalMinorUnits(
+      guidance.exactQuoteNumerator,
+      guidance.exactQuoteDenominator
     );
     const message = `At ${orderPriceInput.value} USD/BTC, ${groupedInteger(orderAmountInput.value)} SAT ` +
-      `produces ${currentQuote} USD cents, which is not whole. ` +
-      `Change the price or enter a compatible amount (a multiple of ` +
-      `${groupedInteger(guidance.baseMultiple)} SAT). Your amount will not be changed automatically.`;
-    orderAmountInput.setCustomValidity("Choose a price or SAT amount that produces a whole-cent settlement.");
+      `is ${exactQuote} cents at the entered price. The USD mint settles ` +
+      `${groupedInteger(guidance.settlementQuoteAmount)} cents ` +
+      `(${formatUnitAmount(guidance.settlementQuoteAmount, "usd")}) after truncating the fractional cent. ` +
+      `Your order remains exactly ${groupedInteger(orderAmountInput.value)} SAT.`;
     orderSettlementHint.textContent = message;
   } catch {
     // Native input patterns and the submit handler provide the authoritative error.

@@ -45,4 +45,15 @@ describe("order funding guard", () => {
     expect(() => assertOrderFunding(wallet, "buy", "42", { numerator: "1", denominator: "2" }))
       .toThrow("requested 21 USD, available 20 USD");
   });
+
+  it("checks a buy against the truncated integer quote amount", () => {
+    expect(() => assertOrderFunding(wallet, "buy", "200", {
+      numerator: "99",
+      denominator: "2000"
+    })).not.toThrow();
+    expect(() => assertOrderFunding(wallet, "buy", "500", {
+      numerator: "99",
+      denominator: "2000"
+    })).toThrow("requested 24 USD, available 20 USD");
+  });
 });
