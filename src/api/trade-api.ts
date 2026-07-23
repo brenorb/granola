@@ -69,6 +69,11 @@ export interface TradeStartRepository {
     session: TradeSession
   ): Promise<TradeSession>;
   getTakerForRequest(intent: TakerStartIntent): Promise<TradeSession | undefined>;
+  /**
+   * Atomically creates one active maker session for an order. Exact proposal
+   * retries return the existing session; another taker cannot race it.
+   */
+  createMakerForOrder(session: TradeSession): Promise<TradeSession>;
 }
 
 export interface TradeSessionFactoryPort {
@@ -105,19 +110,6 @@ const defaultSessionFactory: TradeSessionFactoryPort = {
   createMaker: (input) => createMakerSession(input)
 };
 
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) throw new Error("Trade identity is not canonical");
-    return encoded;
-  }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(",")}}`;
-}
-
 function exactMarket(left: ExactMarket, right: ExactMarket): boolean {
   return left.baseMint === right.baseMint &&
     left.baseUnit === right.baseUnit &&
@@ -131,25 +123,6 @@ function makerOfferedLeg(side: OrderSide): "base" | "quote" {
 
 function takerFundingLeg(side: OrderSide): "base" | "quote" {
   return side === "sell" ? "quote" : "base";
-}
-
-function immutableSessionIdentity(session: TradeSession): unknown {
-  return {
-    sessionId: session.sessionId,
-    reservationId: session.reservationId,
-    role: session.role,
-    orderSide: session.orderSide ?? "sell",
-    orderAddress: session.orderAddress,
-    offeredProjectionId: session.offeredProjectionId,
-    terms: session.terms,
-    makerPubkey: session.evidence.makerPubkey,
-    proposalSealId: session.evidence.reservation.proposalSealId
-  };
-}
-
-function sameImmutableSession(left: TradeSession, right: TradeSession): boolean {
-  return canonical(immutableSessionIdentity(left)) ===
-    canonical(immutableSessionIdentity(right));
 }
 
 function proofAmount(value: string): bigint {
@@ -355,6 +328,11 @@ export class TradeApi {
     proposal: VerifiedInitialReserveProposal
   ): Promise<PublicTradeView> {
     assertVerifiedInitialReserveProposal(proposal);
+    const existing = await this.sessions.get(proposal.message.session_id);
+    if (existing !== undefined) {
+      this.assertBoundMaker(existing, proposal);
+      return publicTradeView(existing);
+    }
     const currentTime = this.currentTime();
     const order = await this.loadExactOrder(
       proposal.message.order_address,
@@ -406,7 +384,9 @@ export class TradeApi {
       targetAmount,
       fundingLeg
     );
-    return publicTradeView(await this.persistCreation(session));
+    const persisted = await this.sessions.createMakerForOrder(session);
+    this.assertBoundMaker(persisted, proposal);
+    return publicTradeView(persisted);
   }
 
   private currentTime(): number {
@@ -433,6 +413,30 @@ export class TradeApi {
       persisted.terms.quoteUnit !== this.market.quoteUnit
     ) {
       throw new Error("Durable taker request binding returned a conflicting session");
+    }
+  }
+
+  private assertBoundMaker(
+    session: TradeSession,
+    proposal: VerifiedInitialReserveProposal
+  ): void {
+    const accepted = session.privateState.transcript.accepted[0];
+    if (
+      session.role !== "maker" ||
+      session.sessionId !== proposal.message.session_id ||
+      session.reservationId !== proposal.message.reservation_id ||
+      session.orderAddress !== proposal.message.order_address ||
+      session.offeredProjectionId !== proposal.message.order_projection_id ||
+      session.offeredProjectionRevision !== proposal.message.order_revision ||
+      session.evidence.makerPubkey !== proposal.message.maker_order_pubkey ||
+      session.evidence.reservation.proposalSealId !== proposal.seal.id ||
+      accepted?.messageId !== proposal.message.message_id ||
+      accepted.rumorId !== proposal.rumor.id ||
+      accepted.transcriptHash !== proposal.transcriptHash ||
+      accepted.authorPubkey !== proposal.message.author_pubkey ||
+      accepted.recipientPubkey !== proposal.message.recipient_pubkey
+    ) {
+      throw new Error("Maker proposal is bound to a conflicting trade session");
     }
   }
 
@@ -521,27 +525,4 @@ export class TradeApi {
     };
   }
 
-  private async persistCreation(session: TradeSession): Promise<TradeSession> {
-    if (session.revision !== 0) {
-      throw new Error("Trade session creation requires revision zero");
-    }
-    const existing = await this.sessions.get(session.sessionId);
-    if (existing !== undefined) {
-      if (!sameImmutableSession(existing, session)) {
-        throw new Error("Trade start found a conflicting session");
-      }
-      return existing;
-    }
-    try {
-      await this.sessions.save(session, null);
-      return session;
-    } catch (error) {
-      const raced = await this.sessions.get(session.sessionId);
-      if (raced === undefined) throw error;
-      if (!sameImmutableSession(raced, session)) {
-        throw new Error("Trade start found a conflicting session");
-      }
-      return raced;
-    }
-  }
 }

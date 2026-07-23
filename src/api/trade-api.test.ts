@@ -106,8 +106,16 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
   };
 }
 
-async function proposal(current = order()): Promise<VerifiedInitialReserveProposal> {
-  const takerEntropy = entropy();
+async function proposal(
+  current = order(),
+  identifiers: {
+    sessionId?: string;
+    reservationId?: string;
+    messageId?: string;
+    entropyOffset?: number;
+  } = {}
+): Promise<VerifiedInitialReserveProposal> {
+  const takerEntropy = entropy(identifiers.entropyOffset ?? 0);
   const takerSecret = bytes(takerEntropy.privateKey("nostr"));
   const terms = {
     base_unit: "sat",
@@ -124,9 +132,10 @@ async function proposal(current = order()): Promise<VerifiedInitialReservePropos
     schema: "granola/dm/v1",
     deployment: "cashu-testnet-v1",
     type: "reserve_propose",
-    message_id: "66666666-6666-4666-8666-666666666666",
-    session_id: sessionId,
-    reservation_id: reservationId,
+    message_id: identifiers.messageId ??
+      "66666666-6666-4666-8666-666666666666",
+    session_id: identifiers.sessionId ?? sessionId,
+    reservation_id: identifiers.reservationId ?? reservationId,
     order_address: current.address,
     order_projection_id: current.eventId,
     order_revision: "0",
@@ -241,6 +250,24 @@ class SessionRepository {
       throw new Error("Taker request ID conflicts with another start intent");
     }
     return structuredClone(this.values.get(existing.sessionId)!);
+  });
+  readonly createMakerForOrder = vi.fn(async (
+    session: TradeSession
+  ): Promise<TradeSession> => {
+    const same = this.values.get(session.sessionId);
+    if (same !== undefined) return structuredClone(same);
+    const competing = [...this.values.values()].find(
+      (item) =>
+        item.role === "maker" &&
+        item.orderAddress === session.orderAddress &&
+        item.phase !== "filled" &&
+        item.phase !== "released"
+    );
+    if (competing !== undefined) {
+      throw new Error("Order is already being taken by another trader");
+    }
+    this.values.set(session.sessionId, structuredClone(session));
+    return structuredClone(session);
   });
 
   async list(): Promise<TradeSession[]> {
@@ -611,17 +638,48 @@ describe("trade start API", () => {
     const view = await api.acceptReserveProposal(verified);
 
     expect(mints.inspectTradeMint).toHaveBeenCalledTimes(2);
-    expect(sessions.save).toHaveBeenCalledWith(
+    expect(sessions.createMakerForOrder).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId,
         reservationId,
         revision: 0,
         role: "maker"
-      }),
-      null
+      })
     );
     expect(JSON.stringify(view)).not.toContain(verified.wrapper.content);
     expect(JSON.stringify(view)).not.toContain("privateState");
+  });
+
+  it("returns the existing maker session for an exact proposal retry", async () => {
+    const verified = await proposal();
+    const { api, sessions, mints } = options({
+      wallets: { load: async () => wallet(baseMint, "sat", "1000") }
+    });
+
+    const first = await api.acceptReserveProposal(verified);
+    const retried = await api.acceptReserveProposal(verified);
+
+    expect(retried).toEqual(first);
+    expect(sessions.createMakerForOrder).toHaveBeenCalledOnce();
+    expect(mints.inspectTradeMint).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows only one taker to create a maker session for an AON order", async () => {
+    const firstProposal = await proposal();
+    const secondProposal = await proposal(order(), {
+      sessionId: "77".repeat(32),
+      reservationId: "77777777-7777-4777-8777-777777777777",
+      messageId: "88888888-8888-4888-8888-888888888888",
+      entropyOffset: 12
+    });
+    const { api, sessions } = options({
+      wallets: { load: async () => wallet(baseMint, "sat", "2000") }
+    });
+
+    await expect(api.acceptReserveProposal(firstProposal)).resolves.toBeDefined();
+    await expect(api.acceptReserveProposal(secondProposal))
+      .rejects.toThrow(/already being taken/i);
+    expect(sessions.values).toHaveProperty("size", 1);
   });
 
   it("rejects unverified proposals and insufficient maker base balance without save", async () => {

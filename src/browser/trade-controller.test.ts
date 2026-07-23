@@ -189,6 +189,7 @@ function setup(options: {
   wait?: (delayMs: number) => Promise<void>;
   onMakerError?: (message: string) => void;
   makerOrderIds?: string[];
+  trades?: PublicTradeView[];
 } = {}): {
   controller: BrowserTradeController;
   api: {
@@ -203,7 +204,7 @@ function setup(options: {
 } {
   const publicView = view();
   const api = {
-    listTrades: vi.fn(async () => [publicView]),
+    listTrades: vi.fn(async () => options.trades ?? [publicView]),
     getTrade: vi.fn(async () => publicView),
     takeOrder: vi.fn(async (_input: TakeOrderInput) => publicView),
     acceptReserveProposal: vi.fn(async (_proposal: VerifiedInitialReserveProposal) => publicView),
@@ -330,6 +331,36 @@ describe("BrowserTradeController", () => {
     await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
 
     await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+  });
+
+  it("resumes only one maker settlement when old duplicate sessions exist", async () => {
+    const older = {
+      ...view(),
+      sessionId: "aa".repeat(32),
+      role: "maker" as const,
+      createdAt: 1_800_000_000,
+      updatedAt: 1_800_000_001
+    };
+    const newer = {
+      ...older,
+      sessionId: "bb".repeat(32),
+      createdAt: 1_800_000_002,
+      updatedAt: 1_800_000_003
+    };
+    const { controller, api } = setup({ trades: [older, newer] });
+    api.getTrade.mockImplementation(async (id: string) =>
+      id === older.sessionId ? older : newer
+    );
+    api.advanceTrade.mockImplementation(async (id: string) => ({
+      ...(id === older.sessionId ? older : newer),
+      revision: 1,
+      phase: "filled"
+    }));
+
+    await controller.resume();
+
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    expect(api.advanceTrade).toHaveBeenCalledWith(newer.sessionId);
   });
 
   it("reports maker relay failures through the maker status callback", async () => {

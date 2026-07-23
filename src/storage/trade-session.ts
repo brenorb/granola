@@ -43,6 +43,22 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function makerStartIdentity(session: TradeSession): string {
+  return JSON.stringify({
+    sessionId: session.sessionId,
+    reservationId: session.reservationId,
+    role: session.role,
+    orderSide: session.orderSide ?? "sell",
+    orderAddress: session.orderAddress,
+    offeredProjectionId: session.offeredProjectionId,
+    offeredProjectionRevision: session.offeredProjectionRevision,
+    terms: session.terms,
+    makerPubkey: session.evidence.makerPubkey,
+    proposalSealId: session.evidence.reservation.proposalSealId,
+    accepted: session.privateState.transcript.accepted[0] ?? null
+  });
+}
+
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} is invalid`);
@@ -1910,6 +1926,39 @@ export class TradeSessionRepository {
         ...clone(intent),
         sessionId: session.sessionId
       });
+      assertTradeSessionStore(store);
+      await this.driver.set(TRADE_SESSIONS_KEY, store);
+      return clone(session);
+    });
+  }
+
+  async createMakerForOrder(session: TradeSession): Promise<TradeSession> {
+    assertSession(session);
+    if (session.revision !== 0 || session.role !== "maker") {
+      throw new Error("Maker start requires a revision-zero maker session");
+    }
+    return this.runExclusive(async () => {
+      const store = await this.loadStore();
+      const existing = store.sessions.find(
+        (item) => item.sessionId === session.sessionId
+      );
+      if (existing !== undefined) {
+        if (makerStartIdentity(existing) !== makerStartIdentity(session)) {
+          throw new Error("Maker proposal conflicts with an existing trade session");
+        }
+        return clone(existing);
+      }
+      const competing = store.sessions.find(
+        (item) =>
+          item.role === "maker" &&
+          item.orderAddress === session.orderAddress &&
+          item.phase !== "filled" &&
+          item.phase !== "released"
+      );
+      if (competing !== undefined) {
+        throw new Error("Order is already being taken by another trader");
+      }
+      store.sessions.push(clone(session));
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);
       return clone(session);

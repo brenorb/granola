@@ -121,7 +121,7 @@ describe("OrderApi projections", () => {
       orderId: ORDER_ID,
       makerPubkey: MAKER,
       revision: "0",
-      status: "acknowledged"
+      status: "committed"
     });
     expect(relay.published).toHaveLength(1);
     expect(relay.published[0]?.kind).toBe(30078);
@@ -138,7 +138,7 @@ describe("OrderApi projections", () => {
     const retried = await api.retryOrderPublication(ORDER_ID);
 
     expect(failed.status).toBe("staged");
-    expect(retried.status).toBe("acknowledged");
+    expect(retried.status).toBe("committed");
     expect(relay.published.map((event) => event.id)).toEqual([
       failed.projectionId,
       failed.projectionId
@@ -148,7 +148,6 @@ describe("OrderApi projections", () => {
   it("reserves by replacing the exact projection and advancing revision", async () => {
     const { api, relay, outbox } = harness();
     const created = await api.publishOrder(createInput);
-    await api.clearAcknowledgedOrderPublication(ORDER_ID);
     const initial = relay.published[0]!;
     relay.orderEvents = [initial];
 
@@ -175,7 +174,6 @@ describe("OrderApi projections", () => {
   it("rejects a stale event ID or revision before signing a replacement", async () => {
     const { api, relay, signer } = harness();
     const created = await api.publishOrder(createInput);
-    await api.clearAcknowledgedOrderPublication(ORDER_ID);
     relay.orderEvents = [relay.published[0]!];
     const signedBefore = signer.count;
 
@@ -195,7 +193,6 @@ describe("OrderApi projections", () => {
   it("publishes canceled and expired terminal states at the same address", async () => {
     const canceledHarness = harness();
     const created = await canceledHarness.api.publishOrder(createInput);
-    await canceledHarness.api.clearAcknowledgedOrderPublication(ORDER_ID);
     canceledHarness.relay.orderEvents = [canceledHarness.relay.published[0]!];
     const canceled = await canceledHarness.api.cancelOrder({
       address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
@@ -212,7 +209,6 @@ describe("OrderApi projections", () => {
       ...createInput,
       expiresAt: 1_700_000_001
     });
-    await expiredHarness.api.clearAcknowledgedOrderPublication(ORDER_ID);
     expiredHarness.relay.orderEvents = [expiredHarness.relay.published[0]!];
     expiredHarness.setNow(1_700_000_002);
     const expired = await expiredHarness.api.expireOrder({
@@ -224,5 +220,29 @@ describe("OrderApi projections", () => {
       .toContain('"status":"expired"');
     expect(expired.revision).toBe("1");
     expect(expiredHarness.signer.destroyed).toEqual([ORDER_ID]);
+  });
+
+  it("recovers a legacy acknowledged create before reserving the order", async () => {
+    const { api, relay, outbox } = harness();
+    relay.accept = false;
+    const created = await api.publishOrder(createInput);
+    relay.accept = true;
+    const legacy = await api.publishNextStage(ORDER_ID);
+    relay.orderEvents = [relay.published.at(-1)!];
+
+    const reserved = await api.reserveOrder({
+      address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+      expectedProjectionId: created.projectionId,
+      expectedRevision: "0",
+      reservationId: RESERVATION_ID,
+      amount: "100",
+      expiresAt: 1_700_000_600,
+      proposalEventId: "c".repeat(64),
+      takerCommitment: "d".repeat(64)
+    });
+
+    expect(legacy.status).toBe("acknowledged");
+    expect(reserved).toMatchObject({ status: "acknowledged", revision: "1" });
+    expect((await outbox.load(ORDER_ID))?.intent.operation).toBe("reserve");
   });
 });
