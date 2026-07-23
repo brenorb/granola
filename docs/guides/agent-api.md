@@ -41,6 +41,10 @@ const publication = await window.granola.publishOrder({
   price: { numerator: "101", denominator: "2000" }, // USD cents / SAT
   execution: "all_or_none"
 });
+const pending = await window.granola.getPendingOrderPublications();
+if (pending[0]) {
+  await window.granola.retryOrderPublication(pending[0].orderId);
+}
 
 const backup = await window.granola.createBackup();
 await window.granola.clearWallet("DELETE TEST WALLET");
@@ -65,6 +69,15 @@ API. `publishOrder()` signs an immutable kind `78` transition before a kind
 stage. Its return value contains public event IDs and per-relay receipts, never
 key material. `getOrderBook()` verifies signatures and schema, rejects
 conflicting projections, and returns exact rational prices.
+
+Before making a relay request, the browser persists both already-signed public
+events in a private-profile outbox. If either stage misses quorum,
+`publishOrder()` rejects with a `PendingPublicationError` whose `publication`
+contains the public order ID, both event IDs, and receipts. Call
+`getPendingOrderPublications()` to inspect the outbox and
+`retryOrderPublication(orderId)` to retry those exact signatures. A retry never
+creates a replacement order ID and the outbox is cleared only after both stages
+reach quorum. The human UI exposes the same recovery action.
 
 The prototype market is issuer-specific: SAT from
 `https://testnut.cashu.space` against USD cents from

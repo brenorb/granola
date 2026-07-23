@@ -7,10 +7,12 @@ import { fiatPerBtcPrice } from "./order/human-price.js";
 import { NostrOrderService } from "./order/service.js";
 import { MakerIdentity } from "./nostr/identity.js";
 import { RelayClient } from "./nostr/relay.js";
+import { OrderOutboxRepository } from "./storage/order-outbox.js";
 import { IndexedDbStorageDriver, WalletRepository } from "./storage/wallet-repository.js";
 import { renderDashboard } from "./ui/dashboard.js";
 import { formatUnitAmount } from "./ui/format.js";
 import { renderOrderBook } from "./ui/orderbook.js";
+import { renderPendingPublications } from "./ui/order-outbox.js";
 
 interface GranolaBrowserFacade {
   getState: BrowserGranolaApi["getState"];
@@ -24,6 +26,8 @@ interface GranolaBrowserFacade {
   getMakerIdentity: OrderApi["getMakerIdentity"];
   getOrderBook: OrderApi["getOrderBook"];
   publishOrder: OrderApi["publishOrder"];
+  getPendingOrderPublications: OrderApi["getPendingOrderPublications"];
+  retryOrderPublication: OrderApi["retryOrderPublication"];
 }
 
 declare global {
@@ -44,10 +48,14 @@ const makerIdentity = new MakerIdentity(driver, locked);
 const relayClient = new RelayClient();
 const orderApi = new OrderApi(
   makerIdentity,
-  new NostrOrderService(makerIdentity, relayClient)
+  new NostrOrderService(makerIdentity, relayClient),
+  () => Math.floor(Date.now() / 1000),
+  () => crypto.randomUUID(),
+  new OrderOutboxRepository(driver)
 );
 const dashboard = byId("dashboard");
 const orderbook = byId("orderbook");
+const pendingPublications = byId("pending-publications");
 const status = byId("status");
 const activity = byId<HTMLOListElement>("activity-log");
 
@@ -90,6 +98,27 @@ async function refreshOrderBook(): Promise<void> {
   }
 }
 
+function retryPendingPublication(orderId: string): void {
+  void granola.retryOrderPublication(orderId)
+    .then(async (publication) => {
+      await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
+      log(`Republished exact order events ${publication.orderId.slice(0, 8)}…`);
+      report("Pending signed events reached relay quorum");
+    })
+    .catch(async (error: unknown) => {
+      await refreshPendingPublications();
+      report(messageOf(error), true);
+    });
+}
+
+async function refreshPendingPublications(): Promise<void> {
+  renderPendingPublications(
+    pendingPublications,
+    await orderApi.getPendingOrderPublications(),
+    retryPendingPublication
+  );
+}
+
 const granola: GranolaBrowserFacade = {
   getState: api.getState.bind(api),
   inspectMint: api.inspectMint.bind(api),
@@ -101,7 +130,9 @@ const granola: GranolaBrowserFacade = {
   clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation)),
   getMakerIdentity: orderApi.getMakerIdentity.bind(orderApi),
   getOrderBook: orderApi.getOrderBook.bind(orderApi),
-  publishOrder: orderApi.publishOrder.bind(orderApi)
+  publishOrder: orderApi.publishOrder.bind(orderApi),
+  getPendingOrderPublications: orderApi.getPendingOrderPublications.bind(orderApi),
+  retryOrderPublication: orderApi.retryOrderPublication.bind(orderApi)
 };
 window.granola = granola;
 
@@ -151,9 +182,12 @@ byId<HTMLFormElement>("order-form").addEventListener("submit", (event) => {
     const publication = await granola.publishOrder(input);
     const acknowledgements = publication.projectionReceipts.filter((receipt) => receipt.ok).length;
     log(`Published ${side} order ${publication.orderId.slice(0, 8)}… to ${acknowledgements} relay(s)`);
-    await refreshOrderBook();
+    await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
     report(`Order published with ${acknowledgements} relay acknowledgements`);
-  })().catch((error: unknown) => report(messageOf(error), true));
+  })().catch(async (error: unknown) => {
+    await refreshPendingPublications();
+    report(messageOf(error), true);
+  });
 });
 
 byId<HTMLFormElement>("mint-form").addEventListener("submit", (event) => {
@@ -242,6 +276,7 @@ byId<HTMLFormElement>("clear-form").addEventListener("submit", (event) => {
 void Promise.all([
   refresh(),
   refreshOrderBook(),
+  refreshPendingPublications(),
   granola.getMakerIdentity().then(({ publicKey }) => {
     byId("maker-pubkey").textContent = `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`;
     byId("maker-pubkey").title = publicKey;
