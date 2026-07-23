@@ -175,6 +175,7 @@ function privateSession(): TradeSession {
 function setup(options: {
   startGates?: Array<Promise<void> | undefined>;
   wait?: (delayMs: number) => Promise<void>;
+  onMakerError?: (message: string) => void;
 } = {}): {
   controller: BrowserTradeController;
   api: {
@@ -221,6 +222,7 @@ function setup(options: {
     },
     now: () => 1_800_000_000,
     ...(options.wait === undefined ? {} : { wait: options.wait }),
+    ...(options.onMakerError === undefined ? {} : { onMakerError: options.onMakerError }),
     startSubscription: vi.fn(async (input) => {
       const startIndex = subscriptions.length;
       subscriptions.push(input);
@@ -255,12 +257,46 @@ describe("BrowserTradeController", () => {
     });
   });
 
+  it("single-flights concurrent maker startup without duplicate subscriptions", async () => {
+    let releaseSubscription!: () => void;
+    const subscriptionGate = new Promise<void>((resolve) => {
+      releaseSubscription = resolve;
+    });
+    const { controller, subscriptions } = setup({
+      startGates: [subscriptionGate]
+    });
+
+    const first = controller.enableMaker();
+    const second = controller.enableMaker();
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(1));
+    releaseSubscription();
+    await Promise.all([first, second]);
+
+    expect(subscriptions).toHaveLength(1);
+  });
+
   it("opens a proposal from the live maker inbox and persists its maker session", async () => {
     const { controller, api, subscriptions } = setup();
     await controller.enableMaker();
     await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
 
     expect(api.acceptReserveProposal).toHaveBeenCalledOnce();
+  });
+
+  it("reports maker relay failures through the maker status callback", async () => {
+    const onMakerError = vi.fn();
+    const { controller, subscriptions } = setup({ onMakerError });
+    await controller.enableMaker();
+
+    subscriptions[0]!.onError({
+      relay: "wss://inbox.example",
+      kind: "relay_closed",
+      message: "Inbox relay subscription closed unexpectedly"
+    });
+
+    expect(onMakerError).toHaveBeenCalledWith(
+      "Inbox relay subscription closed unexpectedly"
+    );
   });
 
   it("starts the session inbox and advances only one coordinator action per call", async () => {

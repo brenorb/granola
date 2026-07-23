@@ -4,6 +4,7 @@ import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
 import { withOrderOutboxLock, withWalletLock } from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
+import { startInboxListeners } from "./browser/startup.js";
 import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import {
@@ -163,7 +164,11 @@ function tradeController(): Promise<BrowserTradeController> {
     inboxRelay: runtime.inboxRelay,
     makerIdentity,
     onChange: () => { void refreshTrades(); },
-    onError: (message) => report(message, true)
+    onError: (message) => report(message, true),
+    onMakerError: (message) => {
+      byId("maker-inbox-state").textContent = "error";
+      report(message, true);
+    }
   }));
   return tradeControllerPromise;
 }
@@ -271,6 +276,27 @@ const granola: GranolaBrowserFacade = {
 };
 window.granola = granola;
 
+let makerInboxStartPromise: Promise<void> | undefined;
+
+function startMakerInbox(): Promise<void> {
+  if (makerInboxStartPromise !== undefined) return makerInboxStartPromise;
+  byId("maker-inbox-state").textContent = "starting";
+  makerInboxStartPromise = granola.enableMaker()
+    .then(({ makerPubkey, inboxRelay }) => {
+      byId("maker-inbox-state").textContent = "listening";
+      log(`Maker inbox ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
+      report("Maker order inbox is authenticated and listening");
+    })
+    .catch((error: unknown) => {
+      byId("maker-inbox-state").textContent = "error";
+      report(messageOf(error), true);
+    })
+    .finally(() => {
+      makerInboxStartPromise = undefined;
+    });
+  return makerInboxStartPromise;
+}
+
 function runAgentSettlement(sessionId: string): void {
   const root = document.documentElement;
   if (!/^[0-9a-f]{64}$/.test(sessionId)) {
@@ -317,16 +343,7 @@ byId("refresh-trades").addEventListener("click", () => {
     .catch((error: unknown) => report(messageOf(error), true));
 });
 byId("enable-maker").addEventListener("click", () => {
-  void granola.enableMaker()
-    .then(({ makerPubkey, inboxRelay }) => {
-      byId("maker-inbox-state").textContent = "listening";
-      log(`Maker inbox ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
-      report("Maker order inbox is authenticated and listening");
-    })
-    .catch((error: unknown) => {
-      byId("maker-inbox-state").textContent = "offline";
-      report(messageOf(error), true);
-    });
+  void startMakerInbox();
 });
 
 const executionInput = byId<HTMLSelectElement>("order-execution");
@@ -538,7 +555,10 @@ void Promise.all([
   refresh(),
   refreshOrderBook(),
   refreshPendingPublications(),
-  refreshTrades(),
+  startInboxListeners({
+    startSessions: refreshTrades,
+    startMaker: startMakerInbox
+  }),
   granola.getMakerPublicKeys().then((publicKeys) => {
     const publicKey = publicKeys[0] ?? "";
     byId("maker-pubkey").textContent = publicKey

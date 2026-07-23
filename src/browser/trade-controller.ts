@@ -87,6 +87,7 @@ export interface BrowserTradeControllerOptions {
   ) => Promise<VerifiedInitialReserveProposal>;
   onChange?: (trade: PublicTradeView) => void;
   onError?: (message: string) => void;
+  onMakerError?: (message: string) => void;
   wait?: (delayMs: number) => Promise<void>;
 }
 
@@ -113,6 +114,7 @@ export class BrowserTradeController {
   >;
   private readonly onChange: (trade: PublicTradeView) => void;
   private readonly onError: (message: string) => void;
+  private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
   private readonly subscriptionStarts = new Map<string, Promise<void>>();
@@ -132,6 +134,7 @@ export class BrowserTradeController {
         unwrapInitialReserveProposalForMaker(event, secretKey, openOptions));
     this.onChange = options.onChange ?? (() => undefined);
     this.onError = options.onError ?? (() => undefined);
+    this.onMakerError = options.onMakerError ?? this.onError;
     this.wait = options.wait ?? ((delayMs) =>
       new Promise((resolve) => globalThis.setTimeout(resolve, delayMs)));
   }
@@ -262,7 +265,7 @@ export class BrowserTradeController {
               await this.ensureSessionSubscription(trade.sessionId);
               this.onChange(trade);
             } catch (error) {
-              this.onError(messageOf(error));
+              this.onMakerError(messageOf(error));
             }
           },
           onError: (error) => this.handleSubscriptionError(
@@ -270,7 +273,8 @@ export class BrowserTradeController {
             error,
             async () => {
               await this.enableMaker();
-            }
+            },
+            this.onMakerError
           )
         });
         })
@@ -372,16 +376,17 @@ export class BrowserTradeController {
   private handleSubscriptionError(
     key: string,
     error: TradeSubscriptionError,
-    restart: () => Promise<void>
+    restart: () => Promise<void>,
+    reportError: (message: string) => void = this.onError
   ): void {
-    this.onError(error.message);
+    reportError(error.message);
     if (error.kind !== "relay_closed") return;
     const subscription = this.subscriptions.get(key);
     if (subscription === undefined) return;
     subscription.stop();
     this.subscriptions.delete(key);
     void restart().catch((restartError: unknown) => {
-      this.onError(messageOf(restartError));
+      reportError(messageOf(restartError));
     });
   }
 

@@ -88,10 +88,11 @@ tie it.
 
 ## 4. Start the maker inbox
 
-After the order is published, press **Enable maker inbox · offline** on the
-maker page. Wait until the button reads **Enable maker inbox · listening**.
-Granola now registers and listens with this order's ephemeral Nostr key. Keep
-the page open; after a reload, enable it again for each active order.
+After the order is published, the maker page automatically registers and listens
+with each active order's ephemeral Nostr key. Wait until the button reads
+**Enable maker inbox · listening**. If startup fails, the button shows an error;
+press it to retry. Keep the page open; after a reload, startup runs again for
+each active order.
 
 ## 5. Take the ask
 
@@ -198,7 +199,8 @@ discovery. These do not require a replacement trade.
 1. Do not create another order or session.
 2. Do not erase either wallet.
 3. Keep or reopen the same `?wallet=` profile.
-4. If the maker page reloaded, press **Enable maker inbox** again.
+4. If the maker page reloaded, wait for the automatic maker inbox startup or
+   press **Enable maker inbox** to retry it.
 5. Press **Check sessions** and resume the same cards.
 6. For the fast demo, run the same `runUntilSettled` command again only on the
    side whose promise rejected.
