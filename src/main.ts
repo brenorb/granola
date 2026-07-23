@@ -253,8 +253,17 @@ function tradeController(): Promise<BrowserTradeController> {
     inboxRelay: runtime.inboxRelay,
     makerIdentity,
     onChange: () => { void refreshTrades(); },
+    onMakerAccepted: (trade) => {
+      tradeTrace(trade);
+      report("Incoming order accepted automatically");
+    },
     onError: (message) => report(message, true),
-    onMakerError: (message) => report(message, true)
+    onMakerError: (message) => {
+      trace("Nostr", "Maker inbox error", [
+        { label: "error", value: message }
+      ]);
+      report(message, true);
+    }
   }));
   return tradeControllerPromise;
 }
@@ -416,6 +425,9 @@ function startMakerInbox(): Promise<void> {
       report("Maker listener is authenticated and listening");
     })
     .catch((error: unknown) => {
+      trace("Nostr", "Maker listener failed", [
+        { label: "error", value: messageOf(error) }
+      ]);
       report(messageOf(error), true);
     })
     .finally(() => {

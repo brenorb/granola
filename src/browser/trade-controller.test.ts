@@ -318,6 +318,20 @@ describe("BrowserTradeController", () => {
     expect(api.acceptReserveProposal).toHaveBeenCalledOnce();
   });
 
+  it("automatically advances an accepted maker session", async () => {
+    const { controller, api, subscriptions } = setup();
+    api.advanceTrade.mockResolvedValueOnce({
+      ...view(1),
+      role: "maker",
+      phase: "filled"
+    });
+
+    await controller.enableMaker();
+    await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
+
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+  });
+
   it("reports maker relay failures through the maker status callback", async () => {
     const onMakerError = vi.fn();
     const { controller, subscriptions } = setup({ onMakerError });

@@ -86,6 +86,7 @@ export interface BrowserTradeControllerOptions {
     options: { now: number }
   ) => Promise<VerifiedInitialReserveProposal>;
   onChange?: (trade: PublicTradeView) => void;
+  onMakerAccepted?: (trade: PublicTradeView) => void;
   onError?: (message: string) => void;
   onMakerError?: (message: string) => void;
   wait?: (delayMs: number) => Promise<void>;
@@ -113,10 +114,12 @@ export class BrowserTradeController {
     BrowserTradeControllerOptions["openProposal"]
   >;
   private readonly onChange: (trade: PublicTradeView) => void;
+  private readonly onMakerAccepted: (trade: PublicTradeView) => void;
   private readonly onError: (message: string) => void;
   private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
+  private readonly makerSettlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
   private makerSubscriptionKeys = new Set<string>();
   private readonly subscriptionStarts = new Map<string, Promise<void>>();
   private subscriptionGeneration = 0;
@@ -134,6 +137,7 @@ export class BrowserTradeController {
       ((event, secretKey, openOptions) =>
         unwrapInitialReserveProposalForMaker(event, secretKey, openOptions));
     this.onChange = options.onChange ?? (() => undefined);
+    this.onMakerAccepted = options.onMakerAccepted ?? (() => undefined);
     this.onError = options.onError ?? (() => undefined);
     this.onMakerError = options.onMakerError ?? this.onError;
     this.wait = options.wait ?? ((delayMs) =>
@@ -165,15 +169,18 @@ export class BrowserTradeController {
   async resume(): Promise<PublicTradeView[]> {
     const trades = await this.api.listTrades();
     await Promise.all(trades.map((trade) =>
-      this.ensureSessionSubscription(trade.sessionId)
+      this.resumeTrade(trade)
     ));
     return trades;
   }
 
-  async runUntilSettled(sessionId: string): Promise<RunUntilSettledResult> {
+  async runUntilSettled(
+    sessionId: string,
+    reportError: (message: string) => void = this.onError
+  ): Promise<RunUntilSettledResult> {
     let current = await this.api.getTrade(sessionId);
     if (current === undefined) throw new Error("Trade session does not exist");
-    this.startSessionSubscriptionInBackground(sessionId);
+    this.startSessionSubscriptionInBackground(sessionId, reportError);
     const checkpoints: RedactedTradeCheckpoint[] = [];
     const record = (trade: PublicTradeView): void => {
       const latest = checkpoints.at(-1);
@@ -196,7 +203,7 @@ export class BrowserTradeController {
       }
       try {
         current = await this.api.advanceTrade(sessionId);
-        this.startSessionSubscriptionInBackground(sessionId);
+        this.startSessionSubscriptionInBackground(sessionId, reportError);
         this.onChange(current);
         record(current);
         actions += 1;
@@ -227,10 +234,40 @@ export class BrowserTradeController {
     });
   }
 
-  private startSessionSubscriptionInBackground(sessionId: string): void {
+  private startSessionSubscriptionInBackground(
+    sessionId: string,
+    reportError: (message: string) => void = this.onError
+  ): void {
     void this.ensureSessionSubscription(sessionId).catch((error: unknown) => {
-      this.onError(messageOf(error));
+      reportError(messageOf(error));
     });
+  }
+
+  private async resumeTrade(trade: PublicTradeView): Promise<void> {
+    await this.ensureSessionSubscription(trade.sessionId);
+    if (
+      trade.role === "maker" &&
+      trade.phase !== "filled" &&
+      trade.phase !== "frozen" &&
+      trade.phase !== "released"
+    ) {
+      this.startMakerSettlementInBackground(trade.sessionId);
+    }
+  }
+
+  private startMakerSettlementInBackground(sessionId: string): void {
+    if (this.makerSettlementRuns.has(sessionId)) return;
+    const run = this.runUntilSettled(sessionId, this.onMakerError);
+    this.makerSettlementRuns.set(sessionId, run);
+    void run
+      .catch((error: unknown) => {
+        this.onMakerError(messageOf(error));
+      })
+      .finally(() => {
+        if (this.makerSettlementRuns.get(sessionId) === run) {
+          this.makerSettlementRuns.delete(sessionId);
+        }
+      });
   }
 
   async enableMaker(): Promise<MakerInboxStatus> {
@@ -275,7 +312,9 @@ export class BrowserTradeController {
               );
               const trade = await this.api.acceptReserveProposal(proposal);
               await this.ensureSessionSubscription(trade.sessionId);
+              this.onMakerAccepted(trade);
               this.onChange(trade);
+              this.startMakerSettlementInBackground(trade.sessionId);
             } catch (error) {
               this.onMakerError(messageOf(error));
             }
