@@ -252,6 +252,31 @@ describe("strict HTLC lock validation", () => {
     });
   });
 
+  it("accepts the quote refund horizon after its own short lock", () => {
+    const material = createHtlcMaterial();
+    const input = validation(material.hash);
+    input.envelope.binding.direction = "quote";
+    input.expected.binding.direction = "quote";
+    input.expected.leg = "quote";
+    input.expected.locktime = input.expected.deadlines.short;
+    input.expected.refundHorizon = input.expected.deadlines.short + 60;
+    for (const item of input.envelope.proofs) {
+      item.secret = createHTLCsecret(material.hash, [
+        ["locktime", String(input.expected.deadlines.short)],
+        ["refund", refundPubkey],
+        ["pubkeys", receiverPubkey]
+      ]);
+    }
+    input.states = input.envelope.proofs.map((item) =>
+      state(item, CheckStateEnum.UNSPENT)
+    );
+
+    expect(validateHtlcLock(input)).toMatchObject({
+      amount: "10",
+      proofCount: 2
+    });
+  });
+
   it.each([
     ["wrong mint", (input: HtlcValidationInput) => (input.envelope.mintUrl = "https://other.invalid")],
     [

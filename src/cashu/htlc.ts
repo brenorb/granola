@@ -368,7 +368,7 @@ export function validateHtlcLock(input: HtlcValidationInput): HtlcValidationSumm
       (expected.leg === "base" ? expected.deadlines.long : expected.deadlines.short),
     "leg-deadline"
   );
-  assertInvariant(expected.refundHorizon >= expected.deadlines.long, "refund-horizon");
+  assertInvariant(expected.refundHorizon >= expected.locktime, "refund-horizon");
 
   const secrets = new Set<string>();
   const points = new Set<string>();
