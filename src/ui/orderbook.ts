@@ -253,7 +253,7 @@ function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRende
   const columns = element("div");
   columns.className = "orderbook-columns";
   columns.append(
-    renderSideTable("Asks", [...book.asks].reverse(), book.topAsk, book.market, options)
+    renderSideTable("Asks", book.asks, book.topAsk, book.market, options)
   );
 
   const midpoint = element("aside");

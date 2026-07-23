@@ -65,7 +65,7 @@ describe("order-book presentation", () => {
     expect(
       [...root.querySelectorAll<HTMLElement>("[data-order-id], [data-book-midpoint]")]
         .map((node) => node.dataset.orderId ?? "midpoint")
-    ).toEqual([askHigh, askLow, "midpoint", bidHigh, bidLow]);
+    ).toEqual([askLow, askHigh, "midpoint", bidHigh, bidLow]);
 
     expect(root.querySelector(`[data-order-id="${askLow}"]`)?.getAttribute("data-best"))
       .toBe("ask");
