@@ -37,18 +37,41 @@ describe("order funding guard", () => {
 
   it("rejects a sell order larger than the SAT balance", () => {
     expect(() => assertOrderFunding(wallet, "sell", "1875", "100000000"))
-      .toThrow("requested 1,875 SAT, available 100 SAT");
+      .toThrow("requested 1,875 sat, available 100 sat");
   });
 
   it("allows an order within balance and rejects an oversized buy", () => {
     expect(() => assertOrderFunding(wallet, "sell", "100", "100000000")).not.toThrow();
     expect(() => assertOrderFunding(wallet, "buy", "42", "50000000"))
-      .toThrow("requested 21 USD, available 20 USD");
+      .toThrow("requested 0.21 USD, available 0.20 USD");
   });
 
   it("checks a buy against the truncated integer quote amount", () => {
     expect(() => assertOrderFunding(wallet, "buy", "200", "4950000")).not.toThrow();
     expect(() => assertOrderFunding(wallet, "buy", "500", "4950000"))
-      .toThrow("requested 24 USD, available 20 USD");
+      .toThrow("requested 0.24 USD, available 0.20 USD");
+  });
+
+  it("explains when USD is available at the wrong mint", () => {
+    const walletWithWrongUsdMint: WalletView = {
+      ...wallet,
+      balances: [
+        { unit: "sat", amount: "100", mintCount: 1, proofCount: 3 },
+        { unit: "usd", amount: "10000", mintCount: 1, proofCount: 1 }
+      ],
+      pockets: [
+        wallet.pockets[0]!,
+        {
+          ...wallet.pockets[1]!,
+          mintUrl: "https://testnut.cashu.space",
+          amount: "10000"
+        }
+      ]
+    };
+
+    expect(() => assertOrderFunding(walletWithWrongUsdMint, "buy", "200", "5100000"))
+      .toThrow(
+        "requested 0.10 USD, available 0.00 USD. The wallet also has 100.00 USD at another mint"
+      );
   });
 });

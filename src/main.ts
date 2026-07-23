@@ -332,6 +332,8 @@ byId("enable-maker").addEventListener("click", () => {
 const executionInput = byId<HTMLSelectElement>("order-execution");
 const minimumFillInput = byId<HTMLInputElement>("minimum-fill");
 const orderForm = byId<HTMLFormElement>("order-form");
+const mintInput = byId<HTMLSelectElement>("mint-url");
+const mintUnitInput = byId<HTMLSelectElement>("mint-unit");
 function requiredOrderInput(name: string): HTMLInputElement {
   const input = orderForm.querySelector<HTMLInputElement>(`input[name="${name}"]`);
   if (input === null) throw new Error(`Missing order input ${name}`);
@@ -397,6 +399,12 @@ executionInput.addEventListener("change", () => {
   minimumFillInput.disabled = !partial;
   minimumFillInput.required = partial;
   if (!partial) minimumFillInput.value = "";
+});
+
+mintUnitInput.addEventListener("change", () => {
+  mintInput.value = mintUnitInput.value === "usd"
+    ? "https://nofee.testnut.cashu.space"
+    : "https://testnut.cashu.space";
 });
 
 orderForm.addEventListener("submit", (event) => {

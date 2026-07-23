@@ -1,4 +1,5 @@
 import type { WalletView } from "../core/wallet.js";
+import { formatUnitAmount } from "../ui/format.js";
 import { quoteAmountForSettlement, type OrderSide } from "./model.js";
 
 const OFFERED_ASSETS = {
@@ -35,10 +36,17 @@ export function assertOrderFunding(
     : BigInt(quoteAmountForSettlement(amount, priceCentsPerBtc));
   const available = BigInt(availableOrderBalance(wallet, side));
   if (requested > available) {
+    const otherMintBalance = wallet.pockets
+      .filter((pocket) => pocket.unit === asset.unit && pocket.mintUrl !== asset.mintUrl)
+      .reduce((sum, pocket) => sum + BigInt(pocket.amount), 0n);
+    const otherMintHint = otherMintBalance > 0n
+      ? ` The wallet also has ${formatUnitAmount(otherMintBalance.toString(), asset.unit)} ` +
+        `at another mint, which cannot fund this issuer-specific market.`
+      : "";
     throw new Error(
-      `Insufficient ${asset.unit.toUpperCase()} balance to publish this ${side} order: ` +
-      `requested ${requested.toLocaleString("en-US")} ${asset.unit.toUpperCase()}, ` +
-      `available ${available.toLocaleString("en-US")} ${asset.unit.toUpperCase()}`
+      `Insufficient ${asset.unit.toUpperCase()} balance at ${new URL(asset.mintUrl).host} ` +
+      `to publish this ${side} order: requested ${formatUnitAmount(requested.toString(), asset.unit)}, ` +
+      `available ${formatUnitAmount(available.toString(), asset.unit)}.${otherMintHint}`
     );
   }
 }
