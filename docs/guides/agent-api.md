@@ -83,5 +83,7 @@ The public app has a fixed network allowlist matching its Content Security
 Policy: `https://testnut.cashu.space` and
 `https://nofee.testnut.cashu.space`. `inspectMint`, `requestMint`, and
 `receiveToken` reject every other issuer before making a network request.
-Nostr connections are likewise limited to `wss://nostr.ltd`,
-`wss://relay.damus.io`, and `wss://nos.lol`.
+Nostr connections are likewise limited to `wss://nos.lol`,
+`wss://relay.primal.net`, and `wss://offchain.pub`. All three advertise NIP-40
+retention support; the client still validates both NIP-78 event classes through
+acknowledgement and readback because relay capability metadata can be incomplete.

@@ -4,9 +4,9 @@ import { SimplePool } from "nostr-tools/pool";
 import type { NostrEvent } from "../order/events.js";
 
 export const PUBLIC_RELAYS = [
-  "wss://nostr.ltd",
-  "wss://relay.damus.io",
-  "wss://nos.lol"
+  "wss://nos.lol",
+  "wss://relay.primal.net",
+  "wss://offchain.pub"
 ] as const;
 
 export interface RelayReceipt {
