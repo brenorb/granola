@@ -64,8 +64,6 @@ encrypted trade terms before either party locks proofs.
   settle a zero-value quote leg.
 - Counterparties can deterministically recompute and validate the settlement
   amount using integer arithmetic.
-- Earlier testnet events and persisted sessions containing `limit_price` rational
-  objects fail closed and must be republished as canonical `v1` projections.
 - This field is specific to the current SAT/fiat-minor-unit deployment. A
   future multi-asset price format requires a separate protocol decision.
 

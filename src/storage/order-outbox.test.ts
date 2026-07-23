@@ -181,9 +181,9 @@ describe("OrderOutboxRepository", () => {
     await expect(repository.list()).rejects.toThrow(/corrupt/i);
   });
 
-  it("does not read records from the retired transition-based outbox", async () => {
+  it("does not read records outside the active outbox namespace", async () => {
     const driver = new MemoryDriver();
-    driver.data.set("granola.order-outbox.v2", [{ schema: "granola/order-outbox/v2" }]);
+    driver.data.set("granola.order-outbox.unrecognized", [{ schema: "unrecognized" }]);
     const repository = new OrderOutboxRepository(driver, undefined, () => true);
 
     await expect(repository.list()).resolves.toEqual([]);

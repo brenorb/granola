@@ -8,9 +8,8 @@ import type {
 } from "../order/service.js";
 import type { StorageDriver } from "./wallet-repository.js";
 
-// v2 stored transition + projection artifacts. The projection-only format is
-// intentionally isolated because old records cannot be safely interpreted or
-// resumed by the current protocol.
+// The projection-only format stores the exact signed artifact required for
+// publication retries and local recovery.
 const OUTBOX_KEY = "granola.order-outbox.v3";
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;

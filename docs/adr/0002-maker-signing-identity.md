@@ -23,9 +23,7 @@ deletes that order's private Nostr key. If the key is absent, operations for
 that order fail closed rather than silently creating a new authority.
 
 Cashu wallet and refund keys are independent and continue using their existing
-lifetimes; rotating a Nostr order key never changes Cashu keys. Legacy
-profile-level Nostr identity records are deleted on migration and are not used
-to sign new orders.
+lifetimes; rotating a Nostr order key never changes Cashu keys.
 
 ## Consequences
 

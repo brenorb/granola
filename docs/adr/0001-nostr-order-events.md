@@ -6,14 +6,10 @@
 ## Context
 
 Granola needs a public order book that is cheap to query and safe to consume
-without replaying an append-only history. An earlier design treated public
-history as authoritative and made the current order a derived cache. That
-created a two-event publication protocol, partial-publication states, lineage
-validation, and permanent public records for short-lived trading intent.
+without replaying an append-only event log. Orders are ephemeral offers, and
+the public protocol exposes only the maker's latest signed state.
 
-Orders are ephemeral offers. The public protocol should expose only the
-maker's latest signed state. Durable recovery belongs in the maker's private
-local journal.
+Durable recovery belongs in the maker's private local journal.
 
 ## Decision
 
@@ -30,8 +26,7 @@ the same address. Each replacement increments the state's canonical decimal
 `revision`. It has a new event ID and contains no public predecessor reference.
 The newest valid replaceable event is the order.
 
-This is a rewrite of protocol v1, not a second public protocol version. There
-is no compatibility mode and no event-sequence fallback.
+There is no compatibility mode or event-sequence fallback.
 
 ## Canonical event
 

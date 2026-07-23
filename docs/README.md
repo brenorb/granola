@@ -9,8 +9,6 @@
 - [Manual two-profile testnet swap](guides/manual-testnet-swap.md)
 - [Browser agent API](guides/agent-api.md)
 - [Testnet wallet notes](guides/testnet-wallet.md)
-- [NIP-17 inbox capability probe](traces/2026-07-23-inbox-probe.md)
-- [Real two-profile swap trace](traces/2026-07-23-testnet-swap.md)
 
 ## Architecture decisions
 
