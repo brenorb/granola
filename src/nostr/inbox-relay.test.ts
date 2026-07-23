@@ -25,19 +25,18 @@ class FakeConnection implements InboxRelayConnection {
   published: NostrEvent[] = [];
   authPubkeys: string[] = [];
 
-  private async authenticate(): Promise<void> {
-    const auth = await this.onauth?.({
+  async auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string> {
+    const auth = await signer({
       kind: 22242,
       created_at: now,
       tags: [["relay", relayUrl], ["challenge", "relay-challenge"]],
       content: ""
     });
-    if (!auth) throw new Error("missing auth");
     this.authPubkeys.push(auth.pubkey);
+    return "authenticated";
   }
 
   async publish(value: NostrEvent): Promise<string> {
-    await this.authenticate();
     this.published.push(value);
     return "stored";
   }
@@ -46,7 +45,7 @@ class FakeConnection implements InboxRelayConnection {
     _filters: Record<string, unknown>[],
     callbacks: { onevent: (value: NostrEvent) => void; oneose: () => void; onclose: (reason: string) => void }
   ) {
-    void this.authenticate().then(() => {
+    queueMicrotask(() => {
       callbacks.onevent(event());
       callbacks.oneose();
     });
@@ -86,19 +85,59 @@ describe("nostr-tools inbox relay port", () => {
 
   it("rejects an AUTH template without an exact challenge", async () => {
     class MissingChallengeConnection extends FakeConnection {
-      override async publish(value: NostrEvent): Promise<string> {
-        await this.onauth?.({ kind: 22242, created_at: now, tags: [], content: "" });
-        return super.publish(value);
+      override async auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string> {
+        await signer({ kind: 22242, created_at: now, tags: [], content: "" });
+        return "unreachable";
       }
     }
     const port = new NostrToolsInboxRelayPort(
       async () => new MissingChallengeConnection(),
-      async () => new Response("{}", { status: 200 }),
+      async () => new Response(JSON.stringify({
+        supported_nips: [17, 40, 42],
+        limitation: { auth_required: true }
+      }), { status: 200 }),
       1_000
     );
 
     await expect(port.publish(relayUrl, event(), async (challenge) =>
       createNip42AuthEvent(relayUrl, challenge, protocolKey, now)))
       .rejects.toThrow(/challenge/i);
+  });
+
+  it("waits for a challenge that arrives just after connect before publishing", async () => {
+    class DelayedChallengeConnection extends FakeConnection {
+      challenged = false;
+
+      override async auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string> {
+        const template: EventTemplate = {
+          kind: 22242,
+          created_at: now,
+          tags: [["relay", relayUrl], ["challenge", "delayed-challenge"]],
+          content: ""
+        };
+        if (!this.challenged) {
+          queueMicrotask(() => {
+            this.challenged = true;
+            void this.onauth?.(template);
+          });
+          throw new Error("can't perform auth, no challenge was received");
+        }
+        return super.auth(signer);
+      }
+    }
+    const connection = new DelayedChallengeConnection();
+    const port = new NostrToolsInboxRelayPort(
+      async () => connection,
+      async () => new Response(JSON.stringify({
+        supported_nips: [17, 40, 42],
+        limitation: { auth_required: true }
+      }), { status: 200 }),
+      1_000
+    );
+
+    await expect(port.publish(relayUrl, event(), async (challenge) =>
+      createNip42AuthEvent(relayUrl, challenge, protocolKey, now)))
+      .resolves.toBe("stored");
+    expect(connection.challenged).toBe(true);
   });
 });

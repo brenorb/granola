@@ -9,6 +9,7 @@ import type {
 
 export interface InboxRelayConnection {
   onauth: ((template: EventTemplate) => Promise<NostrEvent>) | undefined;
+  auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string>;
   publish(event: NostrEvent): Promise<string>;
   subscribe(
     filters: Record<string, unknown>[],
@@ -50,6 +51,8 @@ const defaultFactory: InboxRelayFactory = async (relay) =>
   await Relay.connect(relay, { enableReconnect: false }) as InboxRelayConnection;
 
 export class NostrToolsInboxRelayPort implements InboxRelayPort {
+  private readonly infoCache = new Map<string, InboxRelayCapabilities>();
+
   constructor(
     private readonly connect: InboxRelayFactory = defaultFactory,
     private readonly fetchInfo: InboxInfoFetcher = fetch,
@@ -61,6 +64,8 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
   }
 
   async info(relay: string): Promise<InboxRelayCapabilities> {
+    const cached = this.infoCache.get(relay);
+    if (cached) return structuredClone(cached);
     const response = await this.fetchInfo(nip11Url(relay), {
       headers: { Accept: "application/nostr+json" }
     });
@@ -77,16 +82,46 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     ) {
       throw new Error("Inbox relay NIP-11 supported_nips is invalid");
     }
-    return {
+    const capabilities = {
       supportedNips: document.supported_nips as number[],
       authRequired: document.limitation?.auth_required === true
     };
+    this.infoCache.set(relay, capabilities);
+    return structuredClone(capabilities);
   }
 
   private async open(relay: string, auth: AuthHandler): Promise<InboxRelayConnection> {
     const connection = await this.connect(relay);
-    connection.onauth = async (template) => await auth(challengeFrom(template));
-    return connection;
+    let challengeSeen: (() => void) | undefined;
+    const challengeReady = new Promise<void>((resolve) => {
+      challengeSeen = resolve;
+    });
+    const signer = async (template: EventTemplate): Promise<NostrEvent> => {
+      const challenge = challengeFrom(template);
+      challengeSeen?.();
+      return await auth(challenge);
+    };
+    connection.onauth = signer;
+    try {
+      if ((await this.info(relay)).authRequired) {
+        try {
+          await connection.auth(signer);
+        } catch {
+          await Promise.race([
+            challengeReady,
+            new Promise<never>((_resolve, reject) => setTimeout(
+              () => reject(new Error("Relay AUTH challenge was not received")),
+              this.queryTimeoutMs
+            ))
+          ]);
+          await connection.auth(signer);
+        }
+      }
+      return connection;
+    } catch (error) {
+      connection.close();
+      throw error;
+    }
   }
 
   async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
