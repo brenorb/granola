@@ -166,9 +166,42 @@ details form { margin-top: 1rem; }
 .trade-protocol-summary li { display: grid; gap: .2rem; }
 .trade-protocol-summary span { color: var(--muted); }
 .trade-protocol-summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trade-protocol-summary__messages { margin: -.35rem; }
+.trade-dms-trigger { display: grid; grid-template-columns: 1fr auto; gap: .2rem .5rem; width: 100%; padding: .35rem; border-color: transparent; background: transparent; box-shadow: none; text-align: left; letter-spacing: 0; }
+.trade-dms-trigger span { color: var(--muted); font-weight: 400; text-transform: none; }
+.trade-dms-trigger strong { font-size: .72rem; text-transform: none; }
+.trade-dms-trigger small { grid-column: 1 / -1; color: var(--orange); font-size: .58rem; text-transform: uppercase; }
+.trade-dms-trigger:hover { border-color: var(--ink); background: var(--acid); box-shadow: 2px 2px 0 var(--ink); transform: none; }
+.trade-dm-dialog { width: min(48rem,calc(100vw - 2rem)); max-height: min(48rem,calc(100vh - 2rem)); padding: 0; overflow: auto; border: 2px solid var(--ink); color: var(--ink); background: var(--paper); box-shadow: 8px 8px 0 var(--ink); }
+.trade-dm-dialog::backdrop { background: rgba(23,25,20,.72); backdrop-filter: blur(2px); }
+.trade-dm-dialog > header { position: sticky; z-index: 2; top: 0; display: flex; align-items: start; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.2rem; border-bottom: 2px solid var(--ink); background: var(--acid); }
+.trade-dm-dialog > header p { margin: 0 0 .25rem; font: 700 .62rem/1 "Courier New", monospace; text-transform: uppercase; letter-spacing: .08em; }
+.trade-dm-dialog > header h3 { margin: 0; font-size: clamp(1.35rem,3vw,2.2rem); font-weight: 500; }
+.trade-dm-dialog__close { flex: none; padding: .55rem .7rem; background: var(--paper) !important; }
+.trade-dm-list { margin: 0; padding: 0; list-style: none; counter-reset: dm; }
+.trade-dm { display: grid; grid-template-columns: minmax(6rem,.28fr) 1fr; gap: .45rem 1.2rem; padding: 1.15rem 1.2rem; border-bottom: 1px solid var(--ink); }
+.trade-dm__heading { grid-row: 1 / span 3; display: flex; flex-direction: column; gap: .35rem; padding-right: 1rem; border-right: 1px solid var(--line); font-family: "Courier New", monospace; }
+.trade-dm__heading span { color: var(--orange); font-size: .66rem; font-weight: 700; text-transform: uppercase; }
+.trade-dm__heading small { font-size: .62rem; line-height: 1.35; }
+.trade-dm h4 { margin: 0; font-size: 1.15rem; font-weight: 500; }
+.trade-dm > p { margin: 0; font: .7rem/1.5 "Courier New", monospace; }
+.trade-dm__envelope { margin: .3rem 0 0; padding: .55rem 0 0; border-top: 1px solid var(--line); }
+.trade-dm__envelope summary { color: var(--muted); font-size: .6rem; }
+.trade-dm__envelope dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: .35rem .8rem; margin: .7rem 0 0; font: .6rem/1.4 "Courier New", monospace; }
+.trade-dm__envelope dl > div { display: contents; }
+.trade-dm__envelope dt { color: var(--muted); text-transform: uppercase; }
+.trade-dm__envelope dd { margin: 0; overflow-wrap: anywhere; }
+.trade-dm-dialog__empty, .trade-dm-dialog__privacy { margin: 0; padding: 1.2rem; font: .68rem/1.5 "Courier New", monospace; }
+.trade-dm-dialog__privacy { color: var(--muted); background: rgba(23,25,20,.05); }
 @media (max-width: 700px) {
   .log-panel li { grid-template-columns: 4.5rem 1fr; }
   .trade-protocol-summary { grid-template-columns: 1fr; }
+  .trade-dm-dialog { width: calc(100vw - 1rem); max-height: calc(100vh - 1rem); box-shadow: 4px 4px 0 var(--ink); }
+  .trade-dm-dialog > header { padding: .85rem; }
+  .trade-dm { grid-template-columns: 1fr; gap: .45rem; padding: .9rem; }
+  .trade-dm__heading { grid-row: auto; flex-direction: row; justify-content: space-between; padding: 0 0 .5rem; border-right: 0; border-bottom: 1px solid var(--line); }
+  .trade-dm__envelope dl { grid-template-columns: 1fr; }
+  .trade-dm__envelope dl > div { display: grid; gap: .1rem; }
 }
 .agent-strip { margin-top: 3rem; padding: clamp(2rem,6vw,5rem); color: var(--paper); background: var(--ink); }
 .agent-strip h2 { max-width: 10em; font-size: clamp(2.5rem,6vw,6rem); }
