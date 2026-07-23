@@ -126,6 +126,15 @@ export type InitialReserveProposalOptions = Omit<
   | "expectedPreviousTranscriptHash"
 >;
 
+export type ReserveAcceptanceOptions = Omit<
+  UnwrapTradeMessageOptions,
+  "expectedOrderHead" | "expectedType" | "expectedSequence"
+> & {
+  expectedPreviousRumorId: string;
+  expectedPreviousMessageId: string;
+  expectedPreviousTranscriptHash: string;
+};
+
 export interface OpenedTradeMessage {
   wrapper: SignedNostrEvent;
   seal: SignedNostrEvent;
@@ -457,8 +466,9 @@ export async function transcriptHash(previousTranscriptHash: string | null, rumo
 async function unwrapTradeMessageInternal(
   outerValue: SignedNostrEvent,
   recipientSecretKey: Uint8Array,
-  options: Omit<UnwrapTradeMessageOptions, "expectedAuthorPubkey"> & {
+  options: Omit<UnwrapTradeMessageOptions, "expectedAuthorPubkey" | "expectedOrderHead"> & {
     expectedAuthorPubkey?: string;
+    expectedOrderHead?: string;
   }
 ): Promise<OpenedTradeMessage> {
   safeTimestamp(options.now, "Current time");
@@ -530,7 +540,9 @@ async function unwrapTradeMessageInternal(
   ) throw new Error("Unexpected message author");
   if (message.recipient_pubkey !== recipient) throw new Error("Unexpected message recipient");
   if (message.order_address !== options.expectedOrderAddress) throw new Error("Unexpected order address");
-  if (message.order_head !== options.expectedOrderHead) throw new Error("Unexpected order head");
+  if (options.expectedOrderHead !== undefined && message.order_head !== options.expectedOrderHead) {
+    throw new Error("Unexpected order head");
+  }
   if (message.terms_hash !== options.expectedTermsHash) throw new Error("Unexpected terms hash");
   if (outer.pubkey === message.author_pubkey) throw new Error("Outer one-time pubkey must differ from author");
   if (options.expectedType !== undefined && message.type !== options.expectedType) {
@@ -603,6 +615,30 @@ export async function unwrapInitialReserveProposal(
     opened.message.previous_transcript_hash !== null
   ) {
     throw new Error("Message is not an initial reservation proposal");
+  }
+  return opened;
+}
+
+/**
+ * Opens the one maker-order-key response that introduces the newly published
+ * reserve head. The head is accepted only when the signed body binds it too.
+ */
+export async function unwrapReserveAcceptance(
+  outerValue: SignedNostrEvent,
+  recipientSecretKey: Uint8Array,
+  options: ReserveAcceptanceOptions
+): Promise<OpenedTradeMessage> {
+  const opened = await unwrapTradeMessageInternal(outerValue, recipientSecretKey, {
+    ...options,
+    expectedType: "reserve_accept",
+    expectedSequence: "1"
+  });
+  const body = record(opened.message.body, "Reserve acceptance body");
+  if (
+    requiredString(body.reserve_transition_id, "Reserve transition ID", HEX_32) !==
+    opened.message.order_head
+  ) {
+    throw new Error("Reserve transition ID does not match the accepted order head");
   }
   return opened;
 }

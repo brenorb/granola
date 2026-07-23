@@ -5,6 +5,7 @@ import {
   createTradeRumor,
   termsHash,
   unwrapInitialReserveProposal,
+  unwrapReserveAcceptance,
   unwrapTradeMessage,
   wrapTradeRumor,
   type GranolaTradeMessage,
@@ -113,6 +114,51 @@ describe("strict Granola NIP-17 messages", () => {
       expectedOrderHead: message.order_head,
       expectedTermsHash: message.terms_hash
     })).rejects.toThrow();
+  });
+
+  it("learns a maker-signed reserve head only from its bound acceptance body", async () => {
+    const first = await proposal();
+    const firstRumor = await createTradeRumor(first, takerKey);
+    const firstTranscript = await (await import("./messages.js")).transcriptHash(null, firstRumor.id);
+    const reserveHead = "ab".repeat(32);
+    const acceptance: GranolaTradeMessage = {
+      ...first,
+      type: "reserve_accept",
+      message_id: "99999999-9999-4999-8999-999999999999",
+      author_pubkey: maker,
+      recipient_pubkey: taker,
+      sequence: "1",
+      previous_message_id: first.message_id,
+      previous_transcript_hash: firstTranscript,
+      order_head: reserveHead,
+      body: { reserve_transition_id: reserveHead }
+    };
+    const rumor = await createTradeRumor(acceptance, makerKey, firstRumor.id);
+    const wrapped = wrapTradeRumor(rumor, makerKey, wrapOptions(wrapperKeyA, 11));
+
+    const opened = await unwrapReserveAcceptance(wrapped.wrapper, takerKey, {
+      now,
+      expectedAuthorPubkey: maker,
+      expectedOrderAddress: first.order_address,
+      expectedTermsHash: first.terms_hash,
+      expectedPreviousRumorId: firstRumor.id,
+      expectedPreviousMessageId: first.message_id,
+      expectedPreviousTranscriptHash: firstTranscript
+    });
+    expect(opened.message.order_head).toBe(reserveHead);
+
+    const substituted = { ...acceptance, body: { reserve_transition_id: "cd".repeat(32) } };
+    const substitutedRumor = await createTradeRumor(substituted, makerKey, firstRumor.id);
+    const substitutedWrap = wrapTradeRumor(substitutedRumor, makerKey, wrapOptions(wrapperKeyB, 12));
+    await expect(unwrapReserveAcceptance(substitutedWrap.wrapper, takerKey, {
+      now,
+      expectedAuthorPubkey: maker,
+      expectedOrderAddress: first.order_address,
+      expectedTermsHash: first.terms_hash,
+      expectedPreviousRumorId: firstRumor.id,
+      expectedPreviousMessageId: first.message_id,
+      expectedPreviousTranscriptHash: firstTranscript
+    })).rejects.toThrow(/reserve transition/i);
   });
 
   it("wraps one exact rumor into distinct authenticated delivery copies", async () => {
