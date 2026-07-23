@@ -53,6 +53,36 @@ function priceCell(order: OrderRecord, market: ExactMarket): HTMLTableCellElemen
   return cell;
 }
 
+function validateTakeAmount(amount: HTMLInputElement, order: OrderRecord): void {
+  amount.setCustomValidity("");
+  if (!/^[1-9]\d*$/.test(amount.value)) {
+    amount.setCustomValidity("Enter a positive whole-number amount.");
+    return;
+  }
+  const fill = BigInt(amount.value);
+  const remaining = BigInt(order.state.remaining_amount);
+  const minimum = BigInt(order.state.minimum_fill_amount);
+  if (fill > remaining) {
+    amount.setCustomValidity("The fill cannot exceed the remaining amount.");
+  } else if (
+    order.state.execution === "all_or_none" &&
+    fill !== remaining
+  ) {
+    amount.setCustomValidity("This all-or-none order requires the full remaining amount.");
+  } else if (
+    order.state.execution === "partial" &&
+    fill < minimum
+  ) {
+    amount.setCustomValidity(`The minimum partial fill is ${minimum.toString()}.`);
+  } else if (
+    order.state.execution === "partial" &&
+    remaining - fill > 0n &&
+    remaining - fill < minimum
+  ) {
+    amount.setCustomValidity("This fill would leave less than the order minimum.");
+  }
+}
+
 function orderRow(
   order: OrderRecord,
   market: ExactMarket,
@@ -62,12 +92,9 @@ function orderRow(
   const row = element("tr");
   row.className = `order-row order-row--${order.state.side === "sell" ? "ask" : "bid"}`;
   row.dataset.orderId = order.state.order_id;
-  if (best !== undefined) row.dataset.best = best;
-
   const side = order.state.side === "sell" ? "Ask" : "Bid";
-  const sideHeader = element("th", best ? `Best ${side.toLowerCase()}` : side);
-  sideHeader.scope = "row";
-  row.append(sideHeader);
+  row.setAttribute("aria-label", best ? `Best ${side.toLowerCase()}` : side);
+  if (best !== undefined) row.dataset.best = best;
   row.append(priceCell(order, market));
   row.append(
     element(
@@ -87,59 +114,30 @@ function orderRow(
   expiry.append(time);
   row.append(expiry);
   const action = element("td");
-  if (order.state.side === "sell") {
-    const amount = element("input");
-    amount.type = "text";
-    amount.inputMode = "numeric";
-    amount.pattern = "[0-9]+";
-    amount.value = order.state.remaining_amount;
-    amount.dataset.takeAmount = "true";
-    amount.setAttribute(
-      "aria-label",
-      `Base amount to take in ${market.baseUnit.toUpperCase()}`
-    );
-    const take = element("button", "Take ask");
-    take.type = "button";
-    take.className = "quiet";
-    take.dataset.takeOrder = "true";
-    take.disabled = !order.verified || options.onTake === undefined;
-    if (options.onTake) take.addEventListener("click", () => {
-      amount.setCustomValidity("");
-      if (!/^[1-9]\d*$/.test(amount.value)) {
-        amount.setCustomValidity("Enter a positive whole-number amount.");
-      } else {
-        const fill = BigInt(amount.value);
-        const remaining = BigInt(order.state.remaining_amount);
-        const minimum = BigInt(order.state.minimum_fill_amount);
-        if (fill > remaining) {
-          amount.setCustomValidity("The fill cannot exceed the remaining amount.");
-        } else if (
-          order.state.execution === "all_or_none" &&
-          fill !== remaining
-        ) {
-          amount.setCustomValidity("This all-or-none order requires the full remaining amount.");
-        } else if (
-          order.state.execution === "partial" &&
-          fill < minimum
-        ) {
-          amount.setCustomValidity(`The minimum partial fill is ${minimum.toString()}.`);
-        } else if (
-          order.state.execution === "partial" &&
-          remaining - fill > 0n &&
-          remaining - fill < minimum
-        ) {
-          amount.setCustomValidity("This fill would leave less than the order minimum.");
-        }
-      }
-      if (!amount.reportValidity()) return;
-      options.onTake?.(order, amount.value);
-    });
-    action.append(amount, take);
-  } else {
-    const unavailable = element("span", "Buy-side taking is not supported");
-    unavailable.dataset.takeUnavailable = "true";
-    action.append(unavailable);
-  }
+  const amount = element("input");
+  amount.type = "text";
+  amount.inputMode = "numeric";
+  amount.pattern = "[0-9]+";
+  amount.value = order.state.remaining_amount;
+  amount.dataset.takeAmount = "true";
+  amount.setAttribute(
+    "aria-label",
+    `Base amount to ${order.state.side === "sell" ? "buy" : "sell"} in ${market.baseUnit.toUpperCase()}`
+  );
+  const take = element(
+    "button",
+    order.state.side === "sell" ? "Take ask" : "Sell into bid"
+  );
+  take.type = "button";
+  take.className = "quiet";
+  take.dataset.takeOrder = "true";
+  take.disabled = !order.verified || options.onTake === undefined;
+  if (options.onTake) take.addEventListener("click", () => {
+    validateTakeAmount(amount, order);
+    if (!amount.reportValidity()) return;
+    options.onTake?.(order, amount.value);
+  });
+  action.append(amount, take);
   if (options.canCancel?.(order) && options.onCancel) {
     const cancel = element("button", "Cancel order");
     cancel.type = "button";
@@ -200,6 +198,48 @@ function midpointText(book: OrderBook): string {
   return `Spread ${fiatPerBtc(spread.toString())} ${priceLabel(book.market)}`;
 }
 
+function renderSideTable(
+  label: "Asks" | "Bids",
+  orders: OrderRecord[],
+  best: OrderRecord | undefined,
+  market: ExactMarket,
+  options: OrderBookRenderOptions
+): HTMLElement {
+  const section = element("section");
+  section.className = `orderbook-side orderbook-side--${label.toLowerCase()}`;
+  const table = element("table");
+  table.className = "orderbook-table";
+  table.append(element("caption", label));
+  const head = element("thead");
+  const headers = element("tr");
+  for (const headerLabel of ["Limit price", "Remaining", "Execution", "Expires (UTC)", "Action"]) {
+    const header = element("th", headerLabel);
+    header.scope = "col";
+    headers.append(header);
+  }
+  head.append(headers);
+  table.append(head);
+
+  const body = element("tbody");
+  body.className = `orderbook-${label.toLowerCase()}`;
+  body.setAttribute("aria-label", label);
+  for (const order of orders) {
+    body.append(orderRow(
+      order,
+      market,
+      order.address === best?.address ? label === "Asks" ? "ask" : "bid" : undefined,
+      options
+    ));
+  }
+  table.append(body);
+
+  const scroller = element("div");
+  scroller.className = "table-scroll";
+  scroller.append(table);
+  section.append(scroller);
+  return section;
+}
+
 function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRenderOptions): void {
   if (book.asks.length === 0 && book.bids.length === 0) {
     const empty = element("div");
@@ -210,59 +250,21 @@ function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRende
     return;
   }
 
-  root.append(renderSummary(book));
-  const table = element("table");
-  table.className = "orderbook-table";
-  table.append(
-    element(
-      "caption",
-      `${book.market.baseUnit.toUpperCase()} / ${book.market.quoteUnit.toUpperCase()} order book`
-    )
+  const columns = element("div");
+  columns.className = "orderbook-columns";
+  columns.append(
+    renderSideTable("Asks", [...book.asks].reverse(), book.topAsk, book.market, options)
   );
-  const head = element("thead");
-  const headers = element("tr");
-  for (const label of ["Side", "Limit price", "Remaining", "Execution", "Expires (UTC)", "Action"]) {
-    const header = element("th", label);
-    header.scope = "col";
-    headers.append(header);
-  }
-  head.append(headers);
-  table.append(head);
 
-  const asks = element("tbody");
-  asks.className = "orderbook-asks";
-  asks.setAttribute("aria-label", "Asks");
-  for (const order of [...book.asks].reverse()) {
-    asks.append(
-      orderRow(order, book.market, order.address === book.topAsk?.address ? "ask" : undefined, options)
-    );
-  }
-  table.append(asks);
-
-  const midpoint = element("tbody");
+  const midpoint = element("aside");
   midpoint.className = "orderbook-midpoint";
-  const midpointRow = element("tr");
-  midpointRow.dataset.bookMidpoint = "true";
-  const midpointCell = element("td", midpointText(book));
-  midpointCell.colSpan = 6;
-  midpointRow.append(midpointCell);
-  midpoint.append(midpointRow);
-  table.append(midpoint);
+  midpoint.dataset.bookMidpoint = "true";
+  midpoint.append(renderSummary(book));
+  midpoint.append(element("p", midpointText(book)));
+  columns.append(midpoint);
 
-  const bids = element("tbody");
-  bids.className = "orderbook-bids";
-  bids.setAttribute("aria-label", "Bids");
-  for (const order of book.bids) {
-    bids.append(
-      orderRow(order, book.market, order.address === book.topBid?.address ? "bid" : undefined, options)
-    );
-  }
-  table.append(bids);
-
-  const scroller = element("div");
-  scroller.className = "table-scroll";
-  scroller.append(table);
-  root.append(scroller);
+  columns.append(renderSideTable("Bids", book.bids, book.topBid, book.market, options));
+  root.append(columns);
 }
 
 export function renderOrderBook(

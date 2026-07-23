@@ -58,10 +58,27 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .market-tape p { min-width: 0; margin: 0; padding: .8rem; background: var(--paper); }
 .market-tape span, .market-tape strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: .66rem/1.5 "Courier New", monospace; }
 .market-tape span { color: #696c62; text-transform: uppercase; }
-.orderbook-summary { display: grid; grid-template-columns: repeat(3,auto 1fr); margin: 1.5rem 0 0; border: 1px solid var(--ink); }
+.market-wallet { display: flex; align-items: stretch; gap: 1px; margin: 1.5rem 0 0; border: 1px solid var(--ink); background: var(--ink); }
+.wallet-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); flex: 1; }
+.wallet-summary__balance { display: grid; gap: .25rem; min-width: 0; padding: .8rem 1rem; background: var(--paper); }
+.wallet-summary__balance span { color: #696c62; font: .66rem/1.3 "Courier New", monospace; text-transform: uppercase; }
+.wallet-summary__balance strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(1.25rem,2vw,2rem); font-weight: 500; }
+.market-wallet .mint-actions { display: flex; align-items: center; gap: 1px; padding: 1px; background: var(--ink); }
+.market-wallet .quick-mint { min-height: 100%; border: 0; box-shadow: none; }
+.market-wallet > #refresh { min-width: max-content; border: 0; background: var(--paper); }
+.orderbook-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(10rem,13rem) minmax(0,1fr); gap: 1px; margin-top: 1.5rem; border: 1px solid var(--ink); background: var(--ink); }
+.orderbook-side { min-width: 0; padding: 0 .7rem .7rem; background: var(--paper); }
+.orderbook-side .table-scroll { margin-top: 0; }
+.orderbook-side .orderbook-table { min-width: 34rem; }
+.orderbook-side caption { padding: 1rem .2rem .7rem; border-bottom: 2px solid var(--ink); font-size: .9rem; }
+.orderbook-side--asks caption { color: var(--orange); }
+.orderbook-side--bids caption { color: #688900; }
+.orderbook-midpoint { display: flex; flex-direction: column; justify-content: center; gap: 1rem; min-width: 0; padding: 1rem; background: var(--paper); }
+.orderbook-midpoint > p { margin: 0; padding-top: 1rem; border-top: 1px solid var(--ink); text-align: center; font: 700 .68rem/1.4 "Courier New", monospace; text-transform: uppercase; }
+.orderbook-summary { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border: 1px solid var(--ink); }
 .orderbook-summary dt, .orderbook-summary dd { margin: 0; padding: .75rem; font: 700 .7rem/1.2 "Courier New", monospace; }
 .orderbook-summary dt { background: var(--ink); color: var(--paper); text-transform: uppercase; }
-.orderbook-summary dd { background: var(--paper); }
+.orderbook-summary dd { overflow: hidden; background: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
 .orderbook-table { font-variant-numeric: tabular-nums; }
 .orderbook-table td:last-child { display: grid; grid-template-columns: minmax(7rem,1fr) auto; gap: .45rem; }
 .orderbook-table td:last-child input { min-width: 7rem; padding: .55rem; }
@@ -71,8 +88,10 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
 .orderbook-bids tr[data-best="bid"] { background: rgba(200,241,53,.3); }
 .orderbook-midpoint td { padding: .45rem .7rem; color: var(--paper); background: var(--ink); text-align: center; font-weight: 700; }
-.order-entry { margin-top: 2rem; padding: 1.2rem; border: 1px solid var(--ink); background: rgba(245,241,229,.55); }
-.order-entry[open] summary { margin-bottom: 1.2rem; }
+.order-entry { margin-top: 1.5rem; padding: 1.2rem; border: 1px solid var(--ink); background: rgba(245,241,229,.55); }
+.order-entry__heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
+.order-entry__heading h3 { margin: 0; font-size: clamp(1.35rem,2.5vw,2rem); font-weight: 500; }
+.order-entry__heading .hint { max-width: 30rem; margin: 0; text-align: right; }
 .order-entry form { max-width: 58rem; }
 .pending-publications { margin-top: 1.2rem; padding: 1rem; border: 2px solid var(--orange); background: var(--paper); }
 .pending-publications h3 { margin: 0 0 .8rem; font-weight: 500; }
@@ -137,7 +156,14 @@ code { font-family: "Courier New", monospace; }
   .panel:nth-child(odd) { border-right: 0; }
   .field-pair { grid-template-columns: 1fr; }
   .market-tape { grid-template-columns: 1fr 1fr; }
-  .orderbook-summary { grid-template-columns: auto 1fr; }
+  .market-wallet { flex-wrap: wrap; }
+  .wallet-summary { flex-basis: 100%; }
+  .market-wallet .mint-actions { flex: 1; }
+  .orderbook-columns { grid-template-columns: 1fr; }
+  .orderbook-midpoint { order: 2; }
+  .orderbook-side--bids { order: 3; }
+  .order-entry__heading { align-items: start; flex-direction: column; }
+  .order-entry__heading .hint { text-align: left; }
   .section-heading { gap: 1rem; }
   .section-actions { flex-direction: column; align-items: stretch; }
 }

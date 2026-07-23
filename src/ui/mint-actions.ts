@@ -16,13 +16,13 @@ const QUICK_MINT_ACTIONS: ReadonlyArray<{
   {
     unit: "sat",
     symbol: "₿",
-    label: "10,000 SAT",
+    label: "Fund SAT",
     accessibleLabel: "Mint 10,000 satoshis"
   },
   {
     unit: "usd",
     symbol: "$",
-    label: "100.00 USD",
+    label: "Fund USD",
     accessibleLabel: "Mint 10,000 USD cents"
   }
 ];

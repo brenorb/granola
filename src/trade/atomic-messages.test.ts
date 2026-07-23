@@ -436,5 +436,74 @@ describe("atomic swap message bodies", () => {
     await expect(validateAtomicSwapMessage(
       await message("refund", 4, {}, { refunded_at: 1_800_000_005 })
     )).rejects.toThrow(/refund timestamp/i);
+    });
   });
-});
+
+  it("flips lock assets and actors for a buy-side maker", async () => {
+    const buyTerms: GranolaTradeTerms = { ...terms, maker_side: "buy" };
+    const buyHash = await termsHash(buyTerms);
+    const buyBody: Partial<Record<AtomicSwapMessageType, Record<string, unknown>>> = {
+      base_lock: {
+        cashu_token: quoteToken,
+        token_commitment: quoteTokenCommitment,
+        mint: terms.quote_mint,
+        unit: terms.quote_unit,
+        keyset: terms.quote_keyset,
+        amount: terms.quote_amount,
+        receiver_cashu_pubkey: takerCashu,
+        refund_cashu_pubkey: makerRefund,
+        locktime: 1_800_001_200
+      },
+      base_lock_ack: {
+        token_commitment: quoteTokenCommitment,
+        validation_commitment: baseValidationCommitment
+      },
+      quote_lock: {
+        cashu_token: baseToken,
+        token_commitment: baseTokenCommitment,
+        mint: terms.base_mint,
+        unit: terms.base_unit,
+        keyset: terms.base_keyset,
+        amount: terms.base_amount,
+        receiver_cashu_pubkey: makerCashu,
+        refund_cashu_pubkey: takerRefund,
+        locktime: 1_800_000_600
+      },
+      quote_lock_ack: {
+        token_commitment: baseTokenCommitment,
+        validation_commitment: quoteValidationCommitment
+      },
+      claim_notice: { quote_token_commitment: baseTokenCommitment },
+      fill_request: {
+        base_token_commitment: quoteTokenCommitment,
+        quote_token_commitment: baseTokenCommitment
+      },
+      settlement_ack: {
+        base_token_commitment: quoteTokenCommitment,
+        quote_token_commitment: baseTokenCommitment
+      }
+    };
+    let state = initialAtomicSwapChoreography(makerOrder);
+    for (const [index, type] of [
+      "reserve_propose", "reserve_accept", "session_ack", "base_lock",
+      "base_lock_ack", "quote_lock", "quote_lock_ack", "claim_notice",
+      "fill_request", "settlement_ack"
+    ].entries()) {
+      const messageOverrides: Partial<GranolaTradeMessage> = {
+        terms_hash: buyHash,
+        ...(type === "reserve_propose" || type === "reserve_accept"
+          ? { terms: buyTerms }
+          : {})
+      };
+      state = await advanceAtomicSwapChoreography(
+        state,
+        await message(
+          type as AtomicSwapMessageType,
+          index,
+          messageOverrides,
+          buyBody[type as AtomicSwapMessageType] ?? {}
+        )
+      );
+    }
+    expect(state.phase).toBe("settled");
+  });

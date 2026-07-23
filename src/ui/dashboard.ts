@@ -14,6 +14,24 @@ function mintHost(mintUrl: string): string {
   return new URL(mintUrl).host;
 }
 
+export function renderWalletSummary(root: HTMLElement, state: GranolaState): void {
+  root.replaceChildren();
+  root.setAttribute("aria-live", "polite");
+
+  const summary = element("div");
+  summary.className = "wallet-summary";
+  for (const unit of ["sat", "usd"] as const) {
+    const balance = state.wallet.balances.find((item) => item.unit === unit);
+    const cell = element("article");
+    cell.className = "wallet-summary__balance";
+    cell.dataset.balanceUnit = unit;
+    cell.append(element("span", `${unit.toUpperCase()} balance`));
+    cell.append(element("strong", balance ? formatUnitAmount(balance.amount, unit) : "No balance"));
+    summary.append(cell);
+  }
+  root.append(summary);
+}
+
 export function renderDashboard(root: HTMLElement, state: GranolaState): void {
   root.replaceChildren();
   root.setAttribute("aria-live", "polite");

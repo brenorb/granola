@@ -169,14 +169,20 @@ async function proposal(current = order()): Promise<VerifiedInitialReservePropos
 class BookPort {
   current: OrderRecord | null = order();
   readonly loadBook = vi.fn(async (): Promise<LoadedOrderBook> => {
-    const asks = this.current === null ? [] : [structuredClone(this.current)];
+    const asks = this.current?.state.side === "sell"
+      ? [structuredClone(this.current)]
+      : [];
+    const bids = this.current?.state.side === "buy"
+      ? [structuredClone(this.current)]
+      : [];
     return {
       book: {
         market,
         marketId: "market",
         asks,
-        bids: [],
-        ...(asks[0] ? { topAsk: asks[0] } : {})
+        bids,
+        ...(asks[0] ? { topAsk: asks[0] } : {}),
+        ...(bids[0] ? { topBid: bids[0] } : {})
       },
       rejected: 0
     };
@@ -270,6 +276,23 @@ function walletWithProofs(
 
 function wallet(mintUrl: string, unit: string, amount: string): WalletState {
   return walletWithProofs(mintUrl, unit, [{ amount }]);
+}
+
+function bidOrder(): OrderRecord {
+  return order({
+    state: createOrderState({
+      orderId,
+      createdAt: now - 100,
+      expiresAt: now + 9 * 86_400,
+      side: "buy",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "usd", mint: quoteMint },
+      requested: { unit: "sat", acceptableMints: [baseMint] },
+      amount: "1000",
+      priceCentsPerBtc: "2000000"
+    })
+  });
 }
 
 class SpendPort {
@@ -408,6 +431,35 @@ describe("trade start API", () => {
       quoteKeyset
     });
     expect(JSON.stringify(view)).not.toContain("privateState");
+  });
+
+  it("starts a seller session against a buy-side bid and checks base funding", async () => {
+    const { api, books, mints, spendability } = options({
+      wallets: { load: async () => wallet(baseMint, "sat", "1000") }
+    });
+    const current = bidOrder();
+    books.current = current;
+
+    const view = await api.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: current.address,
+      expectedProjectionId: current.eventId,
+      expectedRevision: "0",
+      fillBaseAmount: "1000"
+    });
+
+    expect(mints.inspectTradeMint.mock.calls).toEqual([
+      [baseMint, "sat"],
+      [quoteMint, "usd"]
+    ]);
+    expect(spendability.inspectTradeSpendability).toHaveBeenCalledWith(
+      expect.objectContaining({ mintUrl: baseMint, unit: "sat" })
+    );
+    expect(view).toMatchObject({
+      role: "taker",
+      orderSide: "buy",
+      terms: { baseAmount: "1000", quoteAmount: "20" }
+    });
   });
 
   it("rejects missing, stale, unverified, and non-sell orders before preflight", async () => {

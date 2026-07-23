@@ -694,16 +694,20 @@ function semanticPhase(phase: AtomicSwapChoreographyPhase): AtomicSwapErrorPhase
 function assertLockTerms(
   state: AtomicSwapChoreography,
   body: LockBody,
-  leg: "base" | "quote"
+  slot: "base" | "quote"
 ): void {
   const terms = state.terms;
   if (!terms) throw new Error("Canonical terms are unavailable");
-  const prefix = leg === "base" ? "base" : "quote";
+  const makerOffersBase = terms.maker_side !== "buy";
+  const actualLeg = slot === "base"
+    ? (makerOffersBase ? "base" : "quote")
+    : (makerOffersBase ? "quote" : "base");
+  const prefix = actualLeg === "base" ? "base" : "quote";
   if (body.mint !== terms[`${prefix}_mint`]) throw new Error(`${prefix} mint differs from terms`);
   if (body.unit !== terms[`${prefix}_unit`]) throw new Error(`${prefix} unit differs from terms`);
   if (body.keyset !== terms[`${prefix}_keyset`]) throw new Error(`${prefix} keyset differs from terms`);
   if (body.amount !== terms[`${prefix}_amount`]) throw new Error(`${prefix} amount differs from terms`);
-  if (body.locktime !== (leg === "base" ? state.longLocktime : state.shortLocktime)) {
+  if (body.locktime !== (slot === "base" ? state.longLocktime : state.shortLocktime)) {
     throw new Error(`${prefix} locktime differs from accepted deadlines`);
   }
   assertSettlement(state, body.settlement_hash);

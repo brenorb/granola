@@ -36,6 +36,8 @@ export const TRADE_MESSAGE_TYPES = [
 export type TradeMessageType = (typeof TRADE_MESSAGE_TYPES)[number];
 
 export interface GranolaTradeTerms {
+  /** Optional for legacy ask sessions; new sessions bind the maker side. */
+  maker_side?: "buy" | "sell";
   base_unit: string;
   base_mint: string;
   base_keyset: string;
@@ -269,10 +271,15 @@ function normalizedMint(value: unknown, label: string): string {
 
 function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
   const terms = record(value, "Terms");
+  const hasMakerSide = Object.hasOwn(terms, "maker_side");
   exactKeys(terms, [
+    ...(hasMakerSide ? ["maker_side"] : []),
     "base_unit", "base_mint", "base_keyset", "quote_unit", "quote_mint",
     "quote_keyset", "base_amount", "quote_amount", "price_cents_per_btc"
   ], "Terms");
+  if (hasMakerSide && terms.maker_side !== "buy" && terms.maker_side !== "sell") {
+    throw new Error("maker_side is invalid");
+  }
   for (const field of ["base_unit", "quote_unit"] as const) {
     const unit = terms[field];
     if (typeof unit !== "string" || !/^[a-z][a-z0-9_-]{0,15}$/.test(unit)) {

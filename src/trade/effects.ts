@@ -253,6 +253,9 @@ function orderId(session: TradeSession): string {
 
 function granolaTerms(session: TradeSession): GranolaTradeTerms {
   return {
+    ...(session.terms.makerSide === undefined
+      ? {}
+      : { maker_side: session.terms.makerSide }),
     base_unit: session.terms.baseUnit,
     base_mint: session.terms.baseMint,
     base_keyset: session.terms.baseKeyset,
@@ -297,23 +300,36 @@ function localCashuPubkey(session: TradeSession, kind: "cashu" | "refund"): stri
   }
 }
 
-function expectedLock(session: TradeSession, leg: "base" | "quote"): ExpectedHtlcLock {
+type ProtocolSlot = "base" | "quote";
+
+function makerOffersBase(session: TradeSession): boolean {
+  return session.orderSide !== "buy";
+}
+
+/** Maps the protocol's two lock slots to the actual market legs. */
+function slotLeg(session: TradeSession, slot: ProtocolSlot): "base" | "quote" {
+  if (slot === "base") return makerOffersBase(session) ? "base" : "quote";
+  return makerOffersBase(session) ? "quote" : "base";
+}
+
+function expectedLock(session: TradeSession, slot: ProtocolSlot): ExpectedHtlcLock {
+  const leg = slotLeg(session, slot);
   const transcriptHash = session.privateState.settlementTranscriptHash;
   const hash = session.privateState.htlcHash;
   if (!transcriptHash || !hash) {
     throw new Error("Trade lock requires checkpointed settlement and HTLC hashes");
   }
-  const base = leg === "base";
-  const receiverPubkey = base
+  const makerOfferSlot = slot === "base";
+  const receiverPubkey = makerOfferSlot
     ? participant(session, "takerCashuPubkey")
     : participant(session, "makerCashuPubkey");
-  const refundPubkey = base
+  const refundPubkey = makerOfferSlot
     ? participant(session, "makerRefundPubkey")
     : participant(session, "takerRefundPubkey");
-  const locktime = base ? session.plan.longLocktime : session.plan.shortLocktime;
+  const locktime = makerOfferSlot ? session.plan.longLocktime : session.plan.shortLocktime;
   return {
-    mintUrl: base ? session.terms.baseMint : session.terms.quoteMint,
-    unit: base ? session.terms.baseUnit : session.terms.quoteUnit,
+    mintUrl: leg === "base" ? session.terms.baseMint : session.terms.quoteMint,
+    unit: leg === "base" ? session.terms.baseUnit : session.terms.quoteUnit,
     binding: {
       protocolVersion: "1",
       network: "cashu-testnet-v1",
@@ -323,7 +339,7 @@ function expectedLock(session: TradeSession, leg: "base" | "quote"): ExpectedHtl
       direction: leg,
       transcriptHash
     },
-    amount: base ? session.terms.baseAmount : session.terms.quoteAmount,
+    amount: leg === "base" ? session.terms.baseAmount : session.terms.quoteAmount,
     hash,
     receiverPubkey,
     refundPubkey,
@@ -495,7 +511,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     return this.withWalletLock(async () => {
       const wallet = await this.wallet.load();
       const reservations = await this.reservations.load();
-      const leg = action.kind.includes("base") ? "base" : "quote";
+      const slot = action.kind.includes("base") ? "base" : "quote";
+      const leg = slotLeg(session, slot);
       if (action.kind.endsWith("_lock")) {
         const pocket = unreservedPocket(
           wallet,
@@ -509,7 +526,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           inputCommitment: await this.commitment(canonicalJson(
             pocket.proofs.map(({ amount, id, secret, C }) => ({ amount, id, secret, C }))
           )),
-          expected: expectedLock(session, leg)
+          expected: expectedLock(session, slot)
         };
       }
       const privateLeg = session.privateState.legs[leg];
@@ -518,7 +535,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         walletRevision: wallet.revision,
         reservationRevision: reservations.revision,
         tokenCommitment: session.evidence.legs[leg].tokenCommitment,
-        expected: expectedLock(session, leg)
+        expected: expectedLock(session, slot)
       };
     });
   }
@@ -564,11 +581,14 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       case "enter_recovery": {
         const next = bump(session, now);
         next.privateState.transcript.choreography.phase = "refunding";
-        if (session.role === "maker" && session.privateState.legs.base.token !== null) {
+        if (
+          session.role === "maker" &&
+          session.privateState.legs[slotLeg(session, "base")].token !== null
+        ) {
           next.phase = "waiting_base_refund";
         } else if (
           session.role === "taker" &&
-          session.privateState.legs.quote.token !== null
+          session.privateState.legs[slotLeg(session, "quote")].token !== null
         ) {
           next.phase = "waiting_quote_refund";
         } else {
@@ -627,7 +647,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       case "observe_quote":
         return this.observeLeg(
           input.session,
-          input.action.kind === "observe_base" ? "base" : "quote",
+          slotLeg(input.session, input.action.kind === "observe_base" ? "base" : "quote"),
           input.now
         );
       default:
@@ -1085,7 +1105,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         };
       case "base_lock":
       case "quote_lock": {
-        const leg = type === "base_lock" ? "base" : "quote";
+        const slot = type === "base_lock" ? "base" : "quote";
+        const leg = slotLeg(session, slot);
         const evidence = session.evidence.legs[leg];
         const privateLeg = session.privateState.legs[leg];
         const expected = privateLeg.expected;
@@ -1126,40 +1147,48 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         };
       }
       case "claim_notice":
-        if (!quote.tokenCommitment || !quote.claimOperationCommitment || !htlcHash) {
+        const paymentLeg = slotLeg(session, "quote");
+        const payment = session.evidence.legs[paymentLeg];
+        if (!payment.tokenCommitment || !payment.claimOperationCommitment || !htlcHash) {
           throw new Error("Claim notice lacks quote claim evidence");
         }
         return {
           schema,
-          quote_token_commitment: quote.tokenCommitment,
-          claim_operation_commitment: quote.claimOperationCommitment,
+          quote_token_commitment: payment.tokenCommitment,
+          claim_operation_commitment: payment.claimOperationCommitment,
           settlement_hash: htlcHash,
           claimed_at: now
         };
       case "fill_request":
-        if (!base.tokenCommitment || !quote.tokenCommitment ||
-          !base.spendCommitment || !quote.spendCommitment || !htlcHash) {
+        const makerOfferLeg = slotLeg(session, "base");
+        const takerPaymentLeg = slotLeg(session, "quote");
+        const makerOffer = session.evidence.legs[makerOfferLeg];
+        const takerPayment = session.evidence.legs[takerPaymentLeg];
+        if (!makerOffer.tokenCommitment || !takerPayment.tokenCommitment ||
+          !makerOffer.spendCommitment || !takerPayment.spendCommitment || !htlcHash) {
           throw new Error("Fill request lacks independently observed spends");
         }
         return {
           schema,
-          base_token_commitment: base.tokenCommitment,
-          quote_token_commitment: quote.tokenCommitment,
-          base_spend_commitment: base.spendCommitment,
-          quote_spend_commitment: quote.spendCommitment,
+          base_token_commitment: makerOffer.tokenCommitment,
+          quote_token_commitment: takerPayment.tokenCommitment,
+          base_spend_commitment: makerOffer.spendCommitment,
+          quote_spend_commitment: takerPayment.spendCommitment,
           settlement_hash: htlcHash
         };
       case "settlement_ack":
-        if (!session.fillProjectionId || !session.fillProjectionRevision || !base.tokenCommitment ||
-          !quote.tokenCommitment || !htlcHash) {
+        const settledOffer = session.evidence.legs[slotLeg(session, "base")];
+        const settledPayment = session.evidence.legs[slotLeg(session, "quote")];
+        if (!session.fillProjectionId || !session.fillProjectionRevision ||
+          !settledOffer.tokenCommitment || !settledPayment.tokenCommitment || !htlcHash) {
           throw new Error("Settlement acknowledgement lacks the committed fill");
         }
         return {
           schema,
           fill_projection_id: session.fillProjectionId,
           fill_revision: session.fillProjectionRevision,
-          base_token_commitment: base.tokenCommitment,
-          quote_token_commitment: quote.tokenCommitment,
+          base_token_commitment: settledOffer.tokenCommitment,
+          quote_token_commitment: settledPayment.tokenCommitment,
           settlement_hash: htlcHash
         };
       default:
@@ -1328,7 +1357,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       validation: { status: "validated", checkedAt: now, error: null }
     };
     if (checked.type === "base_lock" || checked.type === "quote_lock") {
-      const leg = checked.type === "base_lock" ? "base" : "quote";
+      const slot = checked.type === "base_lock" ? "base" : "quote";
+      const leg = slotLeg(session, slot);
       const body = checked.body as AtomicSwapBody<"base_lock">;
       const expected = expectedLock({
         ...session,
@@ -1336,7 +1366,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           ...session.privateState,
           htlcHash: session.privateState.htlcHash ?? body.settlement_hash
         }
-      }, leg);
+      }, slot);
       const summary = await this.cashu.validateIncomingLock(body.cashu_token, expected);
       if (
         summary.commitment !== body.validation_commitment ||
@@ -1492,8 +1522,9 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       | "prepare_base_refund" | "prepare_quote_refund",
     now: number
   ): Promise<TradeSession> {
-    const leg = action.includes("base") ? "base" : "quote";
-    const expected = expectedLock(session, leg);
+    const slot = action.includes("base") ? "base" : "quote";
+    const leg = slotLeg(session, slot);
+    const expected = expectedLock(session, slot);
     return this.withWalletLock(async () => {
       const walletBefore = await this.wallet.load();
       const reservations = await this.reservations.load();
@@ -1518,7 +1549,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
             preimage,
             settlementPrivateKey: session.privateState.cashuPrivateKey,
             now,
-            claimCutoff: leg === "base"
+            claimCutoff: slot === "base"
               ? session.plan.takerClaimCutoff
               : session.plan.makerClaimCutoff
           });
@@ -1710,7 +1741,11 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       proofCount: observed.proofCount,
       spendCommitment: witnessCommitment
     };
-    if (observed.status === "SPENT" && session.role === "taker" && leg === "quote") {
+    if (
+      observed.status === "SPENT" &&
+      session.role === "taker" &&
+      leg === slotLeg(session, "quote")
+    ) {
       next.privateState.preimage = observed.preimage;
     }
     return next;
