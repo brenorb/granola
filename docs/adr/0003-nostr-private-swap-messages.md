@@ -199,22 +199,27 @@ decoding and allocation denial of service.
 
 The receiver then validates in this order:
 
-1. Verify the outer event ID and signature, kind `1059`, exact tags and time
-   bounds, and require its one-time pubkey to differ from the recipient.
+1. Verify the outer event ID and signature, kind `1059`, exact tag syntax, safe
+   integer `created_at`, canonical integer expiration, and require local time to
+   be strictly before that outer expiration. Require the one-time pubkey to
+   differ from the recipient.
 2. Decrypt and parse the seal; verify its event ID and signature, kind `13`,
-   exact empty tags, and time bounds.
+   exact empty tags, and a safe integer `created_at`.
 3. Decrypt and parse the rumor; recompute its ID and require kind `14`.
 4. Require the seal pubkey to equal the rumor pubkey. NIP-17 makes this check
    mandatory to prevent sender impersonation.
 5. Enforce the signer/receiver matrix: outer `p`, rumor `p`, content recipient,
    seal author, rumor author, and content author must match exactly; the wrapper
    pubkey must also differ from the now-known author.
-6. Validate every Granola field, canonical encoding, deployment, order address
+6. Enforce all cross-layer clock rules below: rumor `created_at` against
+   `sent_at`, local time, and encrypted expiry; seal and wrapper timestamps
+   against the rumor; and outer expiration against encrypted expiry.
+7. Validate every Granola field, canonical encoding, deployment, order address
    and head, terms hash, economic invariants, deadline, sequence, predecessor,
    and transcript hash before changing state.
-7. Deduplicate the message ID, rumor ID, and seal ID. Return the same result for
+8. Deduplicate the message ID, rumor ID, and seal ID. Return the same result for
    an exact replay; reject a changed result under an existing identifier.
-8. Treat two valid successors of one transcript hash as equivocation. Never pick
+9. Treat two valid successors of one transcript hash as equivocation. Never pick
    a winner by timestamp, relay count, or arrival order.
 
 The pinned `nostr-tools@2.23.3` `nip59.unwrapEvent` helper only decrypts. It does
