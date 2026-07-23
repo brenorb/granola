@@ -28,7 +28,10 @@ npm run dev
 ```
 
 Use `http://localhost:5173/?wallet=maker` and `?wallet=taker` for isolated test
-actors. The [agent API](docs/guides/agent-api.md) documents exact amounts,
-trust prompts, and the methods that can return bearer material.
+actors. Follow the
+[manual two-profile testnet tutorial](docs/guides/manual-testnet-swap.md) to
+reproduce the demonstrated swap. The
+[agent API](docs/guides/agent-api.md) documents exact amounts, trust prompts,
+and the methods that can return bearer material.
 
 Production builds use `npm run build` and write the static site to `dist/`.
