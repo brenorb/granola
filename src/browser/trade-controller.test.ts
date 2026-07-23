@@ -402,6 +402,26 @@ describe("BrowserTradeController", () => {
     expect(api.advanceTrade).toHaveBeenCalledWith(advanced.sessionId);
   });
 
+  it("automatically resumes a stalled taker settlement from its durable phase", async () => {
+    const stalled = {
+      ...view(),
+      phase: "base_locked" as const,
+      revision: 4
+    };
+    const { controller, api } = setup({ trades: [stalled] });
+    api.getTrade.mockResolvedValue(stalled);
+    api.advanceTrade.mockResolvedValue({
+      ...stalled,
+      phase: "filled",
+      revision: 5
+    });
+
+    await controller.resume();
+
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    expect(api.advanceTrade).toHaveBeenCalledWith(stalled.sessionId);
+  });
+
   it("silently reconnects a maker inbox after a transient relay close", async () => {
     const onMakerError = vi.fn();
     const { controller, subscriptions, stops } = setup({ onMakerError });
@@ -444,8 +464,11 @@ describe("BrowserTradeController", () => {
     expect(onMakerError).not.toHaveBeenCalled();
   });
 
-  it("starts the session inbox and advances only one coordinator action per call", async () => {
+  it("uses an incoming DM to resume the full settlement loop", async () => {
     const { controller, api, subscriptions } = setup();
+    api.advanceTrade
+      .mockResolvedValueOnce(view(1))
+      .mockResolvedValueOnce({ ...view(2), phase: "filled" });
     const input: TakeOrderInput = {
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
@@ -461,9 +484,28 @@ describe("BrowserTradeController", () => {
     });
 
     await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
-    expect(api.advanceTrade).toHaveBeenCalledTimes(1);
-    await controller.advanceTrade(sessionId);
-    expect(api.advanceTrade).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledTimes(2));
+  });
+
+  it("single-flights concurrent settlement runners for the same session", async () => {
+    let releaseAdvance!: () => void;
+    const advanceGate = new Promise<void>((resolve) => {
+      releaseAdvance = resolve;
+    });
+    const { controller, api } = setup();
+    api.advanceTrade.mockImplementationOnce(async () => {
+      await advanceGate;
+      return { ...view(1), phase: "filled" };
+    });
+
+    const first = controller.runUntilSettled(sessionId);
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    const second = controller.runUntilSettled(sessionId);
+
+    expect(second).toBe(first);
+    releaseAdvance();
+    await Promise.all([first, second]);
+    expect(api.advanceTrade).toHaveBeenCalledOnce();
   });
 
   it("runs one durable action at a time until filled and returns only redacted checkpoints", async () => {
@@ -519,6 +561,10 @@ describe("BrowserTradeController", () => {
 
   it("reopens a session inbox after its relay subscription closes", async () => {
     const { controller, api, subscriptions, stops } = setup();
+    api.advanceTrade.mockResolvedValueOnce({
+      ...view(1),
+      phase: "filled"
+    });
     await controller.takeOrder({
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
@@ -541,7 +587,7 @@ describe("BrowserTradeController", () => {
     });
 
     await subscriptions[1]!.onEvent(wrapper, "wss://inbox.example");
-    expect(api.advanceTrade).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
   });
 
   it("does not restart a stale duplicate maker session from relay backlog", async () => {

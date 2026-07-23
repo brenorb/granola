@@ -144,7 +144,8 @@ export class BrowserTradeController {
   private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
-  private readonly makerSettlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
+  private readonly settlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
+  private readonly backgroundSettlementRuns = new Set<string>();
   private readonly makerSettlementOrders = new Map<string, string>();
   private readonly subscriptionReconnects = new Map<string, Promise<void>>();
   private makerSubscriptionKeys = new Set<string>();
@@ -181,7 +182,11 @@ export class BrowserTradeController {
 
   async takeOrder(input: TakeOrderInput): Promise<PublicTradeView> {
     const trade = await this.api.takeOrder(input);
-    await this.ensureSessionSubscription(trade.sessionId);
+    try {
+      await this.ensureSessionSubscription(trade.sessionId);
+    } catch (error) {
+      this.onError(messageOf(error));
+    }
     this.onChange(trade);
     return trade;
   }
@@ -197,17 +202,42 @@ export class BrowserTradeController {
     const trades = await this.api.listTrades();
     const makerWinners = this.makerSettlementWinners(trades);
     await Promise.all(trades.map(async (trade) => {
-      await this.ensureSessionSubscription(trade.sessionId);
+      try {
+        await this.ensureSessionSubscription(trade.sessionId);
+      } catch (error) {
+        const reportError = trade.role === "maker"
+          ? this.onMakerError
+          : this.onError;
+        reportError(messageOf(error));
+      }
       if (makerWinners.has(trade.sessionId)) {
-        this.startMakerSettlementInBackground(trade);
+        this.startSettlementInBackground(trade);
+      } else if (trade.role === "taker" && this.isActive(trade)) {
+        this.startSettlementInBackground(trade);
       }
     }));
     return trades;
   }
 
-  async runUntilSettled(
+  runUntilSettled(
     sessionId: string,
     reportError: (message: string) => void = this.onError
+  ): Promise<RunUntilSettledResult> {
+    const existing = this.settlementRuns.get(sessionId);
+    if (existing !== undefined) return existing;
+    let run!: Promise<RunUntilSettledResult>;
+    run = this.driveUntilSettled(sessionId, reportError).finally(() => {
+      if (this.settlementRuns.get(sessionId) === run) {
+        this.settlementRuns.delete(sessionId);
+      }
+    });
+    this.settlementRuns.set(sessionId, run);
+    return run;
+  }
+
+  private async driveUntilSettled(
+    sessionId: string,
+    reportError: (message: string) => void
   ): Promise<RunUntilSettledResult> {
     let current = await this.api.getTrade(sessionId);
     if (current === undefined) throw new Error("Trade session does not exist");
@@ -254,6 +284,7 @@ export class BrowserTradeController {
         }
         current = observed;
         record(current);
+        this.startSessionSubscriptionInBackground(sessionId, reportError);
       }
     }
     return Object.freeze({
@@ -298,22 +329,35 @@ export class BrowserTradeController {
     return new Set([...winners.values()].map((trade) => trade.sessionId));
   }
 
-  private startMakerSettlementInBackground(trade: PublicTradeView): void {
+  private isActive(trade: PublicTradeView): boolean {
+    return (
+      trade.phase !== "filled" &&
+      trade.phase !== "frozen" &&
+      trade.phase !== "released"
+    );
+  }
+
+  private startSettlementInBackground(trade: PublicTradeView): void {
+    if (!this.isActive(trade)) return;
     if (
-      this.makerSettlementRuns.has(trade.sessionId) ||
-      this.makerSettlementOrders.has(trade.orderAddress)
+      this.backgroundSettlementRuns.has(trade.sessionId) ||
+      (trade.role === "maker" &&
+        this.makerSettlementOrders.has(trade.orderAddress))
     ) return;
-    const run = this.runUntilSettled(trade.sessionId, this.onMakerError);
-    this.makerSettlementRuns.set(trade.sessionId, run);
-    this.makerSettlementOrders.set(trade.orderAddress, trade.sessionId);
+    const reportError = trade.role === "maker"
+      ? this.onMakerError
+      : this.onError;
+    this.backgroundSettlementRuns.add(trade.sessionId);
+    if (trade.role === "maker") {
+      this.makerSettlementOrders.set(trade.orderAddress, trade.sessionId);
+    }
+    const run = this.runUntilSettled(trade.sessionId, reportError);
     void run
       .catch((error: unknown) => {
-        this.onMakerError(messageOf(error));
+        reportError(messageOf(error));
       })
       .finally(() => {
-        if (this.makerSettlementRuns.get(trade.sessionId) === run) {
-          this.makerSettlementRuns.delete(trade.sessionId);
-        }
+        this.backgroundSettlementRuns.delete(trade.sessionId);
         if (
           this.makerSettlementOrders.get(trade.orderAddress) === trade.sessionId
         ) {
@@ -332,7 +376,7 @@ export class BrowserTradeController {
     );
     if (winner === undefined) return;
     await this.ensureSessionSubscription(winner.sessionId);
-    this.startMakerSettlementInBackground(winner);
+    this.startSettlementInBackground(winner);
   }
 
   async enableMaker(): Promise<MakerInboxStatus> {
@@ -442,8 +486,13 @@ export class BrowserTradeController {
           now: this.now,
           onEvent: async () => {
             try {
-              const trade = await this.api.advanceTrade(sessionId);
-              this.onChange(trade);
+              const trade = await this.api.getTrade(sessionId);
+              if (trade === undefined || !this.isActive(trade)) return;
+              if (trade.role === "maker") {
+                await this.startWinningMakerSettlement(trade.orderAddress);
+              } else {
+                this.startSettlementInBackground(trade);
+              }
             } catch (error) {
               this.onError(messageOf(error));
             }

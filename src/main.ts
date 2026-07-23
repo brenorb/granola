@@ -393,6 +393,8 @@ if (!hasNativeWebLocks()) {
 
 let makerInboxStartPromise: Promise<void> | undefined;
 let makerInboxResyncQueued = false;
+let makerInboxRetryAttempt = 0;
+let makerInboxRetryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
 
 async function syncMakerInboxes(): Promise<void> {
   const publicKeys = await granola.getMakerPublicKeys();
@@ -414,6 +416,11 @@ function startMakerInbox(): Promise<void> {
   }
   makerInboxStartPromise = granola.enableMaker()
     .then(({ makerPubkey, inboxRelay }) => {
+      makerInboxRetryAttempt = 0;
+      if (makerInboxRetryTimer !== undefined) {
+        globalThis.clearTimeout(makerInboxRetryTimer);
+        makerInboxRetryTimer = undefined;
+      }
       if (!makerPubkey) {
         return;
       }
@@ -425,10 +432,22 @@ function startMakerInbox(): Promise<void> {
       report("Maker listener is authenticated and listening");
     })
     .catch((error: unknown) => {
-      trace("Nostr", "Maker listener failed", [
-        { label: "error", value: messageOf(error) }
+      const retryDelay = Math.min(
+        10_000,
+        500 * (2 ** Math.min(makerInboxRetryAttempt, 4))
+      );
+      makerInboxRetryAttempt += 1;
+      trace("Nostr", "Maker listener reconnecting", [
+        { label: "error", value: messageOf(error) },
+        { label: "retry", value: `${retryDelay} ms` }
       ]);
-      report(messageOf(error), true);
+      report("Maker listener unavailable; retrying automatically");
+      if (makerInboxRetryTimer === undefined) {
+        makerInboxRetryTimer = globalThis.setTimeout(() => {
+          makerInboxRetryTimer = undefined;
+          void syncMakerInboxes();
+        }, retryDelay);
+      }
     })
     .finally(() => {
       makerInboxStartPromise = undefined;
