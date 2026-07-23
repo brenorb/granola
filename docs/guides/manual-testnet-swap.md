@@ -22,36 +22,20 @@ If you already used these workspaces, choose a new lowercase suffix in both URLs
 such as `maker-tutorial-2` and `taker-tutorial-2`. Absolute balances depend on
 what each local wallet already holds, so a fresh pair is easier to verify.
 
-The fake mint quote remains visible after issuance and contains an invoice.
-Do not include that panel in screenshots or a public trace. Never publish a
-bearer backup, encoded Cashu token, proof, private key, preimage, or witness.
+The quick funding actions at the top issue 10,000 minor units: 10,000 SAT or
+100.00 USD. Never publish a bearer backup, encoded Cashu token, proof, private
+key, preimage, or witness.
 
-## 1. Give the maker 100 SAT
+## 1. Fund the maker with SAT
 
-On the maker wallet tab, find **Mint fake tokens** and set:
+On the maker wallet tab, press **Fund SAT**. Granola requests the fake invoice
+and polls the mint automatically. Wait for the success notice, then confirm
+**Balances & liabilities** shows 10,000 SAT. This can take up to one minute.
 
-| Control | Value |
-| --- | --- |
-| Test mint | `Testnut / fee test` |
-| Unit | `SAT` |
-| Minor units | `100` |
+## 2. Fund the taker with USD
 
-Press **Request & claim quote**. Granola requests the fake invoice and polls the
-mint automatically. Wait for `100 sat · ISSUED`, then confirm **Balances &
-liabilities** shows 100 SAT. This can take up to one minute.
-
-## 2. Give the taker USD 0.10
-
-On the taker wallet tab, set:
-
-| Control | Value |
-| --- | --- |
-| Test mint | `Testnut / no fee` |
-| Unit | `USD` |
-| Minor units | `10` |
-
-Press **Request & claim quote**. For Cashu USD, `10` minor units means USD 0.10.
-Wait for `0.10 USD · ISSUED` and confirm the wallet balance.
+On the taker wallet tab, press **Fund USD**. Wait for the success notice and
+confirm **Balances & liabilities** shows 100.00 USD.
 
 ## 3. Publish the 20 SAT ask
 
@@ -65,7 +49,7 @@ On the maker wallet tab, expand **Publish a test limit order** and enter:
 | Good for (days) | `30` |
 | Execution | `All or none` |
 
-The browser form publishes all-or-none orders. Press **Sign & publish order**.
+The browser form publishes all-or-none orders. Press **Send order**.
 
 Publication is deliberately durable and staged. If **Pending relay publication**
 appears:
@@ -86,12 +70,12 @@ Press **Refresh book** and find the row with all of these values:
 It will normally be at the top ask price, although other public test orders can
 tie it.
 
-## 4. Confirm the maker listener
+## 4. Let the maker listener start automatically
 
 After the order is published, the same page automatically registers and listens
-with the order's ephemeral Nostr key. Wait until the button reads
-**Sync maker listener · listening**. If startup fails, the button shows an
-error; press it to retry. No page reload or role switch is required.
+with the order's ephemeral Nostr key. The listener starts automatically; no
+manual sync action, page reload, or role switch is required. If startup fails,
+the page reports the error; reloading the same workspace starts it again.
 
 ## 5. Take the ask
 
@@ -175,8 +159,8 @@ For fresh workspaces funded exactly as above, expect approximately:
 
 | Wallet | Before | Expected after |
 | --- | --- | --- |
-| Maker | 100 SAT | 78 SAT + USD 0.01 |
-| Taker | USD 0.10 | 20 SAT + USD 0.09 |
+| Maker | 10,000 SAT | approximately 9,980 SAT + USD 0.01 |
+| Taker | USD 100.00 | 20 SAT + USD 99.99 |
 
 The SAT total can differ if the test mint changes its input fee or proof
 selection. Verify the value movement rather than assuming an absolute total:
@@ -199,8 +183,7 @@ discovery. These do not require a replacement trade.
 1. Do not create another order or session.
 2. Do not erase either wallet.
 3. Keep or reopen the same `?wallet=` workspace.
-4. If the maker tab reloaded, wait for the automatic maker listener startup or
-   press **Sync maker listener** to retry it.
+4. If the maker tab reloaded, wait for the automatic maker listener startup.
 5. Press **Check sessions** and resume the same cards.
 6. For the fast demo, run the same `runUntilSettled` command again only on the
    side whose promise rejected.
