@@ -82,7 +82,7 @@ class ProbePort implements InboxRelayPort {
 const silentOrderRelays: OrderRelayPort = {
   publish: vi.fn(async () => []),
   queryProjections: vi.fn(async () => []),
-  queryTransitions: vi.fn(async () => [])
+  queryOrder: vi.fn(async () => [])
 };
 
 describe("browser trade runtime", () => {

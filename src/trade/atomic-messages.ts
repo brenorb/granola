@@ -42,7 +42,8 @@ export interface ReserveAcceptBody extends VersionedBody {
   maker_session_pubkey: string;
   maker_cashu_pubkey: string;
   maker_refund_pubkey: string;
-  reserve_transition_id: string;
+  reserve_projection_id: string;
+  reserve_revision: string;
   settlement_hash: string;
   short_locktime: number;
   maker_claim_cutoff: number;
@@ -54,7 +55,8 @@ export interface ReserveAcceptBody extends VersionedBody {
 export interface SessionAckBody extends VersionedBody {
   reserve_accept_message_id: string;
   reserve_accept_transcript_hash: string;
-  reserve_transition_id: string;
+  reserve_projection_id: string;
+  reserve_revision: string;
   settlement_hash: string;
 }
 
@@ -96,7 +98,8 @@ export interface FillRequestBody extends VersionedBody {
 }
 
 export interface SettlementAckBody extends VersionedBody {
-  fill_transition_id: string;
+  fill_projection_id: string;
+  fill_revision: string;
   base_token_commitment: string;
   quote_token_commitment: string;
   settlement_hash: string;
@@ -231,6 +234,10 @@ function amount(value: unknown, label: string): string {
   return requiredString(value, label, POSITIVE_INTEGER);
 }
 
+function revision(value: unknown, label: string): string {
+  return requiredString(value, label, /^(0|[1-9][0-9]*)$/);
+}
+
 function timestamp(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative safe Unix timestamp`);
@@ -299,7 +306,8 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
     "maker_session_pubkey",
     "maker_cashu_pubkey",
     "maker_refund_pubkey",
-    "reserve_transition_id",
+    "reserve_projection_id",
+    "reserve_revision",
     "settlement_hash",
     "short_locktime",
     "maker_claim_cutoff",
@@ -311,7 +319,8 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
   hex32(body.maker_session_pubkey, "Maker session public key");
   cashuPubkey(body.maker_cashu_pubkey, "Maker Cashu public key");
   cashuPubkey(body.maker_refund_pubkey, "Maker refund Cashu public key");
-  hex32(body.reserve_transition_id, "Reserve transition ID");
+  hex32(body.reserve_projection_id, "Reserve projection ID");
+  revision(body.reserve_revision, "Reserve revision");
   hex32(body.settlement_hash, "Settlement hash");
   const short = timestamp(body.short_locktime, "Short locktime");
   const makerCutoff = timestamp(body.maker_claim_cutoff, "Maker claim cutoff");
@@ -339,12 +348,14 @@ function sessionAck(value: unknown): SessionAckBody {
   const body = exactBody(value, [
     "reserve_accept_message_id",
     "reserve_accept_transcript_hash",
-    "reserve_transition_id",
+    "reserve_projection_id",
+    "reserve_revision",
     "settlement_hash"
   ]);
   uuid(body.reserve_accept_message_id, "Reserve acceptance message ID");
   hex32(body.reserve_accept_transcript_hash, "Reserve acceptance transcript hash");
-  hex32(body.reserve_transition_id, "Reserve transition ID");
+  hex32(body.reserve_projection_id, "Reserve projection ID");
+  revision(body.reserve_revision, "Reserve revision");
   hex32(body.settlement_hash, "Settlement hash");
   return body as unknown as SessionAckBody;
 }
@@ -428,12 +439,14 @@ function fillRequest(value: unknown): FillRequestBody {
 
 function settlementAck(value: unknown): SettlementAckBody {
   const body = exactBody(value, [
-    "fill_transition_id",
+    "fill_projection_id",
+    "fill_revision",
     "base_token_commitment",
     "quote_token_commitment",
     "settlement_hash"
   ]);
-  hex32(body.fill_transition_id, "Fill transition ID");
+  hex32(body.fill_projection_id, "Fill projection ID");
+  revision(body.fill_revision, "Fill revision");
   hex32(body.base_token_commitment, "Base token commitment");
   hex32(body.quote_token_commitment, "Quote token commitment");
   hex32(body.settlement_hash, "Settlement hash");
@@ -562,12 +575,14 @@ export interface AtomicSwapChoreography {
   sessionId?: string;
   reservationId?: string;
   orderAddress?: string;
-  orderHead?: string;
+  orderProjectionId?: string;
+  orderRevision?: string;
   termsHash?: string;
   terms?: GranolaTradeTerms;
   lastMessageId?: string;
   settlementHash?: string;
-  reserveTransitionId?: string;
+  reserveProjectionId?: string;
+  reserveProjectionRevision?: string;
   shortLocktime?: number;
   longLocktime?: number;
   baseTokenCommitment?: string;
@@ -617,7 +632,11 @@ function expectedType(state: AtomicSwapChoreography, type: AtomicSwapMessageType
   if (required !== type) throw new Error(`Expected ${required ?? "no further message"}, received ${type}`);
 }
 
-function sameCommonSession(state: AtomicSwapChoreography, message: AtomicSwapMessage): void {
+function sameCommonSession(
+  state: AtomicSwapChoreography,
+  message: AtomicSwapMessage,
+  allowProjectionChange = false
+): void {
   if (
     message.maker_order_pubkey !== state.participants.makerOrderPubkey ||
     message.session_id !== state.sessionId ||
@@ -627,8 +646,13 @@ function sameCommonSession(state: AtomicSwapChoreography, message: AtomicSwapMes
   ) {
     throw new Error("Atomic swap message does not match the bound session");
   }
-  if (state.orderHead !== undefined && message.order_head !== state.orderHead) {
-    throw new Error("Atomic swap message does not match the reserved order head");
+  if (
+    !allowProjectionChange &&
+    state.orderProjectionId !== undefined &&
+    (message.order_projection_id !== state.orderProjectionId ||
+      message.order_revision !== state.orderRevision)
+  ) {
+    throw new Error("Atomic swap message does not match the current order projection");
   }
   if (message.previous_message_id !== state.lastMessageId) {
     throw new Error("Atomic swap message predecessor is not the last accepted message");
@@ -780,6 +804,8 @@ export async function advanceAtomicSwapChoreography(
       sessionId: message.session_id,
       reservationId: message.reservation_id,
       orderAddress: message.order_address,
+      orderProjectionId: message.order_projection_id,
+      orderRevision: message.order_revision,
       termsHash: message.terms_hash,
       terms: structuredClone(message.terms!),
       participants: {
@@ -791,7 +817,11 @@ export async function advanceAtomicSwapChoreography(
     });
   }
 
-  sameCommonSession(state, message);
+  sameCommonSession(
+    state,
+    message,
+    message.type === "reserve_accept" || message.type === "settlement_ack"
+  );
   const makerOrder = state.participants.makerOrderPubkey;
   const makerSession = state.participants.makerSessionPubkey;
   const takerSession = state.participants.takerSessionPubkey;
@@ -801,11 +831,12 @@ export async function advanceAtomicSwapChoreography(
     assertRole(message, makerOrder, takerSession);
     if (
       body.taker_session_pubkey !== takerSession ||
-      body.reserve_transition_id !== message.order_head ||
+      body.reserve_projection_id !== message.order_projection_id ||
+      body.reserve_revision !== message.order_revision ||
       body.maker_session_pubkey === makerOrder ||
       body.maker_session_pubkey === takerSession
     ) {
-      throw new Error("Reservation acceptance key handoff or transition is invalid");
+      throw new Error("Reservation acceptance key handoff or projection is invalid");
     }
     if (
       body.maker_cashu_pubkey === state.participants.takerCashuPubkey ||
@@ -823,9 +854,11 @@ export async function advanceAtomicSwapChoreography(
     }
     return nextState(state, message, {
       phase: "awaiting_session_ack",
-      orderHead: body.reserve_transition_id,
+      orderProjectionId: body.reserve_projection_id,
+      orderRevision: body.reserve_revision,
       settlementHash: body.settlement_hash,
-      reserveTransitionId: body.reserve_transition_id,
+      reserveProjectionId: body.reserve_projection_id,
+      reserveProjectionRevision: body.reserve_revision,
       shortLocktime: body.short_locktime,
       longLocktime: body.long_locktime,
       participants: {
@@ -847,7 +880,8 @@ export async function advanceAtomicSwapChoreography(
       throw new Error("Session acknowledgement does not bind the acceptance message");
     }
     if (
-      body.reserve_transition_id !== state.reserveTransitionId ||
+      body.reserve_projection_id !== state.reserveProjectionId ||
+      body.reserve_revision !== state.reserveProjectionRevision ||
       body.settlement_hash !== state.settlementHash
     ) {
       throw new Error("Session acknowledgement changed the accepted reservation");
@@ -956,11 +990,19 @@ export async function advanceAtomicSwapChoreography(
   const body = message.body as SettlementAckBody;
   assertRole(message, makerSession, takerSession);
   if (
+    body.fill_projection_id !== message.order_projection_id ||
+    body.fill_revision !== message.order_revision ||
+    state.reserveProjectionRevision === undefined ||
+    BigInt(body.fill_revision) !== BigInt(state.reserveProjectionRevision) + 1n ||
     body.base_token_commitment !== state.baseTokenCommitment ||
     body.quote_token_commitment !== state.quoteTokenCommitment
   ) {
     throw new Error("Settlement acknowledgement token commitment changed");
   }
   assertSettlement(state, body.settlement_hash);
-  return nextState(state, message, { phase: "settled" });
+  return nextState(state, message, {
+    phase: "settled",
+    orderProjectionId: body.fill_projection_id,
+    orderRevision: body.fill_revision
+  });
 }

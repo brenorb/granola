@@ -37,6 +37,7 @@ interface GranolaBrowserFacade {
   publishOrder: OrderApi["publishOrder"];
   getPendingOrderPublications: OrderApi["getPendingOrderPublications"];
   retryOrderPublication: OrderApi["retryOrderPublication"];
+  cancelOrder: OrderApi["cancelOrder"];
   listTrades: TradeApi["listTrades"];
   getTrade: TradeApi["getTrade"];
   takeOrder: TradeApi["takeOrder"];
@@ -121,11 +122,18 @@ async function refresh(state?: GranolaState): Promise<GranolaState> {
 async function refreshOrderBook(): Promise<void> {
   renderOrderBook(orderbook, { status: "loading" });
   try {
-    const result = await orderApi.getOrderBook();
+    const [result, identity] = await Promise.all([
+      orderApi.getOrderBook(),
+      orderApi.getMakerIdentity()
+    ]);
     renderOrderBook(
       orderbook,
       { status: "ready", book: result.book },
-      { onTake: takeOrderFromBook }
+      {
+        onTake: takeOrderFromBook,
+        onCancel: cancelOrderFromBook,
+        canCancel: (order) => order.makerPubkey === identity.publicKey
+      }
     );
     if (result.rejected > 0) {
       log(`Ignored ${result.rejected} invalid or conflicting public order event(s)`);
@@ -181,13 +189,14 @@ function takeOrderFromBook(
   order: OrderRecord,
   fillBaseAmount: string
 ): void {
-  const retryKey = `${order.address}:${order.headEventId}:${fillBaseAmount}`;
+  const retryKey = `${order.address}:${order.eventId}:${fillBaseAmount}`;
   const requestId = takeRequestIds.get(retryKey) ?? crypto.randomUUID();
   takeRequestIds.set(retryKey, requestId);
   void granola.takeOrder({
     requestId,
     address: order.address,
-    expectedHeadId: order.headEventId,
+    expectedProjectionId: order.eventId,
+    expectedRevision: order.state.revision,
     fillBaseAmount
   }).then(async (trade) => {
     takeRequestIds.delete(retryKey);
@@ -201,13 +210,25 @@ function retryPendingPublication(orderId: string): void {
   void granola.retryOrderPublication(orderId)
     .then(async (publication) => {
       await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
-      log(`Republished exact order events ${publication.orderId.slice(0, 8)}…`);
-      report("Pending signed events reached relay quorum");
+      log(`Republished exact order projection ${publication.orderId.slice(0, 8)}…`);
+      report("Pending signed projection received a relay acknowledgement");
     })
     .catch(async (error: unknown) => {
       await refreshPendingPublications();
       report(messageOf(error), true);
     });
+}
+
+function cancelOrderFromBook(order: OrderRecord): void {
+  void granola.cancelOrder({
+    address: order.address,
+    expectedProjectionId: order.eventId,
+    expectedRevision: order.state.revision
+  }).then(async () => {
+    await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
+    log(`Canceled order ${order.state.order_id.slice(0, 8)}…`);
+    report("Canceled order projection received a relay acknowledgement");
+  }).catch((error: unknown) => report(messageOf(error), true));
 }
 
 async function refreshPendingPublications(): Promise<void> {
@@ -232,6 +253,7 @@ const granola: GranolaBrowserFacade = {
   publishOrder: publishOrderWithFunding,
   getPendingOrderPublications: orderApi.getPendingOrderPublications.bind(orderApi),
   retryOrderPublication: orderApi.retryOrderPublication.bind(orderApi),
+  cancelOrder: orderApi.cancelOrder.bind(orderApi),
   listTrades: async () => (await tradeController()).listTrades(),
   getTrade: async (sessionId) => (await tradeController()).getTrade(sessionId),
   takeOrder: async (input: TakeOrderInput) => (await tradeController()).takeOrder(input),
@@ -396,7 +418,7 @@ orderForm.addEventListener("submit", (event) => {
         : {})
     };
     const publication = await granola.publishOrder(input);
-    const acknowledgements = publication.projectionReceipts.filter((receipt) => receipt.ok).length;
+    const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;
     log(`Published ${side} order ${publication.orderId.slice(0, 8)}… to ${acknowledgements} relay(s)`);
     await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
     report(`Order published with ${acknowledgements} relay acknowledgements`);

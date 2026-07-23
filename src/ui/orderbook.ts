@@ -11,6 +11,8 @@ export type OrderBookRenderState =
 
 export interface OrderBookRenderOptions {
   onTake?: (order: OrderRecord, fillBaseAmount: string) => void;
+  onCancel?: (order: OrderRecord) => void;
+  canCancel?: (order: OrderRecord) => boolean;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -85,53 +87,67 @@ function orderRow(
   expiry.append(time);
   row.append(expiry);
   const action = element("td");
-  const amount = element("input");
-  amount.type = "text";
-  amount.inputMode = "numeric";
-  amount.pattern = "[0-9]+";
-  amount.value = order.state.remaining_amount;
-  amount.dataset.takeAmount = "true";
-  amount.setAttribute(
-    "aria-label",
-    `Base amount to take in ${market.baseUnit.toUpperCase()}`
-  );
-  const take = element("button", `Take ${order.state.side === "sell" ? "ask" : "bid"}`);
-  take.type = "button";
-  take.className = "quiet";
-  take.dataset.takeOrder = "true";
-  take.disabled = !order.verified || options.onTake === undefined;
-  if (options.onTake) take.addEventListener("click", () => {
-    amount.setCustomValidity("");
-    if (!/^[1-9]\d*$/.test(amount.value)) {
-      amount.setCustomValidity("Enter a positive whole-number amount.");
-    } else {
-      const fill = BigInt(amount.value);
-      const remaining = BigInt(order.state.remaining_amount);
-      const minimum = BigInt(order.state.minimum_fill_amount);
-      if (fill > remaining) {
-        amount.setCustomValidity("The fill cannot exceed the remaining amount.");
-      } else if (
-        order.state.execution === "all_or_none" &&
-        fill !== remaining
-      ) {
-        amount.setCustomValidity("This all-or-none order requires the full remaining amount.");
-      } else if (
-        order.state.execution === "partial" &&
-        fill < minimum
-      ) {
-        amount.setCustomValidity(`The minimum partial fill is ${minimum.toString()}.`);
-      } else if (
-        order.state.execution === "partial" &&
-        remaining - fill > 0n &&
-        remaining - fill < minimum
-      ) {
-        amount.setCustomValidity("This fill would leave less than the order minimum.");
+  if (order.state.side === "sell") {
+    const amount = element("input");
+    amount.type = "text";
+    amount.inputMode = "numeric";
+    amount.pattern = "[0-9]+";
+    amount.value = order.state.remaining_amount;
+    amount.dataset.takeAmount = "true";
+    amount.setAttribute(
+      "aria-label",
+      `Base amount to take in ${market.baseUnit.toUpperCase()}`
+    );
+    const take = element("button", "Take ask");
+    take.type = "button";
+    take.className = "quiet";
+    take.dataset.takeOrder = "true";
+    take.disabled = !order.verified || options.onTake === undefined;
+    if (options.onTake) take.addEventListener("click", () => {
+      amount.setCustomValidity("");
+      if (!/^[1-9]\d*$/.test(amount.value)) {
+        amount.setCustomValidity("Enter a positive whole-number amount.");
+      } else {
+        const fill = BigInt(amount.value);
+        const remaining = BigInt(order.state.remaining_amount);
+        const minimum = BigInt(order.state.minimum_fill_amount);
+        if (fill > remaining) {
+          amount.setCustomValidity("The fill cannot exceed the remaining amount.");
+        } else if (
+          order.state.execution === "all_or_none" &&
+          fill !== remaining
+        ) {
+          amount.setCustomValidity("This all-or-none order requires the full remaining amount.");
+        } else if (
+          order.state.execution === "partial" &&
+          fill < minimum
+        ) {
+          amount.setCustomValidity(`The minimum partial fill is ${minimum.toString()}.`);
+        } else if (
+          order.state.execution === "partial" &&
+          remaining - fill > 0n &&
+          remaining - fill < minimum
+        ) {
+          amount.setCustomValidity("This fill would leave less than the order minimum.");
+        }
       }
-    }
-    if (!amount.reportValidity()) return;
-    options.onTake?.(order, amount.value);
-  });
-  action.append(amount, take);
+      if (!amount.reportValidity()) return;
+      options.onTake?.(order, amount.value);
+    });
+    action.append(amount, take);
+  } else {
+    const unavailable = element("span", "Buy-side taking is not supported");
+    unavailable.dataset.takeUnavailable = "true";
+    action.append(unavailable);
+  }
+  if (options.canCancel?.(order) && options.onCancel) {
+    const cancel = element("button", "Cancel order");
+    cancel.type = "button";
+    cancel.className = "quiet";
+    cancel.dataset.cancelOrder = "true";
+    cancel.addEventListener("click", () => options.onCancel?.(order));
+    action.append(cancel);
+  }
   row.append(action);
   return row;
 }

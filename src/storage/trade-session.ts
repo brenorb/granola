@@ -20,7 +20,7 @@ const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ORDER_ADDRESS = new RegExp(
-  `^30078:[0-9a-f]{64}:granola:order:v2:${UUID_V4.source.slice(1, -1)}$`
+  `^30078:[0-9a-f]{64}:granola:order:v1:${UUID_V4.source.slice(1, -1)}$`
 );
 const CANONICAL_INTEGER = /^(0|[1-9]\d*)$/;
 const POSITIVE_INTEGER = /^[1-9]\d*$/;
@@ -237,12 +237,14 @@ function validateChoreography(value: unknown): void {
       "sessionId",
       "reservationId",
       "orderAddress",
-      "orderHead",
+      "orderProjectionId",
+      "orderRevision",
       "termsHash",
       "terms",
       "lastMessageId",
       "settlementHash",
-      "reserveTransitionId",
+      "reserveProjectionId",
+      "reserveProjectionRevision",
       "shortLocktime",
       "longLocktime",
       "baseTokenCommitment",
@@ -378,7 +380,7 @@ function validateTranscript(value: unknown): asserts value is TradeTranscriptJou
 function validateMessage(value: unknown): void {
   const message = object(value, "Trade outbox message");
   if (
-    message.schema !== "granola/dm/v2" ||
+    message.schema !== "granola/dm/v1" ||
     message.deployment !== "cashu-testnet-v1" ||
     typeof message.message_id !== "string" ||
     !UUID_V4.test(message.message_id) ||
@@ -888,25 +890,20 @@ function validatePendingOrderPublication(
   value: unknown,
   context: {
     orderAddress: string;
-    offeredOrderHead: string;
     makerPubkey: string;
-    reserveTransitionId: string | null;
-    fillTransitionId: string | null;
-  },
-  quorum: number
+    reserveProjectionId: string | null;
+    fillProjectionId: string | null;
+  }
 ): void {
   const pending = object(value, "Pending order publication");
   exactKeys(pending, [
     "operation",
     "orderId",
-    "transition",
     "projection",
-    "transitionReceipts",
-    "projectionReceipts",
+    "receipts",
     "status",
     "stagedAt",
-    "transitionAcknowledgedAt",
-    "projectionAcknowledgedAt",
+    "acknowledgedAt",
     "committedAt"
   ], "Pending order publication");
   if (
@@ -914,9 +911,7 @@ function validatePendingOrderPublication(
     typeof pending.orderId !== "string" ||
     !UUID_V4.test(pending.orderId)
   ) throw new Error("Pending order publication is invalid");
-  validateEvent(pending.transition, 78, "Pending order transition");
   validateEvent(pending.projection, 30078, "Pending order projection");
-  const transition = pending.transition as Record<string, unknown>;
   const projection = pending.projection as Record<string, unknown>;
   const addressParts = context.orderAddress.split(":");
   const addressOrderId = addressParts[5];
@@ -926,85 +921,55 @@ function validatePendingOrderPublication(
     addressParts[1] !== context.makerPubkey ||
     addressParts[2] !== "granola" ||
     addressParts[3] !== "order" ||
-    addressParts[4] !== "v2" ||
+    addressParts[4] !== "v1" ||
     typeof addressOrderId !== "string" ||
     !UUID_V4.test(addressOrderId) ||
     pending.orderId !== addressOrderId ||
-    transition.pubkey !== context.makerPubkey ||
-    transition.pubkey !== projection.pubkey ||
-    eventTag(transition, "op") !== pending.operation ||
-    eventTag(projection, "e") !== transition.id ||
-    eventTag(transition, "d") !==
-      `granola:order-transition:v2:${String(pending.orderId)}` ||
+    projection.pubkey !== context.makerPubkey ||
     eventTag(projection, "d") !==
-      `granola:order:v2:${String(pending.orderId)}`
+      `granola:order:v1:${String(pending.orderId)}`
   ) throw new Error("Pending order publication artifacts disagree");
   if (
     (pending.operation === "reserve" && (
-      context.reserveTransitionId !== transition.id ||
-      context.fillTransitionId !== null
+      context.reserveProjectionId !== projection.id ||
+      context.fillProjectionId !== null
     )) ||
-    (pending.operation === "fill" && context.fillTransitionId !== transition.id) ||
-    (pending.operation === "release" && context.fillTransitionId !== null)
+    (pending.operation === "fill" && context.fillProjectionId !== projection.id) ||
+    (pending.operation === "release" && context.fillProjectionId !== null)
   ) throw new Error("Pending order publication ID does not match session lineage");
-  const relays = [...new Set([
-    ...((pending.transitionReceipts as Array<{ relay?: unknown }> | undefined) ?? [])
-      .map(({ relay }) => relay)
-      .filter((relay): relay is string => typeof relay === "string"),
-    ...((pending.projectionReceipts as Array<{ relay?: unknown }> | undefined) ?? [])
+  const relays = [...new Set(
+    ((pending.receipts as Array<{ relay?: unknown }> | undefined) ?? [])
       .map(({ relay }) => relay)
       .filter((relay): relay is string => typeof relay === "string")
-  ])];
+  )];
   validateRelayList(relays, "Pending order publication relays", true);
-  const transitionReceipts = validateReceipts(
-    pending.transitionReceipts,
-    relays,
-    "Pending order transition receipts"
-  );
-  const projectionReceipts = validateReceipts(
-    pending.projectionReceipts,
+  const receipts = validateReceipts(
+    pending.receipts,
     relays,
     "Pending order projection receipts"
   );
   safeTime(pending.stagedAt, "Pending order staged time");
-  for (const timestamp of [
-    "transitionAcknowledgedAt",
-    "projectionAcknowledgedAt",
-    "committedAt"
-  ] as const) {
+  for (const timestamp of ["acknowledgedAt", "committedAt"] as const) {
     if (pending[timestamp] !== null) {
       safeTime(pending[timestamp], `Pending order ${timestamp}`);
     }
   }
-  const transitionOk = transitionReceipts.filter(({ ok }) => ok).length >= quorum;
-  const projectionOk = projectionReceipts.filter(({ ok }) => ok).length >= quorum;
+  const projectionOk = receipts.some(({ ok }) => ok);
   const status = pending.status;
   const valid = status === "staged"
-    ? !transitionOk &&
-      projectionReceipts.length === 0 &&
-      pending.transitionAcknowledgedAt === null &&
-      pending.projectionAcknowledgedAt === null &&
+    ? !projectionOk &&
+      pending.acknowledgedAt === null &&
       pending.committedAt === null
-    : status === "transition_acknowledged"
-      ? transitionOk &&
-        pending.transitionAcknowledgedAt !== null &&
-        pending.projectionAcknowledgedAt === null &&
+    : status === "acknowledged"
+      ? projectionOk && pending.acknowledgedAt !== null &&
         pending.committedAt === null
-      : status === "projection_acknowledged"
-        ? transitionOk && projectionOk &&
-          pending.transitionAcknowledgedAt !== null &&
-          pending.projectionAcknowledgedAt !== null &&
-          pending.committedAt === null
-        : status === "committed" &&
-          transitionOk && projectionOk &&
-          pending.transitionAcknowledgedAt !== null &&
-          pending.projectionAcknowledgedAt !== null &&
-          pending.committedAt !== null;
+      : status === "committed" &&
+        projectionOk && pending.acknowledgedAt !== null &&
+        pending.committedAt !== null;
   if (!valid) throw new Error("Pending order publication status is inconsistent");
   const ordered = [
     pending.stagedAt,
-    pending.transitionAcknowledgedAt,
-    pending.projectionAcknowledgedAt,
+    pending.acknowledgedAt,
     pending.committedAt
   ].filter((time): time is number => typeof time === "number");
   if (ordered.some((time, index) => index > 0 && time < ordered[index - 1]!)) {
@@ -1093,11 +1058,25 @@ function assertSession(value: unknown): asserts value is TradeSession {
     typeof session.phase !== "string" ||
     !TRADE_PHASES.has(session.phase) ||
     typeof session.orderAddress !== "string" ||
-    typeof session.offeredOrderHead !== "string" ||
-    !HEX_32.test(session.offeredOrderHead)
+    typeof session.offeredProjectionId !== "string" ||
+    !HEX_32.test(session.offeredProjectionId) ||
+    typeof session.offeredProjectionRevision !== "string" ||
+    !/^(0|[1-9]\d*)$/.test(session.offeredProjectionRevision)
   ) throw new Error("Trade session metadata is invalid");
-  optionalHex(session.reserveTransitionId, "Reserve transition ID");
-  optionalHex(session.fillTransitionId, "Fill transition ID");
+  optionalHex(session.reserveProjectionId, "Reserve projection ID");
+  optionalHex(session.fillProjectionId, "Fill projection ID");
+  if (
+    !(
+      session.reserveProjectionRevision === null ||
+      (typeof session.reserveProjectionRevision === "string" &&
+        /^(0|[1-9]\d*)$/.test(session.reserveProjectionRevision))
+    ) ||
+    !(
+      session.fillProjectionRevision === null ||
+      (typeof session.fillProjectionRevision === "string" &&
+        /^(0|[1-9]\d*)$/.test(session.fillProjectionRevision))
+    )
+  ) throw new Error("Trade projection revision is invalid");
   const createdAt = safeTime(session.createdAt, "Trade creation time");
   const updatedAt = safeTime(session.updatedAt, "Trade update time");
   if (updatedAt < createdAt) throw new Error("Trade update time is invalid");
@@ -1139,8 +1118,10 @@ function assertSession(value: unknown): asserts value is TradeSession {
     "makerPubkey",
     "commitments",
     "mintStates",
-    "reserveTransitionId",
-    "fillTransitionId",
+    "reserveProjectionId",
+    "reserveProjectionRevision",
+    "fillProjectionId",
+    "fillProjectionRevision",
     "reservation",
     "legs"
   ], "Trade evidence");
@@ -1152,8 +1133,11 @@ function assertSession(value: unknown): asserts value is TradeSession {
     !Array.isArray(evidence.mintStates) ||
     evidence.mintStates.some((item) => typeof item !== "string")
   ) throw new Error("Trade evidence is invalid");
-  optionalHex(evidence.reserveTransitionId, "Reserve transition evidence");
-  optionalHex(evidence.fillTransitionId, "Fill transition evidence");
+  optionalHex(evidence.reserveProjectionId, "Reserve projection evidence");
+  optionalHex(evidence.fillProjectionId, "Fill projection evidence");
+  if (evidence.reserveProjectionRevision !== session.reserveProjectionRevision) {
+    throw new Error("Reserve projection revision evidence disagrees with the session");
+  }
   if (new Set(evidence.commitments as string[]).size !== (evidence.commitments as string[]).length) {
     throw new Error("Trade evidence commitments are duplicated");
   }
@@ -1176,11 +1160,11 @@ function assertSession(value: unknown): asserts value is TradeSession {
     ))
   ) throw new Error("Trade reservation evidence is incomplete");
   if (
-    (session.reserveTransitionId === null) !==
+    (session.reserveProjectionId === null) !==
       (reservation.takerCommitment === null)
-  ) throw new Error("Reserve transition and taker commitment evidence disagree");
-  if (evidence.reserveTransitionId !== session.reserveTransitionId) {
-    throw new Error("Reserve transition evidence disagrees with the session");
+  ) throw new Error("Reserve projection and taker commitment evidence disagree");
+  if (evidence.reserveProjectionId !== session.reserveProjectionId) {
+    throw new Error("Reserve projection evidence disagrees with the session");
   }
   const fillPrivateState = object(session.privateState, "Trade private state");
   const fillTranscript = object(
@@ -1194,14 +1178,21 @@ function assertSession(value: unknown): asserts value is TradeSession {
   const awaitingTakerFillVerification =
     session.role === "taker" &&
     session.phase === "filled" &&
-    session.fillTransitionId !== null &&
-    evidence.fillTransitionId === null &&
+    session.fillProjectionId !== null &&
+    evidence.fillProjectionId === null &&
     fillChoreography.phase === "settled";
   if (
-    evidence.fillTransitionId !== session.fillTransitionId &&
+    (evidence.fillProjectionId !== session.fillProjectionId ||
+      evidence.fillProjectionRevision !== session.fillProjectionRevision) &&
     !awaitingTakerFillVerification
   ) {
-    throw new Error("Fill transition evidence disagrees with the session");
+    throw new Error("Fill projection ID or revision evidence disagrees with the session");
+  }
+  if (
+    awaitingTakerFillVerification &&
+    evidence.fillProjectionRevision !== null
+  ) {
+    throw new Error("Unverified fill projection has revision evidence");
   }
   const evidenceLegs = object(evidence.legs, "Trade evidence legs");
   validateLegEvidence(evidenceLegs.base);
@@ -1214,18 +1205,16 @@ function assertSession(value: unknown): asserts value is TradeSession {
   if (session.pendingOrderPublication !== null) {
     validatePendingOrderPublication(session.pendingOrderPublication, {
       orderAddress: session.orderAddress as string,
-      offeredOrderHead: session.offeredOrderHead as string,
       makerPubkey: evidence.makerPubkey as string,
-      reserveTransitionId: session.reserveTransitionId as string | null,
-      fillTransitionId: session.fillTransitionId as string | null
-    }, 2);
+      reserveProjectionId: session.reserveProjectionId as string | null,
+      fillProjectionId: session.fillProjectionId as string | null
+    });
     const pendingPublication = session.pendingOrderPublication as NonNullable<
       TradeSession["pendingOrderPublication"]
     >;
     const pendingTimes = [
       pendingPublication.stagedAt,
-      pendingPublication.transitionAcknowledgedAt,
-      pendingPublication.projectionAcknowledgedAt,
+      pendingPublication.acknowledgedAt,
       pendingPublication.committedAt
     ].filter((time): time is number => time !== null);
     if (pendingTimes.some((time) => time > updatedAt)) {
@@ -1322,19 +1311,39 @@ function assertSession(value: unknown): asserts value is TradeSession {
     const pendingBody = pending.message.body as Record<string, unknown>;
     const reserveAcceptanceHandoff =
       session.role === "taker" &&
-      session.reserveTransitionId === null &&
+      session.reserveProjectionId === null &&
       transcript.choreography.phase === "awaiting_reserve_accept" &&
       pending.message.type === "reserve_accept" &&
-      typeof pendingBody.reserve_transition_id === "string" &&
-      HEX_32.test(pendingBody.reserve_transition_id) &&
-      pending.message.order_head === pendingBody.reserve_transition_id;
+      typeof pendingBody.reserve_projection_id === "string" &&
+      HEX_32.test(pendingBody.reserve_projection_id) &&
+      pending.message.order_projection_id === pendingBody.reserve_projection_id &&
+      pending.message.order_revision === pendingBody.reserve_revision;
+    const settlementHandoff =
+      session.role === "taker" &&
+      transcript.choreography.phase === "awaiting_settlement_ack" &&
+      pending.message.type === "settlement_ack" &&
+      typeof pendingBody.fill_projection_id === "string" &&
+      HEX_32.test(pendingBody.fill_projection_id) &&
+      pending.message.order_projection_id === pendingBody.fill_projection_id &&
+      pending.message.order_revision === pendingBody.fill_revision;
     if (
       pending.message.sequence !== transcript.nextSequence ||
       pending.message.maker_order_pubkey !== evidence.makerPubkey ||
       (
-        pending.message.order_head !==
-          (session.reserveTransitionId ?? session.offeredOrderHead) &&
-        !reserveAcceptanceHandoff
+        pending.message.order_projection_id !==
+          (session.fillProjectionId ??
+            session.reserveProjectionId ??
+            session.offeredProjectionId) &&
+        !reserveAcceptanceHandoff &&
+        !settlementHandoff
+      ) ||
+      (
+        pending.message.order_revision !==
+          (session.fillProjectionRevision ??
+            session.reserveProjectionRevision ??
+            session.offeredProjectionRevision) &&
+        !reserveAcceptanceHandoff &&
+        !settlementHandoff
       ) ||
       pending.message.previous_message_id !== transcript.lastMessageId ||
       pending.message.previous_transcript_hash !== transcript.lastTranscriptHash ||
@@ -1376,8 +1385,9 @@ function assertSession(value: unknown): asserts value is TradeSession {
         transcript.choreography.participants.takerSessionPubkey ||
       messageBody.maker_session_pubkey !== localNostrPubkey ||
       messageBody.taker_session_pubkey !== outbox.message.recipient_pubkey ||
-      messageBody.reserve_transition_id !== session.reserveTransitionId ||
-      session.reserveTransitionId === null
+      messageBody.reserve_projection_id !== session.reserveProjectionId ||
+      messageBody.reserve_revision !== session.reserveProjectionRevision ||
+      session.reserveProjectionId === null
     )) {
       throw new Error("Maker reserve acceptance does not bind the exact session handoff");
     }
@@ -1390,8 +1400,14 @@ function assertSession(value: unknown): asserts value is TradeSession {
       outbox.message.session_id !== session.sessionId ||
       outbox.message.reservation_id !== session.reservationId ||
       outbox.message.order_address !== session.orderAddress ||
-      outbox.message.order_head !==
-        (session.reserveTransitionId ?? session.offeredOrderHead) ||
+      outbox.message.order_projection_id !==
+        (session.fillProjectionId ??
+          session.reserveProjectionId ??
+          session.offeredProjectionId) ||
+      outbox.message.order_revision !==
+        (session.fillProjectionRevision ??
+          session.reserveProjectionRevision ??
+          session.offeredProjectionRevision) ||
       outbox.message.maker_order_pubkey !== evidence.makerPubkey ||
       outbox.message.sequence !== transcript.nextSequence ||
       outbox.message.previous_message_id !== transcript.lastMessageId ||
@@ -1467,7 +1483,8 @@ function assertSessions(value: unknown): asserts value is TradeSession[] {
 export interface TakerStartIntent {
   requestId: string;
   address: string;
-  expectedHeadId: string;
+  expectedProjectionId: string;
+  expectedRevision: string;
   fillBaseAmount: string;
 }
 
@@ -1490,7 +1507,8 @@ function assertTakerStartIntent(
   exactKeys(intent, [
     "requestId",
     "address",
-    "expectedHeadId",
+    "expectedProjectionId",
+    "expectedRevision",
     "fillBaseAmount",
     ...(withSessionId ? ["sessionId"] : [])
   ], label);
@@ -1499,8 +1517,10 @@ function assertTakerStartIntent(
     !UUID_V4.test(intent.requestId) ||
     typeof intent.address !== "string" ||
     !ORDER_ADDRESS.test(intent.address) ||
-    typeof intent.expectedHeadId !== "string" ||
-    !HEX_32.test(intent.expectedHeadId) ||
+    typeof intent.expectedProjectionId !== "string" ||
+    !HEX_32.test(intent.expectedProjectionId) ||
+    typeof intent.expectedRevision !== "string" ||
+    !/^(0|[1-9]\d*)$/.test(intent.expectedRevision) ||
     typeof intent.fillBaseAmount !== "string" ||
     !POSITIVE_INTEGER.test(intent.fillBaseAmount) ||
     (withSessionId && (
@@ -1516,7 +1536,8 @@ function sameTakerStartIntent(
 ): boolean {
   return left.requestId === right.requestId &&
     left.address === right.address &&
-    left.expectedHeadId === right.expectedHeadId &&
+    left.expectedProjectionId === right.expectedProjectionId &&
+    left.expectedRevision === right.expectedRevision &&
     left.fillBaseAmount === right.fillBaseAmount;
 }
 
@@ -1545,7 +1566,8 @@ function assertTradeSessionStore(value: unknown): asserts value is TradeSessionS
       session === undefined ||
       session.role !== "taker" ||
       session.orderAddress !== binding.address ||
-      session.offeredOrderHead !== binding.expectedHeadId ||
+      session.offeredProjectionId !== binding.expectedProjectionId ||
+      session.offeredProjectionRevision !== binding.expectedRevision ||
       session.terms.baseAmount !== binding.fillBaseAmount
     ) {
       throw new Error("Taker start binding is conflicting or orphaned");
@@ -1586,9 +1608,8 @@ const ORDER_STATUS_RANK: Record<
   number
 > = {
   staged: 0,
-  transition_acknowledged: 1,
-  projection_acknowledged: 2,
-  committed: 3
+  acknowledged: 1,
+  committed: 2
 };
 
 const HAPPY_PATH_PHASES = new Set([
@@ -1619,7 +1640,8 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
     "reservationId",
     "role",
     "orderAddress",
-    "offeredOrderHead",
+    "offeredProjectionId",
+    "offeredProjectionRevision",
     "createdAt"
   ] as const) {
     if (next[field] !== current[field]) {
@@ -1696,7 +1718,7 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
   const currentOrder = current.pendingOrderPublication;
   const nextOrder = next.pendingOrderPublication;
   if (currentOrder && nextOrder &&
-    currentOrder.transition.id === nextOrder.transition.id) {
+    currentOrder.projection.id === nextOrder.projection.id) {
     const advance = ORDER_STATUS_RANK[nextOrder.status] -
       ORDER_STATUS_RANK[currentOrder.status];
     if (
@@ -1864,7 +1886,7 @@ export class TradeSessionRepository {
       }
       if (
         session.orderAddress !== intent.address ||
-        session.offeredOrderHead !== intent.expectedHeadId ||
+        session.offeredProjectionId !== intent.expectedProjectionId ||
         session.terms.baseAmount !== intent.fillBaseAmount
       ) {
         throw new Error("Taker start session does not match its exact intent");

@@ -65,7 +65,7 @@ authority.
 The taker generates a fresh Nostr session key for each reservation attempt. Once
 it accepts a reservation, the maker also generates a fresh settlement key. The
 order-key-signed `reserve_accept` binds both session public keys, the reservation,
-the exact public reserve transition, terms, and transcript.
+the exact public reserve projection, terms, and transcript.
 
 All later bearer-material messages use the two session keys. Session private
 keys are stored locally through the terminal settlement or refund horizon and
@@ -94,14 +94,15 @@ machine and must not weaken these common fields:
 
 ```json
 {
-  "schema": "granola/dm/v2",
+  "schema": "granola/dm/v1",
   "deployment": "cashu-testnet-v1",
   "type": "reserve_propose",
   "message_id": "11111111-1111-4111-8111-111111111111",
   "session_id": "5555555555555555555555555555555555555555555555555555555555555555",
   "reservation_id": "22222222-2222-4222-8222-222222222222",
-  "order_address": "30078:<maker>:granola:order:v2:<order-id>",
-  "order_head": "<exact-transition-id>",
+  "order_address": "30078:<maker>:granola:order:v1:<order-id>",
+  "order_projection_id": "<exact-projection-id>",
+  "order_revision": "0",
   "maker_order_pubkey": "<32-byte-lowercase-hex>",
   "author_pubkey": "<32-byte-lowercase-hex>",
   "recipient_pubkey": "<32-byte-lowercase-hex>",
@@ -127,7 +128,7 @@ machine and must not weaken these common fields:
 ```
 
 Every message binds the schema and deployment, stable order address, exact
-current head, session and reservation IDs, sender and receiver, monotonic
+current projection ID and revision, session and reservation IDs, sender and receiver, monotonic
 direction-specific sequence, expiry, predecessor, running transcript hash, both
 mint URLs and keyset IDs, units, integer amounts, and integer cents-per-BTC
 price. `quote_amount` is the deterministic truncated settlement defined by ADR
@@ -142,7 +143,7 @@ can exceed JavaScript's safe range are canonical decimal strings.
 The terms hash is:
 
 ```text
-SHA256(UTF8("granola-terms-v2\n") || UTF8(JCS(terms)))
+SHA256(UTF8("granola-terms-v1\n") || UTF8(JCS(terms)))
 ```
 
 After computing the rumor ID, the resulting transcript hash is:
@@ -174,7 +175,7 @@ outer wrapper's sole `p` value. The signer and recipient are fixed by phase:
 
 An acceptance is invalid unless its seal is authored by the public order key and
 its body binds the fresh maker settlement key, taker session key, exact public
-reserve transition, and prior transcript. A rejection terminates negotiation and
+reserve projection, and prior transcript. A rejection terminates negotiation and
 must not create or advertise a settlement key. After a valid `session_ack`, the
 maker order key is no longer an allowed author for settlement messages.
 
@@ -216,9 +217,9 @@ The receiver then validates in this order:
 6. Enforce all cross-layer clock rules below: rumor `created_at` against
    `sent_at`, local time, and encrypted expiry; seal and wrapper timestamps
    against the rumor; and outer expiration against encrypted expiry.
-7. Validate every Granola field, canonical encoding, deployment, order address
-   and head, terms hash, economic invariants, deadline, sequence, predecessor,
-   and transcript hash before changing state.
+7. Validate every Granola field, canonical encoding, deployment, order address,
+   current projection event ID and revision, terms hash, economic invariants,
+   deadline, sequence, predecessor, and transcript hash before changing state.
 8. Deduplicate the message ID, rumor ID, and seal ID. Return the same result for
    an exact replay; reject a changed result under an existing identifier.
 9. Treat two valid successors of one transcript hash as equivocation. Never pick
@@ -283,12 +284,12 @@ outer expiries remain live.
 - Retry until an authenticated application `ack` or the encrypted deadline.
   An ACK references the message, rumor, and seal IDs plus the resulting
   transcript hash.
-- The maker publishes and reads back the public reserve transition before
-  sending `reserve_accept`. The acceptance references that exact new transition
-  and binds the maker's fresh settlement key.
-- The taker verifies both the private acceptance and authoritative public chain
+- The maker publishes and reads back the public reserve projection before
+  sending `reserve_accept`. The acceptance references that
+  exact projection event ID and revision and binds the maker's fresh settlement key.
+- The taker verifies both the private acceptance and current signed public projection
   before making bearer material claimable.
-- A proposal alone never reserves an order. A public transition alone does not
+- A proposal alone never reserves an order. A reserved public projection alone does not
   prove that the intended taker received a valid private acceptance.
 
 Granola uses NIP-17's disappearing-message option and does not publish a sender
@@ -362,7 +363,7 @@ NIP-17 calls disappearing messages optional forward secrecy, but NIP-44
 explicitly states that its static ECDH conversation key has no forward secrecy.
 Granola describes expiry and session-key deletion as retention reduction and
 key erasure, not formal forward secrecy. Live observers may still correlate
-gift-wrap arrival with nearby public order transitions.
+gift-wrap arrival with nearby public order projections.
 
 ## Rejected alternatives
 
@@ -396,10 +397,10 @@ transport.
 
 Before a real trade, executable negative vectors must cover tampered outer and
 seal signatures, invalid MAC, wrong wrapper kind or recipient, non-empty seal
-tags, rumor impersonation, wrong order/head/terms/keyset, duplicate and
+tags, rumor impersonation, wrong order projection ID or revision/terms/keyset, duplicate and
 cross-session replay, transcript forks, relay reordering and ACK loss, expiry
 boundaries, oversized ciphertext, missing or stale kind `10050`, deleted session
-recovery, and private acceptance without its authoritative reserve transition.
+recovery, and private acceptance without its authoritative reserve projection.
 
 [NIP-04]: https://github.com/nostr-protocol/nips/blob/db5fe3de8c5d1443b634c9bbf66ecb004f337057/04.md
 [NIP-17]: https://github.com/nostr-protocol/nips/blob/db5fe3de8c5d1443b634c9bbf66ecb004f337057/17.md

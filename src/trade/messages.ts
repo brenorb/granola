@@ -48,14 +48,15 @@ export interface GranolaTradeTerms {
 }
 
 export interface GranolaTradeMessage {
-  schema: "granola/dm/v2";
+  schema: "granola/dm/v1";
   deployment: "cashu-testnet-v1";
   type: TradeMessageType;
   message_id: string;
   session_id: string;
   reservation_id: string;
   order_address: string;
-  order_head: string;
+  order_projection_id: string;
+  order_revision: string;
   maker_order_pubkey: string;
   author_pubkey: string;
   recipient_pubkey: string;
@@ -107,7 +108,8 @@ export interface UnwrapTradeMessageOptions {
   now: number;
   expectedAuthorPubkey: string;
   expectedOrderAddress: string;
-  expectedOrderHead: string;
+  expectedOrderProjectionId?: string;
+  expectedOrderRevision?: string;
   expectedTermsHash: string;
   expectedType?: TradeMessageType;
   expectedSequence?: string;
@@ -128,7 +130,10 @@ export type InitialReserveProposalOptions = Omit<
 
 export type ReserveAcceptanceOptions = Omit<
   UnwrapTradeMessageOptions,
-  "expectedOrderHead" | "expectedType" | "expectedSequence"
+  | "expectedOrderProjectionId"
+  | "expectedOrderRevision"
+  | "expectedType"
+  | "expectedSequence"
 > & {
   expectedPreviousRumorId: string;
   expectedPreviousMessageId: string;
@@ -295,7 +300,7 @@ function assertTerms(value: unknown): asserts value is GranolaTradeTerms {
 
 export async function termsHash(terms: GranolaTradeTerms): Promise<string> {
   assertTerms(terms);
-  return sha256([utf8.encode("granola-terms-v2\n"), utf8.encode(canonicalJson(terms))]);
+  return sha256([utf8.encode("granola-terms-v1\n"), utf8.encode(canonicalJson(terms))]);
 }
 
 function safeTimestamp(value: unknown, label: string): number {
@@ -317,12 +322,13 @@ async function assertMessage(value: unknown): Promise<GranolaTradeMessage> {
   const hasTerms = Object.hasOwn(message, "terms");
   exactKeys(message, [
     "schema", "deployment", "type", "message_id", "session_id", "reservation_id",
-    "order_address", "order_head", "maker_order_pubkey", "author_pubkey",
+    "order_address", "order_projection_id", "order_revision",
+    "maker_order_pubkey", "author_pubkey",
     "recipient_pubkey", "sequence", "previous_message_id",
     "previous_transcript_hash", "sent_at", "expires_at", "terms_hash",
     ...(hasTerms ? ["terms"] : []), "body"
   ], "Granola message");
-  if (message.schema !== "granola/dm/v2" || message.deployment !== "cashu-testnet-v1") {
+  if (message.schema !== "granola/dm/v1" || message.deployment !== "cashu-testnet-v1") {
     throw new Error("Unknown Granola message schema or deployment");
   }
   if (!TRADE_MESSAGE_TYPES.includes(message.type as TradeMessageType)) {
@@ -334,9 +340,10 @@ async function assertMessage(value: unknown): Promise<GranolaTradeMessage> {
   const maker = requiredString(message.maker_order_pubkey, "Maker order pubkey", HEX_32);
   requiredString(message.author_pubkey, "Author pubkey", HEX_32);
   requiredString(message.recipient_pubkey, "Recipient pubkey", HEX_32);
-  requiredString(message.order_head, "Order head", HEX_32);
+  requiredString(message.order_projection_id, "Order projection ID", HEX_32);
+  requiredString(message.order_revision, "Order revision", CANONICAL_INTEGER);
   const orderAddress = requiredString(message.order_address, "Order address");
-  const addressPattern = new RegExp(`^30078:${maker}:granola:order:v2:${UUID_V4_BODY}$`);
+  const addressPattern = new RegExp(`^30078:${maker}:granola:order:v1:${UUID_V4_BODY}$`);
   if (!addressPattern.test(orderAddress)) throw new Error("Order address is invalid");
   const sequence = requiredString(message.sequence, "Sequence", CANONICAL_INTEGER);
   const sentAt = safeTimestamp(message.sent_at, "sent_at");
@@ -509,12 +516,12 @@ async function unwrapTradeMessageInternal(
     UnwrapTradeMessageOptions,
     | "expectedAuthorPubkey"
     | "expectedOrderAddress"
-    | "expectedOrderHead"
+    | "expectedOrderProjectionId"
     | "expectedTermsHash"
   > & {
     expectedAuthorPubkey?: string;
     expectedOrderAddress?: string;
-    expectedOrderHead?: string;
+    expectedOrderProjectionId?: string;
     expectedTermsHash?: string;
   }
 ): Promise<OpenedTradeMessage> {
@@ -590,8 +597,14 @@ async function unwrapTradeMessageInternal(
     options.expectedOrderAddress !== undefined &&
     message.order_address !== options.expectedOrderAddress
   ) throw new Error("Unexpected order address");
-  if (options.expectedOrderHead !== undefined && message.order_head !== options.expectedOrderHead) {
-    throw new Error("Unexpected order head");
+  if (options.expectedOrderProjectionId !== undefined && message.order_projection_id !== options.expectedOrderProjectionId) {
+    throw new Error("Unexpected order projection");
+  }
+  if (
+    options.expectedOrderRevision !== undefined &&
+    message.order_revision !== options.expectedOrderRevision
+  ) {
+    throw new Error("Unexpected order revision");
   }
   if (
     options.expectedTermsHash !== undefined &&
@@ -711,7 +724,8 @@ export async function unwrapInitialReserveProposalForMaker(
 
 /**
  * Opens the one maker-order-key response that introduces the newly published
- * reserve head. The head is accepted only when the signed body binds it too.
+ * reserve projection. The projection is accepted only when the signed body
+ * binds both its event ID and revision.
  */
 export async function unwrapReserveAcceptance(
   outerValue: SignedNostrEvent,
@@ -725,10 +739,16 @@ export async function unwrapReserveAcceptance(
   });
   const body = record(opened.message.body, "Reserve acceptance body");
   if (
-    requiredString(body.reserve_transition_id, "Reserve transition ID", HEX_32) !==
-    opened.message.order_head
+    requiredString(body.reserve_projection_id, "Reserve projection ID", HEX_32) !==
+    opened.message.order_projection_id
   ) {
-    throw new Error("Reserve transition ID does not match the accepted order head");
+    throw new Error("Reserve projection ID does not match the accepted order");
+  }
+  if (
+    requiredString(body.reserve_revision, "Reserve revision", CANONICAL_INTEGER) !==
+    opened.message.order_revision
+  ) {
+    throw new Error("Reserve revision does not match the accepted order");
   }
   return opened;
 }

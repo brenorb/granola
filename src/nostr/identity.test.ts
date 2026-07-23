@@ -31,7 +31,7 @@ describe("maker identity", () => {
     );
 
     const signed = await identity.sign({
-      kind: 78,
+      kind: 30078,
       created_at: 1_700_000_000,
       tags: [["t", "granola-test"]],
       content: "{}"

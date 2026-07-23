@@ -18,138 +18,38 @@ export interface NostrEvent extends UnsignedNostrEvent {
   sig: string;
 }
 
-interface ProjectionContent extends OrderState {
-  head: string;
-}
+export type OrderOperation =
+  | "create"
+  | "reserve"
+  | "release"
+  | "fill"
+  | "cancel"
+  | "expire";
 
-interface CreateTransitionContent {
-  schema: "granola/order-transition/v2";
-  operation_id: string;
-  operation: "create";
-  revision: "0";
-  previous: null;
-  state: OrderState;
-}
-
-export type OrderOperation = "create" | "reserve" | "release" | "fill" | "cancel" | "replace";
-
-export interface FillTransitionEvidence {
+export interface FillOrderEvidence {
   settlement_hash: string;
   base_token_commitment: string;
   quote_token_commitment: string;
 }
 
-export interface ReleaseTransitionEvidence {
+export interface ReleaseOrderEvidence {
   release_reason: "expired" | "abort";
   abort_event_id?: string;
 }
 
-export type TransitionEvidence = FillTransitionEvidence | ReleaseTransitionEvidence;
-
-interface StateTransitionContent {
-  schema: "granola/order-transition/v2";
-  operation_id: string;
-  operation: OrderOperation;
-  revision: string;
-  previous: string | null;
-  state: OrderState;
-  evidence?: TransitionEvidence;
-}
-
-export interface TransitionRecord extends CreateTransitionRecord {
-  operation: OrderOperation;
-  revision: string;
-  previous: string | null;
-  evidence?: TransitionEvidence;
-}
-
-export interface CreateTransitionRecord {
-  eventId: string;
-  makerPubkey: string;
-  address: string;
-  operationId: string;
-  state: OrderState;
-}
+export type OrderOperationEvidence = FillOrderEvidence | ReleaseOrderEvidence;
 
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-function orderAddress(pubkey: string, orderId: string): string {
-  return `30078:${pubkey}:granola:order:v2:${orderId}`;
+export function orderAddress(pubkey: string, orderId: string): string {
+  return `30078:${pubkey}:granola:order:v1:${orderId}`;
 }
 
 function requireHex(value: string, pattern: RegExp, label: string): void {
   if (!pattern.test(value)) throw new Error(`${label} must be lowercase hex`);
-}
-
-function requireCanonicalKeys(
-  value: Record<string, unknown>,
-  required: string[],
-  optional: string[] = []
-): void {
-  const allowed = new Set([...required, ...optional]);
-  const keys = Object.keys(value);
-  if (
-    required.some((key) => !(key in value)) ||
-    keys.some((key) => !allowed.has(key))
-  ) {
-    throw new Error("Transition evidence must be canonical");
-  }
-}
-
-function canonicalFillEvidence(value: unknown): FillTransitionEvidence {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Fill transition requires settlement commitments");
-  }
-  const input = value as Record<string, unknown>;
-  requireCanonicalKeys(input, [
-    "settlement_hash",
-    "base_token_commitment",
-    "quote_token_commitment"
-  ]);
-  const settlementHash = input.settlement_hash;
-  const baseCommitment = input.base_token_commitment;
-  const quoteCommitment = input.quote_token_commitment;
-  if (
-    typeof settlementHash !== "string" ||
-    typeof baseCommitment !== "string" ||
-    typeof quoteCommitment !== "string"
-  ) {
-    throw new Error("Fill transition requires settlement commitments");
-  }
-  requireHex(settlementHash, HEX_32, "Settlement hash");
-  requireHex(baseCommitment, HEX_32, "Base token commitment");
-  requireHex(quoteCommitment, HEX_32, "Quote token commitment");
-  return {
-    settlement_hash: settlementHash,
-    base_token_commitment: baseCommitment,
-    quote_token_commitment: quoteCommitment
-  };
-}
-
-function canonicalReleaseEvidence(value: unknown): ReleaseTransitionEvidence {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Release transition requires release evidence");
-  }
-  const input = value as Record<string, unknown>;
-  requireCanonicalKeys(input, ["release_reason"], ["abort_event_id"]);
-  if (input.release_reason === "expired") {
-    if (input.abort_event_id !== undefined) {
-      throw new Error("Expired release cannot reference an abort event");
-    }
-    return { release_reason: "expired" };
-  }
-  if (input.release_reason === "abort") {
-    if (typeof input.abort_event_id !== "string") {
-      throw new Error("Abort release requires a signed abort event ID");
-    }
-    requireHex(input.abort_event_id, HEX_32, "Abort event ID");
-    return {
-      release_reason: "abort",
-      abort_event_id: input.abort_event_id
-    };
-  }
-  throw new Error("Release reason is invalid");
 }
 
 function canonicalJson(value: unknown): string {
@@ -157,136 +57,13 @@ function canonicalJson(value: unknown): string {
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right));
-    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+    return `{${entries.map(([key, item]) =>
+      `${JSON.stringify(key)}:${canonicalJson(item)}`
+    ).join(",")}}`;
   }
-  return JSON.stringify(value);
-}
-
-export function createTransitionTemplate(
-  state: OrderState,
-  makerPubkey: string,
-  operationId: string
-): UnsignedNostrEvent {
-  requireHex(makerPubkey, HEX_32, "Maker public key");
-  if (!operationId.trim()) throw new Error("Operation ID is required");
-  if (state.revision !== "0" || state.status !== "open") {
-    throw new Error("Create transition requires an initial open state");
-  }
-  return {
-    kind: 78,
-    created_at: state.created_at,
-    tags: [
-      ["d", `granola:order-transition:v2:${state.order_id}`],
-      ["t", "granola-order-transition"],
-      ["v", "1"],
-      ["a", orderAddress(makerPubkey, state.order_id)],
-      ["op", "create"]
-    ],
-    content: JSON.stringify({
-      schema: "granola/order-transition/v2",
-      operation_id: operationId,
-      operation: "create",
-      revision: "0",
-      previous: null,
-      state
-    })
-  };
-}
-
-export function createStateTransitionTemplate(
-  state: OrderState,
-  makerPubkey: string,
-  operationId: string,
-  operation: Exclude<OrderOperation, "create">,
-  previous: NostrEvent,
-  evidence?: TransitionEvidence,
-  createdAt?: number
-): UnsignedNostrEvent {
-  requireHex(makerPubkey, HEX_32, "Maker public key");
-  requireHex(previous.id, HEX_32, "Previous transition ID");
-  if (previous.pubkey !== makerPubkey) throw new Error("Previous transition maker mismatch");
-  if (!operationId.trim()) throw new Error("Operation ID is required");
-  if (!/^[1-9]\d*$/.test(state.revision)) {
-    throw new Error("State transition requires a positive canonical revision");
-  }
-  if (operation === "reserve" && state.status !== "reserved") {
-    throw new Error("Reserve transition requires reserved state");
-  }
-  if (operation === "fill" && state.status !== "filled" && state.status !== "partially_filled") {
-    throw new Error("Fill transition requires filled or partially-filled state");
-  }
-  if (operation === "release" && state.status !== "open" && state.status !== "partially_filled") {
-    throw new Error("Release transition requires open or partially-filled state");
-  }
-  let normalizedEvidence: TransitionEvidence | undefined;
-  if (operation === "fill") {
-    normalizedEvidence = canonicalFillEvidence(evidence);
-  } else if (operation === "release") {
-    normalizedEvidence = canonicalReleaseEvidence(evidence);
-  } else if (evidence) {
-    throw new Error("Transition operation cannot carry evidence");
-  }
-  const timestamp = createdAt ?? (
-    operation === "reserve" && state.reservation
-      ? state.reservation.accepted_at
-      : previous.created_at + 1
-  );
-  if (operation === "release" && createdAt === undefined) {
-    throw new Error("Release transition requires an explicit release timestamp");
-  }
-  if (!Number.isSafeInteger(timestamp) || timestamp < previous.created_at) {
-    throw new Error("Transition timestamp is invalid");
-  }
-  const content: StateTransitionContent = {
-    schema: "granola/order-transition/v2",
-    operation_id: operationId,
-    operation,
-    revision: state.revision,
-    previous: previous.id,
-    state,
-    ...(normalizedEvidence ? { evidence: normalizedEvidence } : {})
-  };
-  return {
-    kind: 78,
-    created_at: timestamp,
-    tags: [
-      ["d", `granola:order-transition:v2:${state.order_id}`],
-      ["t", "granola-order-transition"],
-      ["v", "1"],
-      ["a", orderAddress(makerPubkey, state.order_id)],
-      ["op", operation],
-      ["e", previous.id]
-    ],
-    content: JSON.stringify(content)
-  };
-}
-
-export async function createProjectionTemplate(
-  state: OrderState,
-  transition: NostrEvent
-): Promise<UnsignedNostrEvent> {
-  requireHex(transition.id, HEX_32, "Transition ID");
-  requireHex(transition.pubkey, HEX_32, "Maker public key");
-  const markets = await eligibleMarketIds(state);
-  const retention = state.expires_at + 604_800;
-  if (!Number.isSafeInteger(retention)) throw new Error("Projection retention timestamp is invalid");
-  const content: ProjectionContent = { ...state, head: transition.id };
-  return {
-    kind: 30078,
-    created_at: transition.created_at,
-    tags: [
-      ["d", `granola:order:v2:${state.order_id}`],
-      ["t", "granola-order"],
-      ["v", "1"],
-      ["s", state.status],
-      ["side", state.side],
-      ...markets.map((market) => ["m", market]),
-      ["expires_at", String(state.expires_at)],
-      ["expiration", String(retention)],
-      ["e", transition.id]
-    ],
-    content: JSON.stringify(content)
-  };
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) throw new Error("Value cannot be canonically encoded");
+  return encoded;
 }
 
 function tagValues(event: NostrEvent, key: string): string[] {
@@ -297,7 +74,9 @@ function tagValues(event: NostrEvent, key: string): string[] {
 
 function oneTag(event: NostrEvent, key: string): string {
   const values = tagValues(event, key);
-  if (values.length !== 1 || !values[0]) throw new Error(`Projection requires one ${key} tag`);
+  if (values.length !== 1 || !values[0]) {
+    throw new Error(`Projection requires one ${key} tag`);
+  }
   return values[0];
 }
 
@@ -308,14 +87,12 @@ function canonicalNonNegative(value: unknown, label: string): string {
   return value;
 }
 
-function parseCanonicalState(value: unknown): { state: OrderState; head?: string } {
-  if (!value || typeof value !== "object") throw new Error("Projection content must be an object");
-  const input = value as Partial<ProjectionContent>;
-  if (input.schema !== "granola/order/v2") throw new Error("Unknown order schema");
-  if (input.head !== undefined) {
-    if (typeof input.head !== "string") throw new Error("Projection head is invalid");
-    requireHex(input.head, HEX_32, "Projection head");
+function parseCanonicalState(value: unknown): OrderState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Projection content must be an object");
   }
+  const input = value as Partial<OrderState>;
+  if (input.schema !== "granola/order/v1") throw new Error("Unknown order schema");
   if (
     typeof input.order_id !== "string" ||
     typeof input.created_at !== "number" ||
@@ -353,42 +130,68 @@ function parseCanonicalState(value: unknown): { state: OrderState; head?: string
   const revision = canonicalNonNegative(input.revision, "Order revision");
   const remaining = canonicalNonNegative(input.remaining_amount, "Remaining amount");
   const reserved = canonicalNonNegative(input.reserved_amount, "Reserved amount");
-  if (BigInt(remaining) > BigInt(initial.original_amount)) throw new Error("Remaining amount exceeds original amount");
-  if (BigInt(reserved) > BigInt(remaining)) throw new Error("Reserved amount exceeds remaining amount");
-  if (!input.status || !["open", "partially_filled", "reserved", "filled", "canceled", "expired"].includes(input.status)) {
+  if (BigInt(remaining) > BigInt(initial.original_amount)) {
+    throw new Error("Remaining amount exceeds original amount");
+  }
+  if (BigInt(reserved) > BigInt(remaining)) {
+    throw new Error("Reserved amount exceeds remaining amount");
+  }
+  if (
+    !input.status ||
+    !["open", "partially_filled", "reserved", "filled", "canceled", "expired"]
+      .includes(input.status)
+  ) {
     throw new Error("Order status is invalid");
   }
-  let reservation = input.reservation ?? null;
+
+  const reservation = input.reservation ?? null;
   if (reservation !== null) {
     if (
       typeof reservation.id !== "string" ||
+      !UUID_V4.test(reservation.id) ||
       typeof reservation.amount !== "string" ||
-      typeof reservation.accepted_at !== "number" ||
-      typeof reservation.expires_at !== "number" ||
+      !/^[1-9]\d*$/.test(reservation.amount) ||
+      !Number.isSafeInteger(reservation.accepted_at) ||
+      !Number.isSafeInteger(reservation.expires_at) ||
       typeof reservation.proposal_event_id !== "string" ||
       typeof reservation.taker_commitment !== "string"
-    ) throw new Error("Reservation is incomplete");
+    ) {
+      throw new Error("Reservation is incomplete");
+    }
     if (reservation.amount !== reserved || input.status !== "reserved") {
       throw new Error("Reservation amount and status are inconsistent");
     }
     requireHex(reservation.proposal_event_id, HEX_32, "Proposal event ID");
     requireHex(reservation.taker_commitment, HEX_32, "Taker commitment");
-    if (reservation.expires_at <= reservation.accepted_at || reservation.expires_at > initial.expires_at) {
+    if (
+      reservation.accepted_at < initial.created_at ||
+      reservation.expires_at <= reservation.accepted_at ||
+      reservation.expires_at > initial.expires_at
+    ) {
       throw new Error("Reservation expiry is invalid");
     }
   } else if (reserved !== "0" || input.status === "reserved") {
     throw new Error("Reserved amount requires reservation state");
   }
-  if (input.status === "filled" && remaining !== "0") throw new Error("Filled order must have zero remaining amount");
-  if (remaining === "0" && input.status !== "filled" && input.status !== "canceled") {
+  if (input.status === "filled" && remaining !== "0") {
+    throw new Error("Filled order must have zero remaining amount");
+  }
+  if (remaining === "0" && !["filled", "canceled"].includes(input.status)) {
     throw new Error("Zero remaining amount requires terminal state");
   }
   if (input.status === "open" && remaining !== initial.original_amount) {
     throw new Error("Open order must retain its original amount");
   }
-  if (input.status === "partially_filled" && (remaining === "0" || remaining === initial.original_amount)) {
+  if (
+    input.status === "partially_filled" &&
+    (remaining === "0" || remaining === initial.original_amount)
+  ) {
     throw new Error("Partially-filled amount is inconsistent");
   }
+  if (input.replaces != null || input.replaced_by != null) {
+    throw new Error("Order replacement metadata is not supported");
+  }
+
   const state: OrderState = {
     ...initial,
     revision,
@@ -396,120 +199,43 @@ function parseCanonicalState(value: unknown): { state: OrderState; head?: string
     reserved_amount: reserved,
     status: input.status,
     reservation,
-    replaces: input.replaces ?? null,
-    replaced_by: input.replaced_by ?? null
+    replaces: null,
+    replaced_by: null
   };
-  const { head: _head, ...rawState } = input as ProjectionContent;
-  if (canonicalJson(rawState) !== canonicalJson(state)) {
+  if (canonicalJson(value) !== canonicalJson(state)) {
     throw new Error("Projection order state must be canonical");
   }
-  return { state, ...(input.head ? { head: input.head } : {}) };
+  return state;
 }
 
-export function parseCreateTransitionEvent(
-  event: NostrEvent,
-  verify: (event: NostrEvent) => boolean
-): CreateTransitionRecord {
-  const parsed = parseTransitionEvent(event, verify);
-  if (parsed.operation !== "create" || parsed.revision !== "0" || parsed.previous !== null) {
-    throw new Error("Event is not a create transition");
-  }
-  return parsed;
-}
-
-export function parseTransitionEvent(
-  event: NostrEvent,
-  verify: (event: NostrEvent) => boolean
-): TransitionRecord {
-  if (event.kind !== 78) throw new Error("Event is not an order transition");
-  requireHex(event.id, HEX_32, "Event ID");
-  requireHex(event.pubkey, HEX_32, "Maker public key");
-  requireHex(event.sig, HEX_64, "Event signature");
-  if (!verify(event)) throw new Error("Event signature verification failed");
-
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(event.content);
-  } catch {
-    throw new Error("Transition content is not valid JSON");
-  }
-  if (!decoded || typeof decoded !== "object") {
-    throw new Error("Transition content must be an object");
-  }
-  const input = decoded as Partial<StateTransitionContent>;
+export async function createProjectionTemplate(
+  state: OrderState,
+  makerPubkey: string,
+  createdAt: number = state.created_at
+): Promise<UnsignedNostrEvent> {
+  requireHex(makerPubkey, HEX_32, "Maker public key");
   if (
-    input.schema !== "granola/order-transition/v2" ||
-    !input.operation ||
-    !["create", "reserve", "release", "fill", "cancel", "replace"].includes(input.operation) ||
-    typeof input.revision !== "string" ||
-    typeof input.operation_id !== "string" ||
-    !input.operation_id.trim() ||
-    !input.state
+    !Number.isSafeInteger(createdAt) ||
+    createdAt < state.created_at ||
+    (state.revision === "0" && createdAt !== state.created_at)
   ) {
-    throw new Error("Transition content is incomplete");
+    throw new Error("Projection timestamp is invalid");
   }
-  const { state } = parseCanonicalState(input.state);
-  if (input.revision !== state.revision) throw new Error("Transition revision and state mismatch");
-  const isCreate = input.operation === "create";
-  if (isCreate ? input.previous !== null : typeof input.previous !== "string") {
-    throw new Error("Transition predecessor is invalid");
-  }
-  if (typeof input.previous === "string") requireHex(input.previous, HEX_32, "Transition predecessor");
-  if (isCreate && (state.revision !== "0" || state.status !== "open")) {
-    throw new Error("Create transition requires initial open state");
-  }
-  if (!isCreate && state.revision === "0") throw new Error("Successor transition requires positive revision");
-  let evidence: TransitionEvidence | undefined;
-  if (input.operation === "fill") {
-    evidence = canonicalFillEvidence(input.evidence);
-  } else if (input.operation === "release") {
-    evidence = canonicalReleaseEvidence(input.evidence);
-  } else if (input.evidence !== undefined) {
-    throw new Error("Transition operation cannot carry evidence");
-  }
-  const expectedContent: StateTransitionContent = {
-    schema: "granola/order-transition/v2",
-    operation_id: input.operation_id,
-    operation: input.operation,
-    revision: state.revision,
-    previous: input.previous ?? null,
-    state,
-    ...(evidence ? { evidence } : {})
-  };
-  if (canonicalJson(decoded) !== canonicalJson(expectedContent)) {
-    throw new Error("Transition content and order state must be canonical");
-  }
-  if (isCreate && event.created_at !== state.created_at) {
-    throw new Error("Transition timestamp does not match order creation");
-  }
-  if (input.operation === "reserve" && event.created_at !== state.reservation?.accepted_at) {
-    throw new Error("Reserve timestamp does not match reservation acceptance");
-  }
-  const address = orderAddress(event.pubkey, state.order_id);
-  if (oneTag(event, "d") !== `granola:order-transition:v2:${state.order_id}`) {
-    throw new Error("Transition order ID tag mismatch");
-  }
-  if (oneTag(event, "t") !== "granola-order-transition") {
-    throw new Error("Transition namespace mismatch");
-  }
-  if (oneTag(event, "v") !== "1") throw new Error("Transition version mismatch");
-  if (oneTag(event, "op") !== input.operation) throw new Error("Transition operation mismatch");
-  if (oneTag(event, "a") !== address) throw new Error("Transition address tag mismatch");
-  const predecessors = tagValues(event, "e");
-  if (isCreate ? predecessors.length !== 0 : predecessors.length !== 1 || predecessors[0] !== input.previous) {
-    throw new Error("Transition predecessor tag mismatch");
-  }
-
+  const markets = await eligibleMarketIds(state);
   return {
-    eventId: event.id,
-    makerPubkey: event.pubkey,
-    address,
-    operationId: input.operation_id,
-    operation: input.operation,
-    revision: state.revision,
-    previous: input.previous ?? null,
-    state,
-    ...(evidence ? { evidence } : {})
+    kind: 30078,
+    created_at: createdAt,
+    tags: [
+      ["d", `granola:order:v1:${state.order_id}`],
+      ["t", "granola-order"],
+      ["v", "1"],
+      ["s", state.status],
+      ["side", state.side],
+      ...markets.map((market) => ["m", market]),
+      ["expires_at", String(state.expires_at)],
+      ["expiration", String(state.expires_at)]
+    ],
+    content: JSON.stringify(state)
   };
 }
 
@@ -529,36 +255,54 @@ export async function parseProjectionEvent(
   } catch {
     throw new Error("Projection content is not valid JSON");
   }
-  const { state, head } = parseCanonicalState(decoded);
-  if (!head) throw new Error("Projection head is required");
+  const state = parseCanonicalState(decoded);
+  if (event.created_at < state.created_at) {
+    throw new Error("Projection predates order creation");
+  }
   if (state.revision === "0" && event.created_at !== state.created_at) {
     throw new Error("Initial projection timestamp does not match order creation");
   }
-  const expectedD = `granola:order:v2:${state.order_id}`;
-  if (oneTag(event, "d") !== expectedD) throw new Error("Projection order ID tag mismatch");
-  if (oneTag(event, "t") !== "granola-order") throw new Error("Projection namespace mismatch");
+  if (
+    state.status === "reserved" &&
+    event.created_at !== state.reservation?.accepted_at
+  ) {
+    throw new Error("Reserved projection timestamp does not match acceptance");
+  }
+  if (oneTag(event, "d") !== `granola:order:v1:${state.order_id}`) {
+    throw new Error("Projection order ID tag mismatch");
+  }
+  if (oneTag(event, "t") !== "granola-order") {
+    throw new Error("Projection namespace mismatch");
+  }
   if (oneTag(event, "v") !== "1") throw new Error("Projection version mismatch");
-  if (oneTag(event, "s") !== state.status) throw new Error("Projection status tag mismatch");
-  if (oneTag(event, "side") !== state.side) throw new Error("Projection side tag mismatch");
-  if (oneTag(event, "e") !== head) throw new Error("Projection head tag mismatch");
+  if (oneTag(event, "s") !== state.status) {
+    throw new Error("Projection status tag mismatch");
+  }
+  if (oneTag(event, "side") !== state.side) {
+    throw new Error("Projection side tag mismatch");
+  }
+  if (tagValues(event, "e").length !== 0) {
+    throw new Error("Projection cannot reference a public predecessor");
+  }
   if (oneTag(event, "expires_at") !== String(state.expires_at)) {
     throw new Error("Projection expiry tag mismatch");
   }
-  if (oneTag(event, "expiration") !== String(state.expires_at + 604_800)) {
-    throw new Error("Projection retention tag mismatch");
+  if (oneTag(event, "expiration") !== String(state.expires_at)) {
+    throw new Error("Projection expiration tag mismatch");
+  }
+  if (state.status === "expired" && event.created_at < state.expires_at) {
+    throw new Error("Expired projection predates order expiry");
   }
   const actualMarkets = [...new Set(tagValues(event, "m"))].sort();
   const expectedMarkets = await eligibleMarketIds(state);
   if (JSON.stringify(actualMarkets) !== JSON.stringify(expectedMarkets)) {
     throw new Error("Projection market index mismatch");
   }
-
   return {
     address: orderAddress(event.pubkey, state.order_id),
     eventId: event.id,
-    headEventId: head,
     makerPubkey: event.pubkey,
-    verified: false,
+    verified: true,
     state
   };
 }

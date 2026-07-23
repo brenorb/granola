@@ -17,8 +17,7 @@ export function renderPendingPublications(
   root: HTMLElement,
   publications: PublicOrderPublication[],
   retry: (orderId: string) => void,
-  relayCount = 3,
-  quorum = 2
+  relayCount = 3
 ): void {
   root.replaceChildren();
   root.hidden = publications.length === 0;
@@ -27,16 +26,14 @@ export function renderPendingPublications(
   root.append(element("h3", "Pending relay publication"));
   const list = element("ul");
   for (const publication of publications) {
-    const transitionAcks = publication.transitionReceipts.filter((receipt) => receipt.ok).length;
-    const projectionAcks = publication.projectionReceipts.filter((receipt) => receipt.ok).length;
-    const stage = transitionAcks < quorum ? "transition" : "projection";
-    const acknowledgements = stage === "transition" ? transitionAcks : projectionAcks;
+    const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;
     const item = element("li");
     const description = element(
       "span",
-      `${shortId(publication.orderId)} · ${acknowledgements}/${relayCount} ${stage} relay acknowledgements`
+      `${shortId(publication.orderId)} · ${acknowledgements}/${relayCount} relay acknowledgements` +
+      (acknowledgements > 0 ? " · sufficient" : "")
     );
-    const button = element("button", "Retry same signed events");
+    const button = element("button", "Retry same signed projection");
     button.type = "button";
     button.addEventListener("click", () => retry(publication.orderId));
     item.append(description, button);

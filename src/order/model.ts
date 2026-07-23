@@ -30,7 +30,7 @@ export interface ReservationState {
 }
 
 export interface OrderState {
-  schema: "granola/order/v2";
+  schema: "granola/order/v1";
   order_id: string;
   revision: string;
   created_at: number;
@@ -88,6 +88,37 @@ export interface ReleaseOrderInput {
   abortEventId?: string;
 }
 
+export function cancelOrder(state: OrderState): OrderState {
+  assertMutable(state);
+  if (state.reservation !== null) {
+    throw new Error("Reserved orders must be released before cancellation");
+  }
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: "0",
+    status: "canceled",
+    reservation: null
+  };
+}
+
+export function expireOrder(state: OrderState, expiredAt: number): OrderState {
+  assertMutable(state);
+  if (!Number.isSafeInteger(expiredAt) || expiredAt < state.expires_at) {
+    throw new Error("Order is not expired");
+  }
+  if (state.reservation !== null) {
+    throw new Error("Reserved orders must be released before expiry");
+  }
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: "0",
+    status: "expired",
+    reservation: null
+  };
+}
+
 export interface ExactMarket {
   baseUnit: string;
   baseMint: string;
@@ -98,7 +129,6 @@ export interface ExactMarket {
 export interface OrderRecord {
   address: string;
   eventId: string;
-  headEventId: string;
   makerPubkey: string;
   verified: boolean;
   state: OrderState;
@@ -198,7 +228,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
   if (acceptableMints.length === 0) throw new Error("At least one requested mint is required");
 
   return {
-    schema: "granola/order/v2",
+    schema: "granola/order/v1",
     order_id: input.orderId,
     revision: "0",
     created_at: input.createdAt,

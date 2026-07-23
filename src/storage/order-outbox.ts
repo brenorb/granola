@@ -1,29 +1,29 @@
-import type { TransitionEvidence } from "../order/events.js";
-import type { OrderState } from "../order/model.js";
-import type { StagedOrderPublication, SuccessorOperation } from "../order/service.js";
-import type { StorageDriver } from "./wallet-repository.js";
 import { verifyEvent } from "nostr-tools/pure";
+
+import type { OrderOperationEvidence } from "../order/events.js";
+import type { OrderState } from "../order/model.js";
+import type {
+  StagedOrderPublication,
+  SuccessorOperation
+} from "../order/service.js";
+import type { StorageDriver } from "./wallet-repository.js";
 
 const OUTBOX_KEY = "granola.order-outbox.v2";
 const HEX_32 = /^[0-9a-f]{64}$/;
 const HEX_64 = /^[0-9a-f]{128}$/;
 
 export type OrderPublicationOperation = "create" | SuccessorOperation;
-export type OrderPublicationStatus =
-  | "staged"
-  | "transition_acknowledged"
-  | "projection_acknowledged"
-  | "committed";
+export type OrderPublicationStatus = "staged" | "acknowledged" | "committed";
 
 export interface OrderPublicationIntent {
   operation: OrderPublicationOperation;
   orderId: string;
   address: string;
-  expectedHeadId: string | null;
-  quorum: number;
+  expectedProjectionId: string | null;
+  expectedRevision: string | null;
   compatibility: string;
   state: OrderState;
-  evidence: TransitionEvidence | null;
+  evidence: OrderOperationEvidence | null;
   createdAt: number;
 }
 
@@ -35,7 +35,7 @@ export interface OrderOutboxEntry {
 }
 
 export class OrderOutboxConflictError extends Error {
-  constructor(message = "Order publication intent conflicts with the durable outbox") {
+  constructor(message = "Order projection intent conflicts with the durable outbox") {
     super(message);
     this.name = "OrderOutboxConflictError";
   }
@@ -67,14 +67,13 @@ export function canonicalOrderPublicationCompatibility(value: unknown): string {
   return canonical(value);
 }
 
-function validEvent(
+function validProjection(
   value: unknown,
-  kind: 78 | 30078,
-  verify: (event: StagedOrderPublication["transition"]) => boolean
+  verify: (event: StagedOrderPublication["projection"]) => boolean
 ): boolean {
   if (!value || typeof value !== "object") return false;
   const event = value as Record<string, unknown>;
-  return event.kind === kind &&
+  return event.kind === 30078 &&
     Number.isSafeInteger(event.created_at) &&
     typeof event.content === "string" &&
     Array.isArray(event.tags) &&
@@ -84,7 +83,7 @@ function validEvent(
     typeof event.id === "string" && HEX_32.test(event.id) &&
     typeof event.pubkey === "string" && HEX_32.test(event.pubkey) &&
     typeof event.sig === "string" && HEX_64.test(event.sig) &&
-    verify(value as StagedOrderPublication["transition"]);
+    verify(value as StagedOrderPublication["projection"]);
 }
 
 function validateReceipts(value: unknown): number {
@@ -98,7 +97,9 @@ function validateReceipts(value: unknown): number {
       typeof receipt.relay !== "string" ||
       typeof receipt.ok !== "boolean" ||
       typeof receipt.message !== "string"
-    ) throw new Error("Order outbox receipts are corrupt");
+    ) {
+      throw new Error("Order outbox receipts are corrupt");
+    }
     const url = new URL(receipt.relay);
     if (
       url.protocol !== "wss:" ||
@@ -106,7 +107,9 @@ function validateReceipts(value: unknown): number {
       url.password ||
       url.search ||
       url.hash
-    ) throw new Error("Order outbox receipt relay is invalid");
+    ) {
+      throw new Error("Order outbox receipt relay is invalid");
+    }
     url.pathname = url.pathname.replace(/\/+$/, "");
     const normalized = url.toString().replace(/\/$/, "");
     if (normalized !== receipt.relay || relays.has(normalized)) {
@@ -124,13 +127,16 @@ function assertIntent(value: unknown): asserts value is OrderPublicationIntent {
   }
   const intent = value as Record<string, unknown>;
   if (
-    !["create", "reserve", "fill", "release"].includes(String(intent.operation)) ||
+    !["create", "reserve", "fill", "release", "cancel", "expire"]
+      .includes(String(intent.operation)) ||
     typeof intent.orderId !== "string" ||
     typeof intent.address !== "string" ||
-    !(intent.expectedHeadId === null ||
-      (typeof intent.expectedHeadId === "string" && HEX_32.test(intent.expectedHeadId))) ||
-    !Number.isSafeInteger(intent.quorum) ||
-    (intent.quorum as number) < 1 ||
+    !(intent.expectedProjectionId === null ||
+      (typeof intent.expectedProjectionId === "string" &&
+        HEX_32.test(intent.expectedProjectionId))) ||
+    !(intent.expectedRevision === null ||
+      (typeof intent.expectedRevision === "string" &&
+        /^(0|[1-9]\d*)$/.test(intent.expectedRevision))) ||
     typeof intent.compatibility !== "string" ||
     intent.compatibility.length === 0 ||
     !intent.state ||
@@ -150,7 +156,8 @@ function assertIntent(value: unknown): asserts value is OrderPublicationIntent {
     throw new Error("Order outbox intent is corrupt");
   }
   if (
-    (intent.operation === "create") !== (intent.expectedHeadId === null)
+    (intent.operation === "create") !==
+      (intent.expectedProjectionId === null && intent.expectedRevision === null)
   ) {
     throw new Error("Order outbox intent is corrupt");
   }
@@ -158,7 +165,7 @@ function assertIntent(value: unknown): asserts value is OrderPublicationIntent {
 
 function assertEntry(
   value: unknown,
-  verify: (event: StagedOrderPublication["transition"]) => boolean
+  verify: (event: StagedOrderPublication["projection"]) => boolean
 ): asserts value is OrderOutboxEntry {
   if (!value || typeof value !== "object") {
     throw new Error("Order outbox storage is corrupt");
@@ -166,8 +173,7 @@ function assertEntry(
   const entry = value as Record<string, unknown>;
   if (
     entry.schema !== "granola/order-outbox/v2" ||
-    !["staged", "transition_acknowledged", "projection_acknowledged", "committed"]
-      .includes(String(entry.status))
+    !["staged", "acknowledged", "committed"].includes(String(entry.status))
   ) {
     throw new Error("Order outbox storage is corrupt");
   }
@@ -177,69 +183,34 @@ function assertEntry(
   }
   const publication = entry.publication as unknown as StagedOrderPublication;
   const intent = entry.intent as unknown as OrderPublicationIntent;
-  const transitionAccepted = validateReceipts(publication.transitionReceipts);
-  const projectionAccepted = validateReceipts(publication.projectionReceipts);
-  const quorum = intent.quorum;
+  const accepted = validateReceipts(publication.receipts);
   const status = entry.status as OrderPublicationStatus;
-  const statusMatchesReceipts =
-    (status === "staged" &&
-      transitionAccepted < quorum &&
-      projectionAccepted === 0) ||
-    (status === "transition_acknowledged" &&
-      transitionAccepted >= quorum &&
-      projectionAccepted < quorum) ||
-    ((status === "projection_acknowledged" || status === "committed") &&
-      transitionAccepted >= quorum &&
-      projectionAccepted >= quorum);
-  const projectionHead = publication.projection?.tags
-    ?.filter((tag) => tag[0] === "e")
-    .map((tag) => tag[1]);
   if (
     publication.schema !== "granola/order-publication/v1" ||
     !same(publication.state, intent.state) ||
-    !validEvent(publication.transition, 78, verify) ||
-    !validEvent(publication.projection, 30078, verify) ||
-    !statusMatchesReceipts ||
-    projectionHead?.length !== 1 ||
-    projectionHead[0] !== publication.transition.id ||
-    publication.transition.created_at !== intent.createdAt ||
+    !validProjection(publication.projection, verify) ||
+    (status === "staged" ? accepted !== 0 : accepted < 1) ||
     publication.projection.created_at !== intent.createdAt
   ) {
     throw new Error("Order outbox storage is corrupt");
   }
-  let transitionContent: Record<string, unknown>;
-  let projectionContent: Record<string, unknown>;
+  let projectionState: unknown;
   try {
-    transitionContent = JSON.parse(publication.transition.content) as Record<string, unknown>;
-    projectionContent = JSON.parse(publication.projection.content) as Record<string, unknown>;
+    projectionState = JSON.parse(publication.projection.content);
   } catch {
     throw new Error("Order outbox storage is corrupt");
   }
-  const transitionAddresses = publication.transition.tags
-    .filter((tag) => tag[0] === "a")
+  const dTags = publication.projection.tags
+    .filter((tag) => tag[0] === "d")
     .map((tag) => tag[1]);
-  const transitionOperations = publication.transition.tags
-    .filter((tag) => tag[0] === "op")
-    .map((tag) => tag[1]);
-  const transitionPrevious = publication.transition.tags
-    .filter((tag) => tag[0] === "e")
-    .map((tag) => tag[1]);
-  const { head, ...projectedState } = projectionContent;
+  const predecessorTags = publication.projection.tags
+    .filter((tag) => tag[0] === "e");
   if (
-    publication.transition.pubkey !== publication.projection.pubkey ||
-    transitionAddresses.length !== 1 ||
-    transitionAddresses[0] !== intent.address ||
-    transitionOperations.length !== 1 ||
-    transitionOperations[0] !== intent.operation ||
-    !same(transitionContent.state, intent.state) ||
-    transitionContent.operation !== intent.operation ||
-    transitionContent.previous !== intent.expectedHeadId ||
-    !same(transitionContent.evidence ?? null, intent.evidence) ||
-    !same(projectedState, intent.state) ||
-    head !== publication.transition.id ||
-    (intent.expectedHeadId === null
-      ? transitionPrevious.length !== 0
-      : transitionPrevious.length !== 1 || transitionPrevious[0] !== intent.expectedHeadId)
+    !same(projectionState, intent.state) ||
+    dTags.length !== 1 ||
+    intent.address !==
+      `30078:${publication.projection.pubkey}:${dTags[0]}` ||
+    predecessorTags.length !== 0
   ) {
     throw new Error("Order outbox storage is corrupt");
   }
@@ -247,7 +218,7 @@ function assertEntry(
 
 function assertOutbox(
   value: unknown,
-  verify: (event: StagedOrderPublication["transition"]) => boolean
+  verify: (event: StagedOrderPublication["projection"]) => boolean
 ): asserts value is OrderOutboxEntry[] {
   if (!Array.isArray(value)) throw new Error("Order outbox storage is corrupt");
   const orderIds = new Set<string>();
@@ -261,9 +232,9 @@ function assertOutbox(
 }
 
 function mergeReceipts(
-  previous: StagedOrderPublication["transitionReceipts"],
-  current: StagedOrderPublication["transitionReceipts"]
-): StagedOrderPublication["transitionReceipts"] {
+  previous: StagedOrderPublication["receipts"],
+  current: StagedOrderPublication["receipts"]
+): StagedOrderPublication["receipts"] {
   const receipts = new Map(previous.map((receipt) => [receipt.relay, receipt]));
   for (const receipt of current) {
     const existing = receipts.get(receipt.relay);
@@ -272,51 +243,27 @@ function mergeReceipts(
   return [...receipts.values()];
 }
 
-const STATUS_RANK: Record<OrderPublicationStatus, number> = {
-  staged: 0,
-  transition_acknowledged: 1,
-  projection_acknowledged: 2,
-  committed: 3
-};
-
 function mergeExact(existing: OrderOutboxEntry, next: OrderOutboxEntry): OrderOutboxEntry {
   if (
     !same(existing.intent, next.intent) ||
-    existing.publication.transition.id !== next.publication.transition.id ||
     existing.publication.projection.id !== next.publication.projection.id ||
-    !same(existing.publication.transition, next.publication.transition) ||
     !same(existing.publication.projection, next.publication.projection)
   ) {
     throw new OrderOutboxConflictError();
   }
-  if (
-    next.status === "committed" ||
-    STATUS_RANK[next.status] > STATUS_RANK[existing.status] + 1
-  ) {
-    throw new OrderOutboxConflictError("Order publication status skipped a durable stage");
+  if (next.status === "committed") {
+    throw new OrderOutboxConflictError("Order projection status skipped a durable stage");
   }
-  const transitionReceipts = mergeReceipts(
-    existing.publication.transitionReceipts,
-    next.publication.transitionReceipts
+  const receipts = mergeReceipts(
+    existing.publication.receipts,
+    next.publication.receipts
   );
-  const projectionReceipts = mergeReceipts(
-    existing.publication.projectionReceipts,
-    next.publication.projectionReceipts
-  );
-  const transitionAccepted = validateReceipts(transitionReceipts);
-  const projectionAccepted = validateReceipts(projectionReceipts);
-  const status: OrderPublicationStatus = projectionAccepted >= existing.intent.quorum
-    ? "projection_acknowledged"
-    : transitionAccepted >= existing.intent.quorum
-      ? "transition_acknowledged"
-      : "staged";
   return {
     ...clone(existing),
-    status,
+    status: validateReceipts(receipts) >= 1 ? "acknowledged" : "staged",
     publication: {
       ...clone(existing.publication),
-      transitionReceipts,
-      projectionReceipts
+      receipts
     }
   };
 }
@@ -344,7 +291,7 @@ export class OrderOutboxRepository implements OrderOutboxPort {
   constructor(
     private readonly driver: StorageDriver,
     private readonly runExclusive: OrderOutboxExclusiveRunner = withoutCrossTabLock,
-    private readonly verify: (event: StagedOrderPublication["transition"]) => boolean =
+    private readonly verify: (event: StagedOrderPublication["projection"]) => boolean =
       (event) => verifyEvent(event)
   ) {}
 
@@ -373,15 +320,6 @@ export class OrderOutboxRepository implements OrderOutboxPort {
     stage: () => Promise<StagedOrderPublication>
   ): Promise<OrderOutboxEntry> {
     assertIntent(intent);
-    let compatibility: unknown;
-    try {
-      compatibility = JSON.parse(intent.compatibility);
-    } catch {
-      throw new Error("Order outbox intent compatibility is invalid");
-    }
-    if (canonical(compatibility) !== intent.compatibility) {
-      throw new Error("Order outbox intent compatibility is not canonical");
-    }
     return this.runExclusive(async () => {
       const entries = await this.read();
       const existing = entries.find((entry) => entry.intent.orderId === intent.orderId);
@@ -396,9 +334,9 @@ export class OrderOutboxRepository implements OrderOutboxPort {
         publication: await stage()
       };
       assertEntry(entry, this.verify);
-      const existingIndex = entries.findIndex((item) => item.intent.orderId === intent.orderId);
-      if (existingIndex < 0) entries.push(entry);
-      else entries[existingIndex] = entry;
+      const index = entries.findIndex((item) => item.intent.orderId === intent.orderId);
+      if (index < 0) entries.push(entry);
+      else entries[index] = entry;
       await this.write(entries);
       return clone(entry);
     });
@@ -410,7 +348,9 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const entries = await this.read();
       const index = entries.findIndex((item) => item.intent.orderId === entry.intent.orderId);
       if (index < 0) {
-        throw new OrderOutboxConflictError("Order publication disappeared before progress was saved");
+        throw new OrderOutboxConflictError(
+          "Order projection disappeared before progress was saved"
+        );
       }
       const merged = mergeExact(entries[index]!, entry);
       entries[index] = merged;
@@ -421,20 +361,18 @@ export class OrderOutboxRepository implements OrderOutboxPort {
 
   async loadAcknowledged(orderId: string): Promise<OrderOutboxEntry | undefined> {
     const entry = await this.load(orderId);
-    return entry?.status === "projection_acknowledged" ? entry : undefined;
+    return entry?.status === "acknowledged" ? entry : undefined;
   }
 
   async clearAcknowledged(orderId: string): Promise<OrderOutboxEntry> {
     return this.runExclusive(async () => {
       const entries = await this.read();
       const index = entries.findIndex((entry) => entry.intent.orderId === orderId);
-      if (index < 0) {
-        throw new Error("No acknowledged order publication exists for this order ID");
-      }
+      if (index < 0) throw new Error("No acknowledged order projection exists");
       const existing = entries[index]!;
       if (existing.status === "committed") return clone(existing);
-      if (existing.status !== "projection_acknowledged") {
-        throw new Error("Order publication is not fully acknowledged");
+      if (existing.status !== "acknowledged") {
+        throw new Error("Order projection is not acknowledged");
       }
       const committed: OrderOutboxEntry = { ...existing, status: "committed" };
       entries[index] = committed;
@@ -449,7 +387,7 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const existing = entries.find((entry) => entry.intent.orderId === orderId);
       if (!existing) return;
       if (existing.status !== "committed") {
-        throw new Error("Only a committed order publication can be pruned");
+        throw new Error("Only a committed order projection can be pruned");
       }
       await this.write(entries.filter((entry) => entry.intent.orderId !== orderId));
     });

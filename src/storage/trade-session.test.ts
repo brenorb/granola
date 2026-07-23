@@ -40,10 +40,10 @@ const messageId = "33333333-3333-4333-8333-333333333333";
 const acceptedMessageId = "55555555-5555-4555-8555-555555555555";
 const acceptedRumorId = "19".repeat(32);
 const orderId = "22222222-2222-4222-8222-222222222222";
-const offeredOrderHead = "33".repeat(32);
+const offeredProjectionId = "33".repeat(32);
 const operationId = "44444444-4444-4444-8444-444444444444";
 const htlcMaterial = createHTLCHash("04".repeat(32));
-const orderAddress = `30078:${maker}:granola:order:v2:${orderId}`;
+const orderAddress = `30078:${maker}:granola:order:v1:${orderId}`;
 const publicationRelays = [
   "wss://discovery-one.example",
   "wss://discovery-two.example"
@@ -64,22 +64,10 @@ const wrongRegistrationSigner = structuredClone(finalizeEvent({
   tags: inboxRelays.map((relay) => ["relay", relay]),
   content: ""
 }, makerSecret));
-const transition = structuredClone(finalizeEvent({
-  kind: 78,
-  created_at: 1_700_000_005,
-  tags: [
-    ["d", `granola:order-transition:v2:${orderId}`],
-    ["op", "reserve"]
-  ],
-  content: "exact-signed-reserve-transition"
-}, makerSecret));
 const projection = structuredClone(finalizeEvent({
   kind: 30078,
   created_at: 1_700_000_005,
-  tags: [
-    ["d", `granola:order:v2:${orderId}`],
-    ["e", transition.id]
-  ],
+  tags: [["d", `granola:order:v1:${orderId}`]],
   content: "exact-signed-order-projection"
 }, makerSecret));
 const wrapper = structuredClone(finalizeEvent({
@@ -95,14 +83,15 @@ const seal = structuredClone(finalizeEvent({
   content: "encrypted-private-seal"
 }, sessionSecret));
 const outboxMessage: GranolaTradeMessage = {
-  schema: "granola/dm/v2",
+  schema: "granola/dm/v1",
   deployment: "cashu-testnet-v1",
   type: "base_lock",
   message_id: messageId,
   session_id: sessionId,
   reservation_id: reservationId,
   order_address: orderAddress,
-  order_head: transition.id,
+  order_projection_id: projection.id,
+  order_revision: "1",
   maker_order_pubkey: maker,
   author_pubkey: sessionPubkey,
   recipient_pubkey: "55".repeat(32),
@@ -166,20 +155,20 @@ const session: TradeSession = {
   role: "maker",
   phase: "base_locked",
   orderAddress,
-  offeredOrderHead,
-  reserveTransitionId: transition.id,
-  fillTransitionId: null,
+  offeredProjectionId,
+  offeredProjectionRevision: "0",
+  reserveProjectionId: projection.id,
+  reserveProjectionRevision: "1",
+  fillProjectionId: null,
+  fillProjectionRevision: null,
   pendingOrderPublication: {
     operation: "reserve",
     orderId,
-    transition,
     projection,
-    transitionReceipts: publicationRelays.map((relay) => ({ relay, ok: true, message: "stored" })),
-    projectionReceipts: publicationRelays.map((relay) => ({ relay, ok: true, message: "stored" })),
-    status: "projection_acknowledged",
+    receipts: publicationRelays.map((relay) => ({ relay, ok: true, message: "stored" })),
+    status: "acknowledged",
     stagedAt: 1_700_000_005,
-    transitionAcknowledgedAt: 1_700_000_006,
-    projectionAcknowledgedAt: 1_700_000_007,
+    acknowledgedAt: 1_700_000_006,
     committedAt: null
   },
   createdAt: 1_700_000_000,
@@ -208,8 +197,10 @@ const session: TradeSession = {
     makerPubkey: maker,
     commitments: [htlcMaterial.hash],
     mintStates: ["base:UNSPENT"],
-    reserveTransitionId: transition.id,
-    fillTransitionId: null,
+    reserveProjectionId: projection.id,
+    reserveProjectionRevision: "1",
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     reservation: {
       proposalSealId: seal.id,
       takerCommitment: "18".repeat(32),
@@ -403,15 +394,15 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
   });
   const record: OrderRecord = {
     address: orderAddress,
-    eventId: "32".repeat(32),
-    headEventId: offeredOrderHead,
+    eventId: offeredProjectionId,
     makerPubkey: maker,
     verified: true,
     state
   };
   return createTakerSession({
     order: record,
-    expectedOrderHead: offeredOrderHead,
+    expectedOrderProjectionId: offeredProjectionId,
+    expectedOrderRevision: "0",
     market: {
       baseMint: state.offered.mint,
       baseUnit: state.base_unit,
@@ -432,7 +423,8 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
 const takerStartIntent: TakerStartIntent = {
   requestId: "99999999-9999-4999-8999-999999999999",
   address: orderAddress,
-  expectedHeadId: offeredOrderHead,
+  expectedProjectionId: offeredProjectionId,
+  expectedRevision: "0",
   fillBaseAmount: "20"
 };
 
@@ -542,8 +534,8 @@ describe("trade session v2 repository", () => {
     const awaitingVerification = structuredClone(session);
     awaitingVerification.role = "taker";
     awaitingVerification.phase = "filled";
-    awaitingVerification.fillTransitionId = "aa".repeat(32);
-    awaitingVerification.evidence.fillTransitionId = null;
+    awaitingVerification.fillProjectionId = "aa".repeat(32);
+    awaitingVerification.evidence.fillProjectionId = null;
     awaitingVerification.pendingOrderPublication = null;
     awaitingVerification.privateState.outbox = null;
     awaitingVerification.privateState.cashuOperation = null;
@@ -657,42 +649,27 @@ describe("trade session v2 repository", () => {
       .toEqual(candidate.privateState.pendingIncoming);
   });
 
-  it("accepts a durable staged release publication without regenerating either signed event", async () => {
+  it("accepts a durable staged release publication without regenerating the signed projection", async () => {
     const repository = new TradeSessionRepository(new MemoryStorageDriver());
     const candidate = structuredClone(session);
-    const releaseTransition = structuredClone(finalizeEvent({
-      kind: 78,
-      created_at: 1_700_000_005,
-      tags: [
-        ["d", `granola:order-transition:v2:${orderId}`],
-        ["op", "release"]
-      ],
-      content: "exact-signed-release-transition"
-    }, makerSecret));
     const releaseProjection = structuredClone(finalizeEvent({
       kind: 30078,
       created_at: 1_700_000_005,
-      tags: [
-        ["d", `granola:order:v2:${orderId}`],
-        ["e", releaseTransition.id]
-      ],
+      tags: [["d", `granola:order:v1:${orderId}`]],
       content: "exact-signed-release-projection"
     }, makerSecret));
     candidate.pendingOrderPublication = {
       operation: "release",
       orderId,
-      transition: releaseTransition,
       projection: releaseProjection,
-      transitionReceipts: [{
+      receipts: [{
         relay: publicationRelays[0]!,
-        ok: true,
-        message: "stored below quorum"
+        ok: false,
+        message: "offline"
       }],
-      projectionReceipts: [],
       status: "staged",
       stagedAt: 1_700_000_005,
-      transitionAcknowledgedAt: null,
-      projectionAcknowledgedAt: null,
+      acknowledgedAt: null,
       committedAt: null
     };
 
@@ -784,9 +761,9 @@ describe("trade session v2 repository", () => {
     const publicationRegression = structuredClone(session);
     publicationRegression.revision = 1;
     publicationRegression.updatedAt += 1;
-    publicationRegression.pendingOrderPublication!.status = "transition_acknowledged";
-    publicationRegression.pendingOrderPublication!.projectionReceipts = [];
-    publicationRegression.pendingOrderPublication!.projectionAcknowledgedAt = null;
+    publicationRegression.pendingOrderPublication!.status = "staged";
+    publicationRegression.pendingOrderPublication!.receipts = [];
+    publicationRegression.pendingOrderPublication!.acknowledgedAt = null;
     await expect(repository.save(publicationRegression, 0))
       .rejects.toThrow(/publication.*regress/i);
 
@@ -851,8 +828,9 @@ describe("trade session v2 repository", () => {
         schema: "granola/atomic-swap-body/v1",
         taker_session_pubkey:
           reserveAccept.privateState.outbox!.message.recipient_pubkey,
-        maker_session_pubkey: sessionPubkey,
-        reserve_transition_id: transition.id
+          maker_session_pubkey: sessionPubkey,
+        reserve_projection_id: projection.id,
+        reserve_revision: "1"
       }
     };
     const rumorTemplate = {
@@ -890,7 +868,7 @@ describe("trade session v2 repository", () => {
       (candidate: TradeSession) => {
         candidate.privateState.outbox!.message.body = {
           ...candidate.privateState.outbox!.message.body,
-          reserve_transition_id: offeredOrderHead
+          reserve_projection_id: offeredProjectionId
         };
       }
     ]) {
@@ -951,8 +929,9 @@ describe("trade session v2 repository", () => {
 
     expect(view).toMatchObject({
       revision: 0,
-      offeredOrderHead,
-      reserveTransitionId: session.reserveTransitionId,
+      offeredProjectionId,
+      reserveProjectionId: session.reserveProjectionId,
+      reserveProjectionRevision: "1",
       evidence: {
         reservation: { abortSealId: incomingSeal.id },
         legs: session.evidence.legs
@@ -1205,7 +1184,7 @@ describe("trade session v2 repository", () => {
         ...session,
         pendingOrderPublication: {
           ...session.pendingOrderPublication!,
-          operation: "release"
+          operation: "fill"
         }
       },
       {
@@ -1324,36 +1303,22 @@ describe("trade session v2 repository", () => {
     await expect(spentRepository.save(unknown, 0)).rejects.toThrow(/regress|spent/i);
   });
 
-  it.skip("binds pending order artifacts to maker authority, lineage, IDs, and relay quorum", async () => {
-    const attackerTransition = structuredClone(finalizeEvent({
-      ...transition,
-      tags: transition.tags.map((tag) => [...tag])
-    }, remoteSecret));
+  it.skip("binds pending order projections to maker authority and lineage", async () => {
     const attackerProjection = structuredClone(finalizeEvent({
       ...projection,
-      tags: projection.tags.map((tag) =>
-        tag[0] === "e" ? ["e", attackerTransition.id] : [...tag]
-      )
+      tags: projection.tags.map((tag) => [...tag])
     }, remoteSecret));
     const attacker = structuredClone(session);
     attacker.pendingOrderPublication = {
       ...attacker.pendingOrderPublication!,
-      transition: attackerTransition,
       projection: attackerProjection
     };
 
-    const subquorum = structuredClone(session);
-    subquorum.pendingOrderPublication = {
-      ...subquorum.pendingOrderPublication!,
-      transitionReceipts: subquorum.pendingOrderPublication!.transitionReceipts.slice(0, 1),
-      projectionReceipts: subquorum.pendingOrderPublication!.projectionReceipts.slice(0, 1)
-    };
-
-    for (const corrupt of [attacker, subquorum]) {
+    for (const corrupt of [attacker]) {
       const driver = new MemoryStorageDriver();
       await driver.set("granola.trade-sessions.v2", [corrupt]);
       await expect(new TradeSessionRepository(driver).list())
-        .rejects.toThrow(/authority|signer|quorum|receipt/i);
+        .rejects.toThrow(/authority|signer/i);
     }
   });
 

@@ -25,9 +25,10 @@ string:
 { "price_cents_per_btc": "4950000" }
 ```
 
-Because this removes and replaces signed fields, order state, order
-transitions, order addresses, direct messages, and the terms-hash domain move
-from `v1` to `v2`.
+Granola is still a testnet proof of concept, so the protocol `v1` is rewritten in
+place. Public order projections, private messages, and the terms-hash domain all
+use the canonical integer field; there is no compatibility path for the mistaken
+rational representation.
 
 Settlement uses integer arithmetic only:
 
@@ -63,8 +64,8 @@ encrypted trade terms before either party locks proofs.
   settle a zero-value quote leg.
 - Counterparties can deterministically recompute and validate the settlement
   amount using integer arithmetic.
-- Existing `v1` testnet events and persisted sessions containing `limit_price`
-  rational objects fail closed and must be republished as `v2`.
+- Earlier testnet events and persisted sessions containing `limit_price` rational
+  objects fail closed and must be republished as canonical `v1` projections.
 - This field is specific to the current SAT/fiat-minor-unit deployment. A
   future multi-asset price format requires a separate protocol decision.
 

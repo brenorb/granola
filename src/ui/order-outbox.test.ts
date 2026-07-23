@@ -6,13 +6,12 @@ import { renderPendingPublications } from "./order-outbox.js";
 const pending: PublicOrderPublication = {
   orderId: "11111111-1111-4111-8111-111111111111",
   makerPubkey: "a".repeat(64),
-  transitionId: "b".repeat(64),
   projectionId: "c".repeat(64),
-  transitionReceipts: [
+  revision: "0",
+  receipts: [
     { relay: "wss://one.example", ok: true, message: "stored" },
     { relay: "wss://two.example", ok: false, message: "blocked" }
-  ],
-  projectionReceipts: []
+  ]
 };
 
 describe("pending order publications", () => {
@@ -23,7 +22,7 @@ describe("pending order publications", () => {
     renderPendingPublications(root, [pending], retry);
 
     expect(root.hidden).toBe(false);
-    expect(root.textContent).toContain("1/3 transition relay acknowledgements");
+    expect(root.textContent).toContain("1/3 relay acknowledgements · sufficient");
     expect(root.textContent).toContain("11111111…11111111");
     expect(root.textContent).not.toContain(pending.makerPubkey);
     root.querySelector("button")?.click();

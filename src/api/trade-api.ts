@@ -90,7 +90,8 @@ export interface TradeApiOptions {
 export interface TakeOrderInput {
   requestId: string;
   address: string;
-  expectedHeadId: string;
+  expectedProjectionId: string;
+  expectedRevision: string;
   fillBaseAmount: string;
 }
 
@@ -129,7 +130,7 @@ function immutableSessionIdentity(session: TradeSession): unknown {
     reservationId: session.reservationId,
     role: session.role,
     orderAddress: session.orderAddress,
-    offeredOrderHead: session.offeredOrderHead,
+    offeredProjectionId: session.offeredProjectionId,
     terms: session.terms,
     makerPubkey: session.evidence.makerPubkey,
     proposalSealId: session.evidence.reservation.proposalSealId
@@ -273,7 +274,8 @@ export class TradeApi {
     const intent = {
       requestId: input.requestId,
       address: input.address,
-      expectedHeadId: input.expectedHeadId,
+      expectedProjectionId: input.expectedProjectionId,
+      expectedRevision: input.expectedRevision,
       fillBaseAmount: input.fillBaseAmount
     };
     const existing = await this.sessions.getTakerForRequest(intent);
@@ -284,13 +286,15 @@ export class TradeApi {
     const currentTime = this.currentTime();
     const order = await this.loadExactSellOrder(
       input.address,
-      input.expectedHeadId,
+      input.expectedProjectionId,
+      input.expectedRevision,
       currentTime
     );
     const selectedMarket = await this.preflightMarket(order);
     const session = await this.sessionFactory.createTaker({
       order,
-      expectedOrderHead: input.expectedHeadId,
+      expectedOrderProjectionId: input.expectedProjectionId,
+      expectedOrderRevision: input.expectedRevision,
       market: selectedMarket,
       fillBaseAmount: input.fillBaseAmount,
       clocks: {
@@ -329,7 +333,8 @@ export class TradeApi {
     const currentTime = this.currentTime();
     const order = await this.loadExactSellOrder(
       proposal.message.order_address,
-      proposal.message.order_head,
+      proposal.message.order_projection_id,
+      proposal.message.order_revision,
       currentTime
     );
     const selectedMarket = await this.preflightMarket(order);
@@ -379,7 +384,8 @@ export class TradeApi {
     if (
       persisted.role !== "taker" ||
       persisted.orderAddress !== intent.address ||
-      persisted.offeredOrderHead !== intent.expectedHeadId ||
+      persisted.offeredProjectionId !== intent.expectedProjectionId ||
+      persisted.offeredProjectionRevision !== intent.expectedRevision ||
       persisted.terms.baseAmount !== intent.fillBaseAmount ||
       persisted.terms.baseMint !== this.market.baseMint ||
       persisted.terms.baseUnit !== this.market.baseUnit ||
@@ -392,11 +398,16 @@ export class TradeApi {
 
   private async loadExactSellOrder(
     address: string,
-    expectedHeadId: string,
+    expectedProjectionId: string,
+    expectedRevision: string,
     now: number
   ): Promise<OrderRecord> {
-    if (!address || !HEX_32.test(expectedHeadId)) {
-      throw new Error("Trade order address or expected head is invalid");
+    if (
+      !address ||
+      !HEX_32.test(expectedProjectionId) ||
+      !/^(0|[1-9]\d*)$/.test(expectedRevision)
+    ) {
+      throw new Error("Trade order projection binding is invalid");
     }
     const loaded = await this.orders.loadBook(this.market, now);
     if (!exactMarket(loaded.book.market, this.market)) {
@@ -409,7 +420,12 @@ export class TradeApi {
     }
     const record = matching[0]!;
     if (!record.verified) throw new Error("Trade order is not verified");
-    if (record.headEventId !== expectedHeadId) throw new Error("Trade order head is stale");
+    if (
+      record.eventId !== expectedProjectionId ||
+      record.state.revision !== expectedRevision
+    ) {
+      throw new Error("Trade order projection is stale");
+    }
     if (
       record.state.side !== "sell" ||
       record.state.status !== "open" ||

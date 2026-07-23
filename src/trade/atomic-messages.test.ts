@@ -79,7 +79,8 @@ function body<T extends AtomicSwapMessageType>(
       maker_session_pubkey: makerSession,
       maker_cashu_pubkey: makerCashu,
       maker_refund_pubkey: makerRefund,
-      reserve_transition_id: reserveHead,
+      reserve_projection_id: reserveHead,
+      reserve_revision: "1",
       settlement_hash: settlementHash,
       short_locktime: 1_800_000_600,
       maker_claim_cutoff: 1_800_000_480,
@@ -91,7 +92,8 @@ function body<T extends AtomicSwapMessageType>(
       schema: "granola/atomic-swap-body/v1",
       reserve_accept_message_id: ids[1],
       reserve_accept_transcript_hash: "12".repeat(32),
-      reserve_transition_id: reserveHead,
+      reserve_projection_id: reserveHead,
+      reserve_revision: "1",
       settlement_hash: settlementHash
     },
     base_lock: {
@@ -155,7 +157,8 @@ function body<T extends AtomicSwapMessageType>(
     },
     settlement_ack: {
       schema: "granola/atomic-swap-body/v1",
-      fill_transition_id: "20".repeat(32),
+      fill_projection_id: "20".repeat(32),
+      fill_revision: "2",
       base_token_commitment: baseTokenCommitment,
       quote_token_commitment: quoteTokenCommitment,
       settlement_hash: settlementHash
@@ -215,14 +218,21 @@ async function message<T extends AtomicSwapMessageType>(
   };
   const includesTerms = type === "reserve_propose" || type === "reserve_accept";
   return {
-    schema: "granola/dm/v2",
+    schema: "granola/dm/v1",
     deployment: "cashu-testnet-v1",
     type,
     message_id: ids[index] ?? "00000000-0000-4000-8000-00000000000b",
     session_id: sessionId,
     reservation_id: reservationId,
-    order_address: `30078:${makerOrder}:granola:order:v2:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`,
-    order_head: type === "reserve_propose" ? proposalHead : reserveHead,
+    order_address: `30078:${makerOrder}:granola:order:v1:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`,
+    order_projection_id:
+      type === "reserve_propose" ? proposalHead :
+      type === "settlement_ack" ? "20".repeat(32) :
+      reserveHead,
+    order_revision:
+      type === "reserve_propose" ? "0" :
+      type === "settlement_ack" ? "2" :
+      "1",
     maker_order_pubkey: makerOrder,
     author_pubkey: authors[type],
     recipient_pubkey: recipients[type],

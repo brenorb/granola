@@ -25,8 +25,7 @@ function record(
 ): OrderRecord {
   return {
     address: `30078:maker:${orderId}`,
-    eventId: `${orderId}-event`,
-    headEventId: `${orderId}-head`,
+    eventId: `${orderId}-head`,
     makerPubkey: `maker-${orderId}`,
     verified: true,
     state: createOrderState({
@@ -39,10 +38,10 @@ function record(
       offered: side === "sell"
         ? { unit: "sat", mint: baseMint }
         : { unit: "usd", mint: quoteMint },
-      requested: side === "sell"
+        requested: side === "sell"
         ? { unit: "usd", acceptableMints: [quoteMint] }
         : { unit: "sat", acceptableMints: [baseMint] },
-      amount,
+        amount,
       priceCentsPerBtc
     })
   };
@@ -100,6 +99,32 @@ describe("order-book presentation", () => {
     expect(button?.textContent).toBe("Take ask");
     expect(amount?.value).toBe("20");
     expect(take).toHaveBeenCalledWith(best, "20");
+  });
+
+  it("hides unsupported bid taking and exposes cancellation only for owned orders", async () => {
+    const ask = record(askLow, "sell", "5000000", "20");
+    const bid = record(bidHigh, "buy", "5000000", "20");
+    const book = await buildOrderBook([ask, bid], market, 1_700_000_100);
+    const root = document.createElement("section");
+    const cancel = vi.fn();
+
+    renderOrderBook(root, { status: "ready", book }, {
+      onTake: vi.fn(),
+      onCancel: cancel,
+      canCancel: (order) => order.eventId === ask.eventId
+    });
+
+    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-order]`))
+      .toBeNull();
+    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-unavailable]`)
+      ?.textContent).toMatch(/not supported/i);
+    const cancelButton = root.querySelector<HTMLButtonElement>(
+      `[data-order-id="${askLow}"] [data-cancel-order]`
+    );
+    cancelButton?.click();
+    expect(cancel).toHaveBeenCalledWith(ask);
+    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-cancel-order]`))
+      .toBeNull();
   });
 
   it("validates exact all-or-none and partial-fill amounts before taking an order", async () => {

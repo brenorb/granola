@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
+import { finalizeEvent, getPublicKey, verifyEvent } from "nostr-tools/pure";
 
 import type { OrderApi } from "../api/order-api.js";
 import type {
@@ -11,8 +11,7 @@ import type { WalletState } from "../core/wallet.js";
 import type { NostrTradeTransport } from "../nostr/trade-transport.js";
 import {
   createProjectionTemplate,
-  createStateTransitionTemplate,
-  createTransitionTemplate,
+  parseProjectionEvent,
   type NostrEvent
 } from "../order/events.js";
 import {
@@ -27,7 +26,7 @@ import type { CoordinatorAction } from "./coordinator-plan.js";
 import {
   GranolaCoordinatorEffects,
   type CoordinatorOrderReadPort,
-  type PublishedOrderHead
+  type PublishedOrderProjection
 } from "./effects.js";
 import type { TradeSession } from "./session.js";
 
@@ -62,7 +61,7 @@ function event(
   };
 }
 
-async function publishedFill(): Promise<PublishedOrderHead> {
+async function publishedFill(): Promise<PublishedOrderProjection> {
   const maker = getPublicKey(ORDER_SIGNING_KEY);
   const initial = createOrderState({
     orderId: ORDER_ID,
@@ -79,10 +78,6 @@ async function publishedFill(): Promise<PublishedOrderHead> {
     amount: "20",
     priceCentsPerBtc: "5000000"
   });
-  const create = finalizeEvent(
-    createTransitionTemplate(initial, maker, "create"),
-    ORDER_SIGNING_KEY
-  );
   const reserved = reserveOrder(initial, {
     reservationId: "11111111-1111-4111-8111-111111111111",
     amount: "20",
@@ -91,45 +86,20 @@ async function publishedFill(): Promise<PublishedOrderHead> {
     proposalEventId: "31".repeat(32),
     takerCommitment: "32".repeat(32)
   });
-  const predecessor = finalizeEvent(
-    createStateTransitionTemplate(
-      reserved,
-      maker,
-      "reserve",
-      "reserve",
-      create
-    ),
-    ORDER_SIGNING_KEY
-  );
   const filled = fillOrder(reserved, {
     reservationId: reserved.reservation!.id,
     amount: reserved.reservation!.amount
   });
-  const transition = finalizeEvent(
-    createStateTransitionTemplate(
-      filled,
-      maker,
-      "fill",
-      "fill",
-      predecessor,
-      {
-        settlement_hash: "44".repeat(32),
-        base_token_commitment: "45".repeat(32),
-        quote_token_commitment: "46".repeat(32)
-      },
-      NOW - 120
-    ),
-    ORDER_SIGNING_KEY
-  );
   const projection = finalizeEvent(
-    await createProjectionTemplate(filled, transition),
+    await createProjectionTemplate(filled, maker, NOW - 120),
     ORDER_SIGNING_KEY
   );
+  const record = await parseProjectionEvent(projection, verifyEvent);
   return {
-    headEventId: transition.id,
-    predecessor,
-    transition,
-    projection
+    eventId: projection.id,
+    revision: filled.revision,
+    projection,
+    record
   };
 }
 
@@ -186,10 +156,13 @@ function baseSession(): TradeSession {
     reservationId: "11111111-1111-4111-8111-111111111111",
     role: "maker",
     phase: "base_locked",
-    orderAddress: `30078:${MAKER}:granola:order:v2:${ORDER_ID}`,
-    offeredOrderHead: "33".repeat(32),
-    reserveTransitionId: "34".repeat(32),
-    fillTransitionId: null,
+    orderAddress: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+    offeredProjectionId: "33".repeat(32),
+    offeredProjectionRevision: "0",
+    reserveProjectionId: "34".repeat(32),
+    reserveProjectionRevision: "1",
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     pendingOrderPublication: null,
     createdAt: NOW - 100,
     updatedAt: NOW - 10,
@@ -217,8 +190,10 @@ function baseSession(): TradeSession {
       makerPubkey: MAKER,
       commitments: [],
       mintStates: [],
-      reserveTransitionId: "34".repeat(32),
-      fillTransitionId: null,
+      reserveProjectionId: "34".repeat(32),
+      reserveProjectionRevision: "1",
+      fillProjectionId: null,
+      fillProjectionRevision: null,
       reservation: {
         proposalSealId: "35".repeat(32),
         takerCommitment: "36".repeat(32),
@@ -318,14 +293,15 @@ function stagedDeliverySession(): TradeSession {
   const current = baseSession();
   current.privateState.outbox = {
     message: {
-      schema: "granola/dm/v2",
+      schema: "granola/dm/v1",
       deployment: "cashu-testnet-v1",
       type: "base_lock",
       message_id: "11111111-1111-4111-8111-111111111112",
       session_id: current.sessionId,
       reservation_id: current.reservationId,
       order_address: current.orderAddress,
-      order_head: current.reserveTransitionId!,
+      order_projection_id: current.reserveProjectionId!,
+      order_revision: current.reserveProjectionRevision!,
       maker_order_pubkey: MAKER,
       author_pubkey: "55".repeat(32),
       recipient_pubkey: "56".repeat(32),
@@ -378,14 +354,11 @@ function stagedOrderSession(): TradeSession {
   current.pendingOrderPublication = {
     operation: "reserve",
     orderId: ORDER_ID,
-    transition: event(78, "a1"),
     projection: event(30078, "a2"),
-    transitionReceipts: [],
-    projectionReceipts: [],
+    receipts: [],
     status: "staged",
     stagedAt: NOW - 10,
-    transitionAcknowledgedAt: null,
-    projectionAcknowledgedAt: null,
+    acknowledgedAt: null,
     committedAt: null
   };
   return current;
@@ -423,7 +396,7 @@ interface Harness {
     load: ReturnType<typeof vi.fn>;
   };
   orderReader: {
-    loadPublishedHead: ReturnType<typeof vi.fn>;
+    loadPublishedProjection: ReturnType<typeof vi.fn>;
   };
   nostr: {
     send: ReturnType<typeof vi.fn>;
@@ -460,7 +433,7 @@ function harness(): Harness {
     pruneCommitted: vi.fn()
   };
   const orderReader = {
-    loadPublishedHead: vi.fn()
+    loadPublishedProjection: vi.fn()
   };
   const nostr = {
     createRegistration: vi.fn(),
@@ -544,21 +517,26 @@ function externalInput(
 
 async function takerAwaitingFillVerification(): Promise<{
   session: TradeSession;
-  publication: PublishedOrderHead;
+  publication: PublishedOrderProjection;
 }> {
   const publication = await publishedFill();
   const current = baseSession();
   current.role = "taker";
   current.phase = "filled";
   current.orderAddress =
-    `30078:${publication.transition.pubkey}:granola:order:v2:${ORDER_ID}`;
-  current.offeredOrderHead = publication.predecessor.id;
-  current.reserveTransitionId = publication.predecessor.id;
-  current.fillTransitionId = publication.transition.id;
+    `30078:${publication.projection.pubkey}:granola:order:v1:${ORDER_ID}`;
+  current.offeredProjectionId = "31".repeat(32);
+  current.offeredProjectionRevision = "0";
+  current.reserveProjectionId = "32".repeat(32);
+  current.reserveProjectionRevision = "1";
+  current.fillProjectionId = publication.projection.id;
+  current.fillProjectionRevision = publication.revision;
   current.pendingOrderPublication = null;
-  current.evidence.makerPubkey = publication.transition.pubkey;
-  current.evidence.reserveTransitionId = publication.predecessor.id;
-  current.evidence.fillTransitionId = null;
+  current.evidence.makerPubkey = publication.projection.pubkey;
+  current.evidence.reserveProjectionId = current.reserveProjectionId;
+  current.evidence.reserveProjectionRevision = current.reserveProjectionRevision;
+  current.evidence.fillProjectionId = null;
+  current.evidence.fillProjectionRevision = null;
   current.evidence.legs.base.tokenCommitment = "45".repeat(32);
   current.evidence.legs.quote.tokenCommitment = "46".repeat(32);
   current.privateState.outbox = null;
@@ -580,7 +558,6 @@ describe("GranolaCoordinatorEffects", () => {
       "none"
     ] satisfies CoordinatorAction["kind"][];
     const external = [
-      "publish_order_transition",
       "publish_order_projection",
       "commit_order_publication",
       "clear_order_publication",
@@ -618,7 +595,7 @@ describe("GranolaCoordinatorEffects", () => {
     const allKinds = [...local, ...external];
 
     expect(new Set(allKinds).size).toBe(allKinds.length);
-    expect(allKinds).toHaveLength(40);
+    expect(allKinds).toHaveLength(39);
     for (const kind of local) {
       expect(effects.classify({ kind } as CoordinatorAction), kind).toBe("local");
     }
@@ -680,18 +657,18 @@ describe("GranolaCoordinatorEffects", () => {
       intent: {
         operation: "reserve",
         orderId: ORDER_ID,
-        address: current.orderAddress
+        address: current.orderAddress,
+        createdAt: NOW - 10
       },
       publication: {
-        transition: current.pendingOrderPublication!.transition,
+        state: { revision: "1" },
         projection: current.pendingOrderPublication!.projection,
-        transitionReceipts: [],
-        projectionReceipts: []
+        receipts: []
       }
     } as unknown as OrderOutboxEntry;
     const acknowledgedEntry = clone(stagedEntry);
-    acknowledgedEntry.status = "transition_acknowledged";
-    acknowledgedEntry.publication.transitionReceipts = [{
+    acknowledgedEntry.status = "acknowledged";
+    acknowledgedEntry.publication.receipts = [{
       relay: "wss://orders.example",
       ok: true,
       message: "stored"
@@ -703,31 +680,28 @@ describe("GranolaCoordinatorEffects", () => {
       return {
         orderId: ORDER_ID,
         makerPubkey: MAKER,
-        transitionId: current.pendingOrderPublication!.transition.id,
         projectionId: current.pendingOrderPublication!.projection.id,
-        transitionReceipts: clone(acknowledgedEntry.publication.transitionReceipts),
-        projectionReceipts: [],
-        status: "transition_acknowledged"
+        revision: "1",
+        receipts: clone(acknowledgedEntry.publication.receipts),
+        status: "acknowledged"
       };
     });
 
     const first = await effects.performExternal(
-      externalInput({ kind: "publish_order_transition" }, current)
+      externalInput({ kind: "publish_order_projection" }, current)
     );
     const retry = await effects.performExternal(
-      externalInput({ kind: "publish_order_transition" }, current)
+      externalInput({ kind: "publish_order_projection" }, current)
     );
 
     expect(orderApi.publishNextStage).toHaveBeenCalledTimes(1);
     expect(orderApi.publishNextStage).toHaveBeenCalledWith(ORDER_ID);
-    expect(first.pendingOrderPublication?.transition)
-      .toEqual(current.pendingOrderPublication!.transition);
     expect(first.pendingOrderPublication?.projection)
       .toEqual(current.pendingOrderPublication!.projection);
-    expect(first.pendingOrderPublication?.transitionReceipts)
-      .toEqual(acknowledgedEntry.publication.transitionReceipts);
+    expect(first.pendingOrderPublication?.receipts)
+      .toEqual(acknowledgedEntry.publication.receipts);
     expect(first.pendingOrderPublication?.status)
-      .toBe("transition_acknowledged");
+      .toBe("acknowledged");
     expect(retry).toEqual(first);
   });
 
@@ -735,13 +709,11 @@ describe("GranolaCoordinatorEffects", () => {
     const { effects, orderApi, orderOutbox } = harness();
     const current = baseSession();
     current.phase = "negotiating";
-    current.reserveTransitionId = null;
-    current.evidence.reserveTransitionId = null;
+    current.reserveProjectionId = null;
+    current.evidence.reserveProjectionId = null;
     current.evidence.reservation.takerCommitment = null;
     current.privateState.transcript.choreography.phase =
       "awaiting_reserve_accept";
-    const transition = event(78, "b1");
-    transition.created_at = NOW + 1;
     const projection = event(30078, "b2");
     projection.created_at = NOW + 1;
     const stagedEntry = {
@@ -757,10 +729,12 @@ describe("GranolaCoordinatorEffects", () => {
         }
       },
       publication: {
-        transition,
+        state: {
+          revision: "1",
+          reservation: { taker_commitment: "bc".repeat(32) }
+        },
         projection,
-        transitionReceipts: [],
-        projectionReceipts: []
+        receipts: []
       }
     } as unknown as OrderOutboxEntry;
     orderApi.ensureReserveStaged.mockResolvedValue({ orderId: ORDER_ID });
@@ -937,28 +911,28 @@ describe("GranolaCoordinatorEffects", () => {
     const { effects, orderReader } = harness();
     const { session, publication } = await takerAwaitingFillVerification();
 
-    orderReader.loadPublishedHead.mockRejectedValueOnce(
+    orderReader.loadPublishedProjection.mockRejectedValueOnce(
       new Error("fill is absent from relays")
     );
     await expect(effects.performExternal(
       externalInput({ kind: "verify_order_fill" }, session)
     )).rejects.toThrow(/absent/i);
 
-    orderReader.loadPublishedHead.mockResolvedValueOnce({
+    orderReader.loadPublishedProjection.mockResolvedValueOnce({
       ...publication,
-      headEventId: "ff".repeat(32)
+      eventId: "ff".repeat(32)
     });
     await expect(effects.performExternal(
       externalInput({ kind: "verify_order_fill" }, session)
-    )).rejects.toThrow(/head/i);
+    )).rejects.toThrow(/projection|fill/i);
 
-    orderReader.loadPublishedHead.mockResolvedValueOnce({
+    orderReader.loadPublishedProjection.mockResolvedValueOnce({
       ...publication,
       projection: {
         ...publication.projection,
         content: JSON.stringify({
           ...JSON.parse(publication.projection.content),
-          head: "fe".repeat(32)
+          remaining_amount: "1"
         })
       }
     });
@@ -966,16 +940,17 @@ describe("GranolaCoordinatorEffects", () => {
       externalInput({ kind: "verify_order_fill" }, session)
     )).rejects.toThrow();
 
-    orderReader.loadPublishedHead.mockResolvedValueOnce(publication);
+    orderReader.loadPublishedProjection.mockResolvedValueOnce(publication);
     const verified = await effects.performExternal(
       externalInput({ kind: "verify_order_fill" }, session)
     );
 
-    expect(orderReader.loadPublishedHead).toHaveBeenLastCalledWith(
+    expect(orderReader.loadPublishedProjection).toHaveBeenLastCalledWith(
       session.orderAddress,
-      session.fillTransitionId
+      session.fillProjectionId,
+      session.fillProjectionRevision
     );
-    expect(verified.evidence.fillTransitionId).toBe(session.fillTransitionId);
+    expect(verified.evidence.fillProjectionId).toBe(session.fillProjectionId);
     expect(verified.revision).toBe(session.revision + 1);
     });
   });

@@ -25,7 +25,9 @@ For a maker selling base for quote:
 5. Taker locks the quote proofs second. The quote leg uses the same hash, the maker's Cashu settlement key as receiver, the taker refund key, and the earlier deadline `T_short`.
 6. Maker validates and acknowledges that leg, then claims it with the preimage and maker settlement key before the maker claim cutoff.
 7. Taker observes every quote proof as `SPENT` through NUT-07, extracts one identical witness preimage, verifies its hash, and claims the base leg with that preimage and the taker settlement key.
-8. Maker verifies both legs as `SPENT` before publishing the public `fill` transition. The reservation remains public until fill or confirmed recovery.
+8. Maker verifies both legs as `SPENT` before replacing the order with its
+   public `filled` projection. The reservation remains public until fill or
+   confirmed recovery.
 
 For the testnet demonstration, after confirming each mint clock is within 30 seconds of local time, use:
 
@@ -125,7 +127,12 @@ That would test units but not the cross-mint failure boundary Granola is meant t
 
 ## Consequences
 
-The browser must add durable trade sessions, Cashu HTLC creation/validation/claim/refund operations, strict NIP-17 transport, NUT-07 witness polling, and public reserve/fill transitions. The user- and agent-facing API exposes only high-level operations and redacted observations; it never returns bearer tokens, proofs, witnesses, preimages, private keys, quote IDs, or raw encrypted private messages.
+The browser must add durable trade sessions, Cashu HTLC
+creation/validation/claim/refund operations, strict NIP-17 transport, NUT-07
+witness polling, and public reserve/fill projections. The user- and
+agent-facing API exposes only high-level operations and redacted observations;
+it never returns bearer tokens, proofs, witnesses, preimages, private keys,
+quote IDs, or raw encrypted private messages.
 
 The public verification trace may include event IDs, relay acknowledgements, mints, units, keyset IDs, amounts, price, capability snapshots, deadlines, proof counts, fees, commitments, state sequences, settlement hash, and before/after aggregate balances. It omits raw proofs, curve points, bearer tokens, preimages, witnesses, private keys, and private NIP-17 event identifiers.
 

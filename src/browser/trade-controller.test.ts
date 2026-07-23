@@ -47,10 +47,13 @@ function view(revision = 0): PublicTradeView {
     reservationId: "55555555-5555-4555-8555-555555555555",
     role: "taker",
     phase: "negotiating",
-    orderAddress: `30078:${"66".repeat(32)}:granola:order:v2:77777777-7777-4777-8777-777777777777`,
-    offeredOrderHead: "88".repeat(32),
-    reserveTransitionId: null,
-    fillTransitionId: null,
+    orderAddress: `30078:${"66".repeat(32)}:granola:order:v1:77777777-7777-4777-8777-777777777777`,
+    offeredProjectionId: "88".repeat(32),
+    offeredProjectionRevision: "0",
+    reserveProjectionId: null,
+    reserveProjectionRevision: null,
+    fillProjectionId: null,
+    fillProjectionRevision: null,
     pendingOrderPublication: null,
     createdAt: 1_800_000_000,
     updatedAt: 1_800_000_000,
@@ -78,8 +81,10 @@ function view(revision = 0): PublicTradeView {
       makerPubkey: "66".repeat(32),
       commitments: [],
       mintStates: [],
-      reserveTransitionId: null,
-      fillTransitionId: null,
+      reserveProjectionId: null,
+      reserveProjectionRevision: null,
+      fillProjectionId: null,
+      fillProjectionRevision: null,
       reservation: {
         proposalSealId: null,
         takerCommitment: null,
@@ -263,7 +268,8 @@ describe("BrowserTradeController", () => {
     const input: TakeOrderInput = {
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
-      expectedHeadId: view().offeredOrderHead,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     };
     expect(await controller.takeOrder(input)).toEqual(view());
@@ -335,7 +341,8 @@ describe("BrowserTradeController", () => {
     await controller.takeOrder({
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
-      expectedHeadId: view().offeredOrderHead,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     });
 
@@ -367,7 +374,8 @@ describe("BrowserTradeController", () => {
     await controller.takeOrder({
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
-      expectedHeadId: view().offeredOrderHead,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     });
 
@@ -395,7 +403,8 @@ describe("BrowserTradeController", () => {
     await controller.takeOrder({
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
-      expectedHeadId: view().offeredOrderHead,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     });
 
@@ -419,7 +428,8 @@ describe("BrowserTradeController", () => {
     await controller.takeOrder({
       requestId: "99999999-9999-4999-8999-999999999999",
       address: view().orderAddress,
-      expectedHeadId: view().offeredOrderHead,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
       fillBaseAmount: "1000"
     });
 
