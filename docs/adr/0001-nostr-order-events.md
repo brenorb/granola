@@ -60,8 +60,7 @@ terms and the mutable fields:
 - `remaining_amount`;
 - `reserved_amount`;
 - `status`;
-- `reservation`; and
-- `replaced_by`.
+- `reservation`.
 
 No public event contains settlement commitments, private message IDs, Cashu
 tokens, proofs, preimages, or a predecessor event ID.

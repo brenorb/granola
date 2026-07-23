@@ -53,16 +53,7 @@ On the taker page, set:
 Press **Request & claim quote**. For Cashu USD, `10` minor units means USD 0.10.
 Wait for `0.10 USD · ISSUED` and confirm the wallet balance.
 
-## 3. Start the maker inbox
-
-On the maker page, press **Enable maker inbox · offline**. Wait until the button
-reads **Enable maker inbox · listening** and the status says the maker order
-inbox is authenticated and listening.
-
-Keep this page open. The order-key listener lives for the page lifetime; after
-a reload, enable it again.
-
-## 4. Publish the 20 SAT ask
+## 3. Publish the 20 SAT ask
 
 On the maker page, expand **Publish a test limit order** and enter:
 
@@ -94,6 +85,13 @@ Press **Refresh book** and find the row with all of these values:
 
 It will normally be at the top ask price, although other public test orders can
 tie it.
+
+## 4. Start the maker inbox
+
+After the order is published, press **Enable maker inbox · offline** on the
+maker page. Wait until the button reads **Enable maker inbox · listening**.
+Granola now registers and listens with this order's ephemeral Nostr key. Keep
+the page open; after a reload, enable it again for each active order.
 
 ## 5. Take the ask
 

@@ -58,7 +58,7 @@ Legacy prototype sessions retain their originally signed shorter profile.
 ## Happy-path choreography
 
 1. Taker sends `reserve_propose` to the maker order key.
-2. Maker replaces the order with its reserved projection and sends
+2. Maker publishes the reserved projection at the same `d` tag and sends
    `reserve_accept` bound to that event ID and revision.
 3. Taker sends `session_ack` to the maker session key.
 4. Maker creates and sends the base SAT HTLC.
@@ -67,8 +67,8 @@ Legacy prototype sessions retain their originally signed shorter profile.
 7. Maker validates it, claims the USD leg, and sends `claim_notice`.
 8. Taker independently observes that spend, recovers the preimage, claims the
    SAT leg, and sends `fill_request`.
-9. Maker independently observes both spends, replaces the order with its fill
-   projection, and sends `settlement_ack` bound to that event ID and revision.
+9. Maker independently observes both spends, publishes the fill projection at
+   the same `d` tag, and sends `settlement_ack` bound to that event ID and revision.
 10. Taker accepts the exact settlement acknowledgement. Both public views become
     filled only when the authoritative fill and the two mint observations agree.
 
@@ -91,7 +91,7 @@ namespace. Before advertising the private inbox, the page performs a disposable
 recipient-only live probe against `wss://auth.nostr1.com`; all probe keys are
 zeroized afterward.
 
-The maker explicitly enables its order-key inbox. A valid `reserve_propose`
+The maker explicitly enables each active order-key inbox. A valid `reserve_propose`
 opens a maker session through the same exact-order and exact-funding preflight
 used by the agent API. Once either role's per-session kind `10050` registration
 is committed, the page opens a persistent subscription using that session key.

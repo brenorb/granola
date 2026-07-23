@@ -76,8 +76,9 @@ import { parseProjectionEvent } from "../order/events.js";
 type WithWalletLock = <T>(action: () => Promise<T>) => Promise<T>;
 
 export interface CoordinatorMakerIdentity {
-  publicKey(): Promise<string>;
-  useSecretKey<T>(action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
+  publicKey(orderId?: string): Promise<string>;
+  useSecretKey?<T>(action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
+  useOrderSecretKey?<T>(orderId: string, action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
 }
 
 export interface CoordinatorEffectsEntropy {
@@ -984,7 +985,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     };
 
     const staged = type === "reserve_accept"
-      ? await this.makerIdentity.useSecretKey(stageWithKey)
+      ? await this.withMakerOrderKey(session, stageWithKey)
       : await this.withSessionKey(session, stageWithKey);
     const next = bump(session, now);
     next.privateState.outbox = {
@@ -1002,6 +1003,18 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       next.privateState.htlcHash = session.privateState.htlcHash;
     }
     return next;
+  }
+
+  private async withMakerOrderKey<T>(
+    session: TradeSession,
+    action: (secretKey: Uint8Array) => Promise<T>
+  ): Promise<T> {
+    const id = orderId(session);
+    if (this.makerIdentity.useOrderSecretKey) {
+      return this.makerIdentity.useOrderSecretKey(id, action);
+    }
+    if (this.makerIdentity.useSecretKey) return this.makerIdentity.useSecretKey(action);
+    throw new Error("Maker order key access is unavailable");
   }
 
   private outgoingRecipient(
@@ -1168,7 +1181,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const send = async (key: Uint8Array) =>
       this.nostr.send(outbox.wrapper, outbox.recipientRelays, key);
     const receipts = keyHex === null
-      ? await this.makerIdentity.useSecretKey(send)
+      ? await this.withMakerOrderKey(session, send)
       : await this.withSessionKey(session, send);
     const next = bump(session, now);
     next.privateState.outbox = {

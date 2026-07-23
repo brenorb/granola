@@ -32,7 +32,7 @@ interface GranolaBrowserFacade {
   receiveToken: BrowserGranolaApi["receiveToken"];
   createBackup: BrowserGranolaApi["createBackup"];
   clearWallet: BrowserGranolaApi["clearWallet"];
-  getMakerIdentity: OrderApi["getMakerIdentity"];
+  getMakerPublicKeys: OrderApi["getMakerPublicKeys"];
   getOrderBook: OrderApi["getOrderBook"];
   publishOrder: OrderApi["publishOrder"];
   getPendingOrderPublications: OrderApi["getPendingOrderPublications"];
@@ -122,9 +122,9 @@ async function refresh(state?: GranolaState): Promise<GranolaState> {
 async function refreshOrderBook(): Promise<void> {
   renderOrderBook(orderbook, { status: "loading" });
   try {
-    const [result, identity] = await Promise.all([
+    const [result, identities] = await Promise.all([
       orderApi.getOrderBook(),
-      orderApi.getMakerIdentity()
+      orderApi.getMakerPublicKeys()
     ]);
     renderOrderBook(
       orderbook,
@@ -132,7 +132,7 @@ async function refreshOrderBook(): Promise<void> {
       {
         onTake: takeOrderFromBook,
         onCancel: cancelOrderFromBook,
-        canCancel: (order) => order.makerPubkey === identity.publicKey
+        canCancel: (order) => identities.includes(order.makerPubkey)
       }
     );
     if (result.rejected > 0) {
@@ -248,7 +248,7 @@ const granola: GranolaBrowserFacade = {
   receiveToken: (token) => locked(() => api.receiveToken(token)),
   createBackup: () => locked(() => api.createBackup()),
   clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation)),
-  getMakerIdentity: orderApi.getMakerIdentity.bind(orderApi),
+  getMakerPublicKeys: orderApi.getMakerPublicKeys.bind(orderApi),
   getOrderBook: orderApi.getOrderBook.bind(orderApi),
   publishOrder: publishOrderWithFunding,
   getPendingOrderPublications: orderApi.getPendingOrderPublications.bind(orderApi),
@@ -516,9 +516,12 @@ void Promise.all([
   refreshOrderBook(),
   refreshPendingPublications(),
   refreshTrades(),
-  granola.getMakerIdentity().then(({ publicKey }) => {
-    byId("maker-pubkey").textContent = `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`;
-    byId("maker-pubkey").title = publicKey;
+  granola.getMakerPublicKeys().then((publicKeys) => {
+    const publicKey = publicKeys[0] ?? "";
+    byId("maker-pubkey").textContent = publicKey
+      ? `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`
+      : "none (create an order)";
+    byId("maker-pubkey").title = publicKeys.join("\n");
   })
 ])
   .then(() => log(`Opened isolated wallet profile “${profile}”`))

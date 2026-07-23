@@ -1,66 +1,45 @@
-# ADR 0002: Local maker signing identity
+# ADR 0002: Ephemeral per-order Nostr signing keys
 
 - Status: Accepted
 - Date: 2026-07-23
 
 ## Context
 
-Every public order projection is authorized by its Nostr event key. The same
-key must remain available to reserve, fill, cancel, expire, or replace that
-projection after a page reload. Reusing a person's social Nostr identity would
-unnecessarily link trading activity to their public profile, while a
-memory-only key would orphan every open order when the tab closes.
+An order projection is public and replaceable, so its author key is visible to
+relays and order-book readers. Reusing one profile key would link every order
+and every lifecycle update. A social Nostr key would additionally link trading
+to a person's public identity.
 
 ## Decision
 
-Granola creates one random secp256k1 signing key for each local wallet profile.
-It stores that key in the profile's private IndexedDB store and reuses it until
-the user explicitly destroys the maker identity.
+Granola generates one random secp256k1 key for each order ID. The key is stored
+in the profile's private IndexedDB store only while that order is active. Every
+projection update and the maker's `reserve_accept`/`reserve_reject` message is
+signed with that order's key. A new order always gets a new key.
 
-The key is a protocol identity, not a social identity:
+After a terminal projection (`filled`, `canceled`, or `expired`) has been
+persisted and acknowledged by at least one configured public relay, Granola
+deletes that order's private Nostr key. If the key is absent, operations for
+that order fail closed rather than silently creating a new authority.
 
-- the UI and default agent API expose only its public key;
-- logs, traces, fixtures, exports, screenshots, and Nostr events never contain
-  the secret key;
-- creating the key is serialized by the profile's existing Web Lock;
-- clearing Cashu tokens does not clear the maker identity, because doing so
-  would remove the authority needed to update open orders;
-- destroying an identity is a separate, explicit operation which must warn that
-  its open orders will become unmanageable; and
-- a new wallet profile receives an unlinkable key and separate token storage.
-
-The prototype does not accept a browser extension signer or a user's existing
-Nostr key. A future signer interface may add those choices without changing the
-event schema, but it must make the linkage and availability trade-offs explicit.
-
-## Why
-
-This is the smallest design that preserves order authority across reloads while
-avoiding automatic linkage to a person's broader Nostr activity. IndexedDB has
-the same XSS trust boundary as the Cashu bearer proofs already held by the app,
-so a separate social identity would not improve the prototype's browser threat
-model.
-
-The identity is per profile rather than per order so the browser can reliably
-manage all orders it created without maintaining an additional secret-key
-index. Users who need unlinkability can use separate profiles.
+Cashu wallet and refund keys are independent and continue using their existing
+lifetimes; rotating a Nostr order key never changes Cashu keys. Legacy
+profile-level Nostr identity records are deleted on migration and are not used
+to sign new orders.
 
 ## Consequences
 
-- A lost browser profile loses control of its still-open orders.
-- XSS can steal both tokens and the maker key; the strict CSP and dependency
-  pinning therefore remain security controls, not cosmetic hardening.
-- Public orders from one wallet profile are linkable by maker public key.
-- Cashu wallet backups do not silently become Nostr secret-key exports.
+- Orders from one profile are unlinkable by Nostr author key.
+- Reloads retain authority for active orders through encrypted private storage.
+- Completing an order has a cryptographic erasure point for its Nostr key.
+- Losing the profile loses control of active orders; Cashu recovery remains a
+  separate concern.
+- The browser threat boundary still includes the private IndexedDB store.
 
 ## Rejected alternatives
 
-1. **Reuse a social Nostr key.** Rejected because it links trading and social
-   identities and requires a signer-extension dependency for the basic demo.
-2. **One memory-only key per page load.** Rejected because reloads orphan open
-   orders and make cancel or replacement impossible.
-3. **One key per order.** Rejected for the prototype because securely indexing,
-   retaining, and backing up many authorities adds complexity without improving
-   the default single-profile workflow.
-4. **Derive the key from Cashu proofs.** Rejected because proofs rotate and are
-   bearer secrets; derivation would couple unrelated security domains.
+1. A persistent profile key, because it links orders.
+2. A social Nostr key, because it links trading to social identity.
+3. A memory-only key, because reloads would orphan active orders.
+4. Deriving Nostr keys from Cashu secrets, because the security domains and
+   lifetimes must remain independent.

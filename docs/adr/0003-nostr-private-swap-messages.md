@@ -57,10 +57,11 @@ and NIP-59 is only its metadata-hiding carrier. Neither is a DM protocol alone.
 
 ## Identity and key lifetime
 
-The maker's persistent order-authority key from ADR 0002 is the initial
-rendezvous identity. It receives a terms-only reservation proposal and signs the
-reservation acceptance, binding the private session to the exact public order
-authority.
+The maker's ephemeral per-order key from ADR 0002 is the initial rendezvous
+identity. It receives a terms-only reservation proposal and signs the
+reservation acceptance, binding the private session to the exact current
+projection ID and revision. The key is erased after the terminal projection is
+acknowledged.
 
 The taker generates a fresh Nostr session key for each reservation attempt. Once
 it accepts a reservation, the maker also generates a fresh settlement key. The

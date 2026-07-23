@@ -30,6 +30,7 @@ class MemoryDriver implements StorageDriver {
 
 class FakeSigner {
   count = 0;
+  destroyed: string[] = [];
 
   async publicKey() {
     return MAKER;
@@ -43,6 +44,10 @@ class FakeSigner {
       pubkey: MAKER,
       sig: "b".repeat(128)
     };
+  }
+
+  async destroy(orderId: string): Promise<void> {
+    this.destroyed.push(orderId);
   }
 }
 
@@ -200,6 +205,7 @@ describe("OrderApi projections", () => {
     expect(canceled.revision).toBe("1");
     expect(canceledHarness.relay.published[1]?.content)
       .toContain('"status":"canceled"');
+    expect(canceledHarness.signer.destroyed).toEqual([ORDER_ID]);
 
     const expiredHarness = harness(1_700_000_000);
     const expiring = await expiredHarness.api.publishOrder({
@@ -217,5 +223,6 @@ describe("OrderApi projections", () => {
     expect(expiredHarness.relay.published[1]?.content)
       .toContain('"status":"expired"');
     expect(expired.revision).toBe("1");
+    expect(expiredHarness.signer.destroyed).toEqual([ORDER_ID]);
   });
 });

@@ -72,7 +72,12 @@ export interface BrowserTradeControllerOptions {
   >;
   inboxPort: BrowserInboxPort;
   inboxRelay: string;
-  makerIdentity: Pick<MakerIdentity, "publicKey" | "useSecretKey">;
+  makerIdentity: {
+    publicKey: (orderId?: string) => Promise<string>;
+    useOrderSecretKey?: MakerIdentity["useOrderSecretKey"];
+    listOrderIds?: () => Promise<string[]>;
+    useSecretKey?: <T>(action: (secretKey: Uint8Array) => Promise<T>) => Promise<T>;
+  };
   now?: () => number;
   startSubscription?: StartSubscription;
   openProposal?: (
@@ -225,9 +230,16 @@ export class BrowserTradeController {
   }
 
   async enableMaker(): Promise<MakerInboxStatus> {
-    const makerPubkey = await this.makerIdentity.publicKey();
-    await this.startSubscriptionOnce("maker-order-key", () =>
-      this.makerIdentity.useSecretKey(async (secretKey) => {
+    const orderIds = this.makerIdentity.listOrderIds
+      ? await this.makerIdentity.listOrderIds()
+      : [undefined];
+    const makerPubkeys: string[] = [];
+    await Promise.all(orderIds.map(async (orderId) => {
+      const makerPubkey = await this.makerIdentity.publicKey(orderId);
+      makerPubkeys.push(makerPubkey);
+      const subscriptionKey = orderId ? `maker-order-key:${orderId}` : "maker-order-key";
+      await this.startSubscriptionOnce(subscriptionKey, () =>
+        this.useMakerKey(orderId, async (secretKey) => {
         const registration = this.transport.createRegistration(secretKey);
         await this.transport.publishRegistration(registration, secretKey);
         return this.startSubscription({
@@ -239,7 +251,7 @@ export class BrowserTradeController {
           now: this.now,
           onEvent: async (event) => {
             try {
-              const proposal = await this.makerIdentity.useSecretKey(
+              const proposal = await this.useMakerKey(orderId,
                 (makerOrderSecretKey) => this.openProposal(
                   event,
                   makerOrderSecretKey,
@@ -254,16 +266,31 @@ export class BrowserTradeController {
             }
           },
           onError: (error) => this.handleSubscriptionError(
-            "maker-order-key",
+            subscriptionKey,
             error,
             async () => {
               await this.enableMaker();
             }
           )
         });
-      })
-    );
-    return { makerPubkey, inboxRelay: this.inboxRelay };
+        })
+      );
+    }));
+    return {
+      makerPubkey: makerPubkeys[0] ?? "",
+      inboxRelay: this.inboxRelay
+    };
+  }
+
+  private async useMakerKey<T>(
+    orderId: string | undefined,
+    action: (secretKey: Uint8Array) => Promise<T>
+  ): Promise<T> {
+    if (orderId !== undefined && this.makerIdentity.useOrderSecretKey) {
+      return this.makerIdentity.useOrderSecretKey(orderId, action);
+    }
+    if (this.makerIdentity.useSecretKey) return this.makerIdentity.useSecretKey(action);
+    throw new Error("Maker order key access is unavailable");
   }
 
   stop(): void {

@@ -48,8 +48,6 @@ export interface OrderState {
   execution: ExecutionCondition;
   status: OrderStatus;
   reservation: ReservationState | null;
-  replaces: string | null;
-  replaced_by: string | null;
 }
 
 export interface CreateOrderInput {
@@ -245,9 +243,7 @@ export function createOrderState(input: CreateOrderInput): OrderState {
     minimum_fill_amount: minimumValue.toString(),
     execution,
     status: "open",
-    reservation: null,
-    replaces: null,
-    replaced_by: null
+    reservation: null
   };
 }
 

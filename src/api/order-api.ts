@@ -46,7 +46,10 @@ export const TEST_MARKET: ExactMarket = {
 };
 
 export interface MakerIdentityPort {
-  publicKey(): Promise<string>;
+  publicKey(orderId: string): Promise<string>;
+  existingPublicKey?(orderId: string): Promise<string | undefined>;
+  listPublicKeys?(): Promise<string[]>;
+  destroy?(orderId: string): Promise<void>;
 }
 
 export interface OrderServicePort {
@@ -182,8 +185,8 @@ export class OrderApi {
     if (!outbox) throw new Error("Order API requires a durable projection outbox");
   }
 
-  async getMakerIdentity(): Promise<{ publicKey: string }> {
-    return { publicKey: await this.identity.publicKey() };
+  async getMakerPublicKeys(): Promise<string[]> {
+    return this.identity.listPublicKeys ? this.identity.listPublicKeys() : [];
   }
 
   async getOrderBook(): Promise<LoadedOrderBook> {
@@ -255,7 +258,10 @@ export class OrderApi {
     if (record.address !== binding.address) {
       throw new Error("Order service returned a projection for another address");
     }
-    if (record.makerPubkey !== await this.identity.publicKey()) {
+    const expectedMaker = this.identity.existingPublicKey
+      ? await this.identity.existingPublicKey(record.state.order_id)
+      : await this.identity.publicKey(record.state.order_id);
+    if (!expectedMaker || record.makerPubkey !== expectedMaker) {
       throw new Error("Order projection belongs to another maker");
     }
     if (record.state.revision !== binding.expectedRevision) {
@@ -285,7 +291,14 @@ export class OrderApi {
         throw new Error("Pending projection changed while waiting to publish");
       }
       const advanced = await this.orders.publishNextStage(current);
-      return publicProgress(await this.outbox.recordProgress(advanced));
+      const saved = await this.outbox.recordProgress(advanced);
+      if (
+        saved.status === "acknowledged" &&
+        ["filled", "canceled", "expired"].includes(saved.publication.state.status)
+      ) {
+        await this.identity.destroy?.(orderId);
+      }
+      return publicProgress(saved);
     });
   }
 
@@ -299,7 +312,13 @@ export class OrderApi {
   async clearAcknowledgedOrderPublication(
     orderId: string
   ): Promise<OrderPublicationProgress> {
-    return publicProgress(await this.outbox.clearAcknowledged(orderId));
+    const cleared = await this.outbox.clearAcknowledged(orderId);
+    if (
+      ["filled", "canceled", "expired"].includes(cleared.publication.state.status)
+    ) {
+      await this.identity.destroy?.(orderId);
+    }
+    return publicProgress(cleared);
   }
 
   async pruneCommittedOrderPublication(orderId: string): Promise<void> {
@@ -330,7 +349,7 @@ export class OrderApi {
         ? {}
         : { minimumFillAmount: input.minimumFillAmount })
     });
-    const maker = await this.identity.publicKey();
+    const maker = await this.identity.publicKey(state.order_id);
     const entry = await this.outbox.ensureStaged({
       operation: "create",
       orderId: state.order_id,

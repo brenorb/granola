@@ -33,7 +33,7 @@ const next = await window.granola.claimMint(quote.ref);
 
 await window.granola.receiveToken("cashuB...");
 
-const identity = await window.granola.getMakerIdentity();
+const makerKeys = await window.granola.getMakerPublicKeys();
 const { book, rejected } = await window.granola.getOrderBook();
 const publication = await window.granola.publishOrder({
   side: "sell",
@@ -114,9 +114,10 @@ If the browser sandbox cannot mutate page DOM, navigate the profile page with
 `runUntilSettled=<session-id>` in the query string. The page starts the same
 executor on load and exposes the same redacted status/result attributes.
 
-`getMakerIdentity()` returns only the profile's public protocol key. The secret
-signing key remains in the private IndexedDB store and is never exposed by this
-API. `publishOrder()` signs one parameterized replaceable kind `30078`
+`getMakerPublicKeys()` returns the public keys for active orders. Each order has
+one ephemeral secret signing key in the private IndexedDB store; it is erased
+after an acknowledged terminal projection and is never exposed by this API.
+`publishOrder()` signs one parameterized replaceable kind `30078`
 projection containing the complete current state. One acknowledgement from any
 configured public relay is sufficient. Its return value contains the
 projection ID, revision, and per-relay receipts, never key material.

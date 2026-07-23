@@ -188,19 +188,13 @@ function parseCanonicalState(value: unknown): OrderState {
   ) {
     throw new Error("Partially-filled amount is inconsistent");
   }
-  if (input.replaces != null || input.replaced_by != null) {
-    throw new Error("Order replacement metadata is not supported");
-  }
-
   const state: OrderState = {
     ...initial,
     revision,
     remaining_amount: remaining,
     reserved_amount: reserved,
     status: input.status,
-    reservation,
-    replaces: null,
-    replaced_by: null
+    reservation
   };
   if (canonicalJson(value) !== canonicalJson(state)) {
     throw new Error("Projection order state must be canonical");

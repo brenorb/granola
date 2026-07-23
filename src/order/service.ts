@@ -23,8 +23,8 @@ import {
 export type SuccessorOperation = "reserve" | "release" | "fill" | "cancel" | "expire";
 
 export interface OrderSigner {
-  publicKey(): Promise<string>;
-  sign(template: UnsignedNostrEvent): Promise<NostrEvent>;
+  publicKey(orderId: string): Promise<string>;
+  sign(template: UnsignedNostrEvent, orderId: string): Promise<NostrEvent>;
 }
 
 export interface OrderRelayPort {
@@ -104,8 +104,7 @@ function assertStaticTerms(previous: OrderState, next: OrderState): void {
     "remaining_amount",
     "reserved_amount",
     "status",
-    "reservation",
-    "replaced_by"
+    "reservation"
   ]);
   const stablePrevious = Object.fromEntries(
     Object.entries(previous).filter(([key]) => !mutable.has(key))
@@ -188,9 +187,10 @@ export class NostrOrderService {
   ) {}
 
   async stage(state: OrderState): Promise<StagedOrderPublication> {
-    const maker = await this.signer.publicKey();
+    const maker = await this.signer.publicKey(state.order_id);
     const projection = await this.signer.sign(
-      await createProjectionTemplate(state, maker)
+      await createProjectionTemplate(state, maker),
+      state.order_id
     );
     assertMaker(projection, maker);
     return {
@@ -207,7 +207,7 @@ export class NostrOrderService {
     previous: NostrEvent,
     createdAt: number
   ): Promise<StagedOrderPublication> {
-    const maker = await this.signer.publicKey();
+    const maker = await this.signer.publicKey(state.order_id);
     const previousRecord = await parseProjectionEvent(previous, this.verify);
     if (previousRecord.makerPubkey !== maker) {
       throw new Error("Previous projection belongs to another maker");
@@ -217,7 +217,8 @@ export class NostrOrderService {
     }
     assertSuccessorState(previousRecord.state, operation, state, createdAt);
     const projection = await this.signer.sign(
-      await createProjectionTemplate(state, maker, createdAt)
+      await createProjectionTemplate(state, maker, createdAt),
+      state.order_id
     );
     assertMaker(projection, maker);
     return {
