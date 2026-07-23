@@ -4,12 +4,16 @@ import type { PublicTradeView } from "../trade/session.js";
 import { renderTrades } from "./trades.js";
 
 const trade: PublicTradeView = {
+  revision: 0,
   sessionId: "11".repeat(32),
   reservationId: "11111111-1111-4111-8111-111111111111",
   role: "taker",
   phase: "quote_locked",
   orderAddress: `30078:${"22".repeat(32)}:granola:order:v1:22222222-2222-4222-8222-222222222222`,
-  orderHead: "33".repeat(32),
+  offeredOrderHead: "33".repeat(32),
+  reserveTransitionId: "44".repeat(32),
+  fillTransitionId: null,
+  pendingOrderPublication: null,
   createdAt: 1_700_000_000,
   updatedAt: 1_700_000_010,
   terms: {
@@ -35,7 +39,33 @@ const trade: PublicTradeView = {
   evidence: {
     makerPubkey: "22".repeat(32),
     commitments: ["44".repeat(32)],
-    mintStates: ["base:UNSPENT", "quote:UNSPENT"]
+    mintStates: ["base:UNSPENT", "quote:UNSPENT"],
+    legs: {
+      base: {
+        tokenCommitment: "55".repeat(32),
+        validationCommitment: "66".repeat(32),
+        keysetId: "00deadbeefcafeee",
+        proofCount: 2,
+        fee: "1",
+        mintState: "UNSPENT",
+        observedAt: 1_700_000_009,
+        spendCommitment: null,
+        claimOperationCommitment: null,
+        refundOperationCommitment: null
+      },
+      quote: {
+        tokenCommitment: "77".repeat(32),
+        validationCommitment: "88".repeat(32),
+        keysetId: "00deadbeefcafeff",
+        proofCount: 1,
+        fee: "0",
+        mintState: "UNSPENT",
+        observedAt: 1_700_000_009,
+        spendCommitment: null,
+        claimOperationCommitment: null,
+        refundOperationCommitment: null
+      }
+    }
   }
 };
 
