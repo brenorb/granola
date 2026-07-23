@@ -18,7 +18,7 @@ import { MakerIdentity } from "./nostr/identity.js";
 import { RelayClient } from "./nostr/relay.js";
 import { OrderOutboxRepository } from "./storage/order-outbox.js";
 import { IndexedDbStorageDriver, WalletRepository } from "./storage/wallet-repository.js";
-import { renderDashboard } from "./ui/dashboard.js";
+import { renderDashboard, renderWalletSummary } from "./ui/dashboard.js";
 import { formatUnitAmount } from "./ui/format.js";
 import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
@@ -100,6 +100,7 @@ async function publishOrderWithFunding(input: PublishOrderInput) {
   return publication;
 }
 const dashboard = byId("dashboard");
+const walletSummary = byId("wallet-summary");
 const orderbook = byId("orderbook");
 const pendingPublications = byId("pending-publications");
 const trades = byId("trades");
@@ -129,6 +130,7 @@ function messageOf(value: unknown): string {
 
 async function refresh(state?: GranolaState): Promise<GranolaState> {
   const next = state ?? await api.getState();
+  renderWalletSummary(walletSummary, next);
   renderDashboard(dashboard, next);
   return next;
 }
@@ -552,31 +554,6 @@ byId<HTMLFormElement>("mint-form").addEventListener("submit", (event) => {
   const amount = String(form.get("amount"));
   void requestAndClaimMint({ mintUrl, unit, amount })
     .catch((error: unknown) => report(messageOf(error), true));
-});
-
-const tokenInput = byId<HTMLTextAreaElement>("token");
-tokenInput.addEventListener("input", () => {
-  const preview = byId("token-preview");
-  try {
-    const summary = api.inspectToken(tokenInput.value);
-    preview.textContent = `${formatUnitAmount(summary.amount, summary.unit)} from ${new URL(summary.mintUrl).host}`;
-  } catch {
-    preview.textContent = tokenInput.value ? "This is not a readable Cashu token yet." : "Paste a token to inspect its mint, unit, and amount before receiving.";
-  }
-});
-
-byId<HTMLFormElement>("receive-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  void (async () => {
-    const token = tokenInput.value;
-    const summary = api.inspectToken(token);
-    const state = await granola.receiveToken(token);
-    tokenInput.value = "";
-    byId("token-preview").textContent = "Token received and rotated into fresh proofs.";
-    await refresh(state);
-    log(`Received ${formatUnitAmount(summary.amount, summary.unit)} from ${new URL(summary.mintUrl).host}`);
-    report("Token verified and received");
-  })().catch((error: unknown) => report(messageOf(error), true));
 });
 
 byId("backup").addEventListener("click", () => {

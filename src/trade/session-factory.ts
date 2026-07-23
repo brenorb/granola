@@ -100,7 +100,7 @@ function canonicalMarket(input: SessionMarketSelection): SessionMarketSelection 
   return { ...input, baseMint, quoteMint };
 }
 
-function assertOpenSellOrder(
+function assertOpenOrder(
   order: OrderRecord,
   expectedProjectionId: string,
   expectedRevision: string,
@@ -125,9 +125,9 @@ function assertOpenSellOrder(
   const state = order.state;
   if (
     state.schema !== "granola/order/v1" ||
-    state.side !== "sell" ||
+    (state.side !== "sell" && state.side !== "buy") ||
     state.status !== "open"
-  ) throw new Error("Session factory accepts only open maker sell orders");
+  ) throw new Error("Session factory accepts only open maker orders");
   if (
     state.reservation !== null ||
     state.reserved_amount !== "0" ||
@@ -139,21 +139,22 @@ function assertOpenSellOrder(
   if (normalizeMintUrl(state.offered.mint) !== state.offered.mint) {
     throw new Error("Order offered mint must be canonical");
   }
+  if (state.requested.acceptable_mints.some(
+    (mint) => normalizeMintUrl(mint) !== mint
+  )) throw new Error("Order acceptable mints must be canonical");
   if (
     state.base_unit !== market.baseUnit ||
     state.quote_unit !== market.quoteUnit ||
-    state.offered.unit !== market.baseUnit ||
-    state.offered.mint !== market.baseMint
-  ) throw new Error("Order base market does not match the selected market");
-  if (
-    state.requested.acceptable_mints.some(
-      (mint) => normalizeMintUrl(mint) !== mint
-    )
-  ) throw new Error("Order acceptable mints must be canonical");
-  if (
-    state.requested.unit !== market.quoteUnit ||
-    !state.requested.acceptable_mints.includes(market.quoteMint)
-  ) throw new Error("Order quote mint does not match the selected quote mint");
+    (state.side === "sell"
+      ? state.offered.unit !== market.baseUnit ||
+        state.offered.mint !== market.baseMint ||
+        state.requested.unit !== market.quoteUnit ||
+        !state.requested.acceptable_mints.includes(market.quoteMint)
+      : state.offered.unit !== market.quoteUnit ||
+        state.offered.mint !== market.quoteMint ||
+        state.requested.unit !== market.baseUnit ||
+        !state.requested.acceptable_mints.includes(market.baseMint))
+  ) throw new Error("Order assets do not match the selected market");
   return market;
 }
 
@@ -231,6 +232,7 @@ function tradeTerms(
   order: OrderRecord
 ): TradeTerms {
   return {
+    makerSide: order.state.side,
     baseMint: market.baseMint,
     baseUnit: market.baseUnit,
     baseKeyset: market.baseKeyset,
@@ -300,6 +302,7 @@ function baseSession(input: {
     role: input.role,
     phase: "negotiating",
     orderAddress: input.order.address,
+    orderSide: input.order.state.side,
     offeredProjectionId: input.order.eventId,
     offeredProjectionRevision: input.order.state.revision,
     reserveProjectionId: null,
@@ -351,7 +354,7 @@ export async function createTakerSession(
   input: TakerSessionInput,
   entropy: SessionFactoryEntropy = defaultEntropy
 ): Promise<TradeSession> {
-  const market = assertOpenSellOrder(
+  const market = assertOpenOrder(
     input.order,
     input.expectedOrderProjectionId,
     input.expectedOrderRevision,
@@ -404,7 +407,7 @@ export async function createMakerSession(
   if (message.sent_at > input.clocks.localNow + 300) {
     throw new Error("Reserve proposal is too far in the future");
   }
-  const market = assertOpenSellOrder(
+  const market = assertOpenOrder(
     input.order,
     message.order_projection_id,
     message.order_revision,
@@ -420,6 +423,7 @@ export async function createMakerSession(
   const selected = amounts(input.order, proposalBody.fill_amount);
   const terms = message.terms!;
   if (
+    (terms.maker_side ?? "sell") !== input.order.state.side ||
     terms.base_mint !== market.baseMint ||
     terms.base_unit !== market.baseUnit ||
     terms.base_keyset !== market.baseKeyset ||

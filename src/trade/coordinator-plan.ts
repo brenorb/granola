@@ -50,6 +50,19 @@ function safeNow(value: number): number {
 
 const HEX_32 = /^[0-9a-f]{64}$/;
 
+function makerOffersBase(session: TradeSession): boolean {
+  return session.orderSide !== "buy";
+}
+
+function slotLeg(session: TradeSession, slot: "base" | "quote"): "base" | "quote" {
+  if (slot === "base") return makerOffersBase(session) ? "base" : "quote";
+  return makerOffersBase(session) ? "quote" : "base";
+}
+
+function legSlot(session: TradeSession, leg: "base" | "quote"): "base" | "quote" {
+  return slotLeg(session, "base") === leg ? "base" : "quote";
+}
+
 function independentlySpent(session: TradeSession, leg: "base" | "quote"): boolean {
   const evidence = session.evidence.legs[leg];
   if (
@@ -118,8 +131,9 @@ function terminal(session: TradeSession): boolean {
 }
 
 function lockReady(session: TradeSession, leg: "base" | "quote"): boolean {
-  const privateLeg = session.privateState.legs[leg];
-  const evidence = session.evidence.legs[leg];
+  const actualLeg = slotLeg(session, leg);
+  const privateLeg = session.privateState.legs[actualLeg];
+  const evidence = session.evidence.legs[actualLeg];
   const expected = privateLeg.expected;
   if (
     privateLeg.token === null ||
@@ -129,13 +143,13 @@ function lockReady(session: TradeSession, leg: "base" | "quote"): boolean {
     session.privateState.htlcHash === null ||
     session.privateState.settlementTranscriptHash === null
   ) return false;
-  const base = leg === "base";
-  return expected.leg === leg &&
+  const base = actualLeg === "base";
+  return expected.leg === actualLeg &&
     expected.mintUrl === (base ? session.terms.baseMint : session.terms.quoteMint) &&
     expected.unit === (base ? session.terms.baseUnit : session.terms.quoteUnit) &&
     expected.amount === (base ? session.terms.baseAmount : session.terms.quoteAmount) &&
     expected.hash === session.privateState.htlcHash &&
-    expected.locktime === (base ? session.plan.longLocktime : session.plan.shortLocktime) &&
+    expected.locktime === (leg === "base" ? session.plan.longLocktime : session.plan.shortLocktime) &&
     expected.binding.sessionId === session.sessionId &&
     expected.binding.reservationId === session.reservationId &&
     expected.binding.transcriptHash === session.privateState.settlementTranscriptHash;
@@ -179,12 +193,12 @@ function unsafePreparedOperation(session: TradeSession, now: number): boolean {
   const operation = session.privateState.cashuOperation;
   if (!operation || operation.status !== "prepared") return false;
   if (operation.kind === "refund") {
-    const locktime = operation.leg === "base"
+    const locktime = legSlot(session, operation.leg) === "base"
       ? session.plan.longLocktime
       : session.plan.shortLocktime;
     return now <= locktime + session.plan.refundGuardSeconds;
   }
-  const cutoff = operation.kind === "claim" && operation.leg === "base"
+  const cutoff = operation.kind === "claim" && legSlot(session, operation.leg) === "base"
     ? session.plan.takerClaimCutoff
     : session.plan.makerClaimCutoff;
   return now >= cutoff;
@@ -214,21 +228,23 @@ function unsafeStagedDelivery(session: TradeSession, now: number): boolean {
 }
 
 function recoveryAction(session: TradeSession, now: number): CoordinatorAction | undefined {
-  const base = session.privateState.legs.base;
-  const quote = session.privateState.legs.quote;
-  const baseSpent = independentlySpent(session, "base");
-  const quoteSpent = independentlySpent(session, "quote");
+  const makerOfferLeg = slotLeg(session, "base");
+  const takerPaymentLeg = slotLeg(session, "quote");
+  const base = session.privateState.legs[makerOfferLeg];
+  const quote = session.privateState.legs[takerPaymentLeg];
+  const baseSpent = independentlySpent(session, makerOfferLeg);
+  const quoteSpent = independentlySpent(session, takerPaymentLeg);
   const guard = session.plan.refundGuardSeconds;
 
   const quoteExpiryGuard = session.plan.shortLocktime + guard;
   if (session.role === "taker" && quote.token !== null && !quoteSpent && now >= quoteExpiryGuard) {
-    return hasPostExpiryUnspentObservation(session, "quote", quoteExpiryGuard)
+    return hasPostExpiryUnspentObservation(session, takerPaymentLeg, quoteExpiryGuard)
       ? { kind: "prepare_quote_refund" }
       : { kind: "observe_quote" };
   }
   const baseExpiryGuard = session.plan.longLocktime + guard;
   if (session.role === "maker" && base.token !== null && !baseSpent && now >= baseExpiryGuard) {
-    return hasPostExpiryUnspentObservation(session, "base", baseExpiryGuard)
+    return hasPostExpiryUnspentObservation(session, makerOfferLeg, baseExpiryGuard)
       ? { kind: "prepare_base_refund" }
       : { kind: "observe_base" };
   }
@@ -268,7 +284,7 @@ export function nextCoordinatorAction(
     const releasableRefund =
       session.role === "maker" &&
       session.reserveProjectionId !== null &&
-      walletAppliedRefund(session, "base");
+      walletAppliedRefund(session, slotLeg(session, "base"));
     if (!releasableRefund) return { kind: "clear_cashu_operation" };
     if (publication === null) return { kind: "stage_order_release" };
     if (publication.operation !== "release") {
@@ -415,33 +431,33 @@ export function nextCoordinatorAction(
       if (session.role === "taker") return { kind: "poll_inbox" };
       if (now >= session.plan.makerClaimCutoff) return { kind: "enter_recovery" };
       if (!lockReady(session, "quote")) return { kind: "enter_recovery" };
-      return session.evidence.legs.quote.claimOperationCommitment === null
+      return session.evidence.legs[slotLeg(session, "quote")].claimOperationCommitment === null
         ? { kind: "prepare_quote_claim" }
-        : independentlySpent(session, "quote")
+        : independentlySpent(session, slotLeg(session, "quote"))
           ? { kind: "stage_claim_notice" }
           : { kind: "observe_quote" };
     case "awaiting_fill_request":
       if (session.role === "maker") return { kind: "poll_inbox" };
       if (now >= session.plan.takerClaimCutoff) return { kind: "enter_recovery" };
       if (
-        !independentlySpent(session, "quote") ||
+        !independentlySpent(session, slotLeg(session, "quote")) ||
         session.privateState.preimage === null
       ) {
         return { kind: "observe_quote" };
       }
-      if (session.evidence.legs.base.claimOperationCommitment === null) {
+      if (session.evidence.legs[slotLeg(session, "base")].claimOperationCommitment === null) {
         return { kind: "prepare_base_claim" };
       }
-      if (!independentlySpent(session, "base")) {
+      if (!independentlySpent(session, slotLeg(session, "base"))) {
         return { kind: "observe_base" };
       }
       return { kind: "stage_fill_request" };
     case "awaiting_settlement_ack":
       if (session.role === "taker") return { kind: "poll_inbox" };
-      if (!independentlySpent(session, "quote")) {
+      if (!independentlySpent(session, slotLeg(session, "quote"))) {
         return { kind: "observe_quote" };
       }
-      if (!independentlySpent(session, "base")) {
+      if (!independentlySpent(session, slotLeg(session, "base"))) {
         return { kind: "observe_base" };
       }
       return session.fillProjectionId === null

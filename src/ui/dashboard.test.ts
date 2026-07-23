@@ -1,9 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import type { GranolaState } from "../api/granola-api.js";
-import { renderDashboard } from "./dashboard.js";
+import { renderDashboard, renderWalletSummary } from "./dashboard.js";
 
 describe("wallet dashboard", () => {
+  it("renders compact SAT and USD balances for the market surface", () => {
+    const root = document.createElement("section");
+
+    renderWalletSummary(root, {
+      wallet: {
+        revision: 2,
+        balances: [
+          { unit: "sat", amount: "1200", mintCount: 1, proofCount: 3 },
+          { unit: "usd", amount: "500", mintCount: 1, proofCount: 2 }
+        ],
+        pockets: []
+      },
+      quotes: []
+    });
+
+    expect(root.querySelectorAll("[data-balance-unit]")).toHaveLength(2);
+    expect(root.querySelector('[data-balance-unit="sat"]')?.textContent)
+      .toContain("1,200 sat");
+    expect(root.querySelector('[data-balance-unit="usd"]')?.textContent)
+      .toContain("5.00 USD");
+  });
+
   it("renders unit totals, mint liabilities, and proof inventory accessibly", () => {
     const state: GranolaState = {
       wallet: {

@@ -2,6 +2,7 @@ import type { PreparedTradeOperation } from "../cashu/trade-client.js";
 import type { ExpectedHtlcLock } from "../cashu/htlc.js";
 import type { RelayReceipt } from "../nostr/relay.js";
 import type { NostrEvent } from "../order/events.js";
+import type { OrderSide } from "../order/model.js";
 import type { AtomicSwapChoreography } from "./atomic-messages.js";
 import type {
   GranolaTradeMessage,
@@ -11,6 +12,7 @@ import type {
 import type { SettlementPlan, TradePhase } from "./model.js";
 
 export interface TradeTerms {
+  makerSide?: OrderSide;
   baseMint: string;
   baseUnit: string;
   baseKeyset: string;
@@ -178,6 +180,8 @@ export interface TradeSession {
   reservationId: string;
   role: "maker" | "taker";
   phase: TradePhase;
+  /** The maker's published order side; absent only on legacy ask sessions. */
+  orderSide?: OrderSide;
   orderAddress: string;
   offeredProjectionId: string;
   offeredProjectionRevision: string;
@@ -225,6 +229,7 @@ export function publicTradeView(session: TradeSession): PublicTradeView {
     reservationId: session.reservationId,
     role: session.role,
     phase: session.phase,
+    ...(session.orderSide === undefined ? {} : { orderSide: session.orderSide }),
     orderAddress: session.orderAddress,
     offeredProjectionId: session.offeredProjectionId,
     offeredProjectionRevision: session.offeredProjectionRevision,

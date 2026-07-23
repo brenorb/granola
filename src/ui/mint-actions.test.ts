@@ -21,8 +21,8 @@ describe("quick mint actions", () => {
     ]);
     expect(buttons[0]?.querySelector(".quick-mint__symbol")?.textContent).toBe("₿");
     expect(buttons[1]?.querySelector(".quick-mint__symbol")?.textContent).toBe("$");
-    expect(buttons[0]?.textContent).toContain("10,000 SAT");
-    expect(buttons[1]?.textContent).toContain("100.00 USD");
+    expect(buttons[0]?.textContent).toContain("Fund SAT");
+    expect(buttons[1]?.textContent).toContain("Fund USD");
     expect(root.querySelector("form")).toBeNull();
   });
 

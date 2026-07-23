@@ -1055,6 +1055,8 @@ function assertSession(value: unknown): asserts value is TradeSession {
     typeof session.reservationId !== "string" ||
     !UUID_V4.test(session.reservationId) ||
     (session.role !== "maker" && session.role !== "taker") ||
+    (session.orderSide !== undefined &&
+      session.orderSide !== "buy" && session.orderSide !== "sell") ||
     typeof session.phase !== "string" ||
     !TRADE_PHASES.has(session.phase) ||
     typeof session.orderAddress !== "string" ||
@@ -1085,6 +1087,8 @@ function assertSession(value: unknown): asserts value is TradeSession {
   normalizedHttps(terms.baseMint, "Base mint");
   normalizedHttps(terms.quoteMint, "Quote mint");
   if (
+    (terms.makerSide !== undefined &&
+      terms.makerSide !== "buy" && terms.makerSide !== "sell") ||
     typeof terms.baseUnit !== "string" ||
     typeof terms.quoteUnit !== "string" ||
     typeof terms.baseKeyset !== "string" ||

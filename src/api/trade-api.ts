@@ -9,7 +9,8 @@ import {
 } from "../core/wallet.js";
 import type {
   ExactMarket,
-  OrderRecord
+  OrderRecord,
+  OrderSide
 } from "../order/model.js";
 import type { LoadedOrderBook } from "../order/service.js";
 import type { TakerStartIntent } from "../storage/trade-session.js";
@@ -124,11 +125,20 @@ function exactMarket(left: ExactMarket, right: ExactMarket): boolean {
     left.quoteUnit === right.quoteUnit;
 }
 
+function makerOfferedLeg(side: OrderSide): "base" | "quote" {
+  return side === "sell" ? "base" : "quote";
+}
+
+function takerFundingLeg(side: OrderSide): "base" | "quote" {
+  return side === "sell" ? "quote" : "base";
+}
+
 function immutableSessionIdentity(session: TradeSession): unknown {
   return {
     sessionId: session.sessionId,
     reservationId: session.reservationId,
     role: session.role,
+    orderSide: session.orderSide ?? "sell",
     orderAddress: session.orderAddress,
     offeredProjectionId: session.offeredProjectionId,
     terms: session.terms,
@@ -284,7 +294,7 @@ export class TradeApi {
       return publicTradeView(existing);
     }
     const currentTime = this.currentTime();
-    const order = await this.loadExactSellOrder(
+    const order = await this.loadExactOrder(
       input.address,
       input.expectedProjectionId,
       input.expectedRevision,
@@ -304,22 +314,37 @@ export class TradeApi {
       }
     });
     const wallet = await this.wallets.load();
-    if (selectedMarket.quoteKeyset !== session.terms.quoteKeyset) {
-      throw new Error("Session quote keyset changed after exact mint preflight");
+    const fundingLeg = takerFundingLeg(order.state.side);
+    const fundingMint = fundingLeg === "base"
+      ? session.terms.baseMint
+      : session.terms.quoteMint;
+    const fundingUnit = fundingLeg === "base"
+      ? session.terms.baseUnit
+      : session.terms.quoteUnit;
+    const fundingKeyset = fundingLeg === "base"
+      ? session.terms.baseKeyset
+      : session.terms.quoteKeyset;
+    const targetAmount = fundingLeg === "base"
+      ? session.terms.baseAmount
+      : session.terms.quoteAmount;
+    if (fundingKeyset !== (fundingLeg === "base"
+      ? selectedMarket.baseKeyset
+      : selectedMarket.quoteKeyset)) {
+      throw new Error(`Session ${fundingLeg} keyset changed after exact mint preflight`);
     }
-    const quotePocket = exactPocket(
+    const fundingPocket = exactPocket(
       wallet,
-      session.terms.quoteMint,
-      session.terms.quoteUnit,
-      "quote"
+      fundingMint,
+      fundingUnit,
+      fundingLeg
     );
     const spendability =
-      await this.spendability.inspectTradeSpendability(quotePocket);
+      await this.spendability.inspectTradeSpendability(fundingPocket);
     assertFunding(
-      quotePocket,
+      fundingPocket,
       spendability,
-      session.terms.quoteAmount,
-      "quote"
+      targetAmount,
+      fundingLeg
     );
     const persisted = await this.sessions.createTakerForRequest(intent, session);
     this.assertBoundTaker(persisted, intent);
@@ -331,7 +356,7 @@ export class TradeApi {
   ): Promise<PublicTradeView> {
     assertVerifiedInitialReserveProposal(proposal);
     const currentTime = this.currentTime();
-    const order = await this.loadExactSellOrder(
+    const order = await this.loadExactOrder(
       proposal.message.order_address,
       proposal.message.order_projection_id,
       proposal.message.order_revision,
@@ -349,22 +374,37 @@ export class TradeApi {
       }
     });
     const wallet = await this.wallets.load();
-    if (selectedMarket.baseKeyset !== session.terms.baseKeyset) {
-      throw new Error("Session base keyset changed after exact mint preflight");
+    const fundingLeg = makerOfferedLeg(order.state.side);
+    const fundingMint = fundingLeg === "base"
+      ? session.terms.baseMint
+      : session.terms.quoteMint;
+    const fundingUnit = fundingLeg === "base"
+      ? session.terms.baseUnit
+      : session.terms.quoteUnit;
+    const fundingKeyset = fundingLeg === "base"
+      ? session.terms.baseKeyset
+      : session.terms.quoteKeyset;
+    const targetAmount = fundingLeg === "base"
+      ? session.terms.baseAmount
+      : session.terms.quoteAmount;
+    if (fundingKeyset !== (fundingLeg === "base"
+      ? selectedMarket.baseKeyset
+      : selectedMarket.quoteKeyset)) {
+      throw new Error(`Session ${fundingLeg} keyset changed after exact mint preflight`);
     }
-    const basePocket = exactPocket(
+    const fundingPocket = exactPocket(
       wallet,
-      session.terms.baseMint,
-      session.terms.baseUnit,
-      "base"
+      fundingMint,
+      fundingUnit,
+      fundingLeg
     );
     const spendability =
-      await this.spendability.inspectTradeSpendability(basePocket);
+      await this.spendability.inspectTradeSpendability(fundingPocket);
     assertFunding(
-      basePocket,
+      fundingPocket,
       spendability,
-      session.terms.baseAmount,
-      "base"
+      targetAmount,
+      fundingLeg
     );
     return publicTradeView(await this.persistCreation(session));
   }
@@ -396,7 +436,7 @@ export class TradeApi {
     }
   }
 
-  private async loadExactSellOrder(
+  private async loadExactOrder(
     address: string,
     expectedProjectionId: string,
     expectedRevision: string,
@@ -426,20 +466,24 @@ export class TradeApi {
     ) {
       throw new Error("Trade order projection is stale");
     }
+    const state = record.state;
+    const exactAssets = state.side === "sell"
+      ? state.offered.mint === this.market.baseMint &&
+        state.offered.unit === this.market.baseUnit &&
+        state.requested.unit === this.market.quoteUnit &&
+        state.requested.acceptable_mints.includes(this.market.quoteMint)
+      : state.side === "buy" &&
+        state.offered.mint === this.market.quoteMint &&
+        state.offered.unit === this.market.quoteUnit &&
+        state.requested.unit === this.market.baseUnit &&
+        state.requested.acceptable_mints.includes(this.market.baseMint);
     if (
-      record.state.side !== "sell" ||
-      record.state.status !== "open" ||
-      record.state.reservation !== null
-    ) {
-      throw new Error("Trade API accepts only open maker sell orders");
-    }
-    if (
-      record.state.offered.mint !== this.market.baseMint ||
-      record.state.offered.unit !== this.market.baseUnit ||
-      record.state.base_unit !== this.market.baseUnit ||
-      record.state.requested.unit !== this.market.quoteUnit ||
-      record.state.quote_unit !== this.market.quoteUnit ||
-      !record.state.requested.acceptable_mints.includes(this.market.quoteMint)
+      (state.side !== "sell" && state.side !== "buy") ||
+      state.status !== "open" ||
+      state.reservation !== null ||
+      state.base_unit !== this.market.baseUnit ||
+      state.quote_unit !== this.market.quoteUnit ||
+      !exactAssets
     ) {
       throw new Error("Trade order does not match the exact configured market");
     }
@@ -449,26 +493,24 @@ export class TradeApi {
   private async preflightMarket(
     order: OrderRecord
   ): Promise<SessionMarketSelection> {
+    const baseRequest = order.state.side === "sell"
+      ? { mint: order.state.offered.mint, unit: order.state.offered.unit }
+      : { mint: this.market.baseMint, unit: order.state.requested.unit };
+    const quoteRequest = order.state.side === "sell"
+      ? { mint: this.market.quoteMint, unit: order.state.requested.unit }
+      : { mint: order.state.offered.mint, unit: order.state.offered.unit };
     const [base, quote] = await Promise.all([
-      this.cashu.inspectTradeMint(
-        order.state.offered.mint,
-        order.state.offered.unit
-      ),
-      this.cashu.inspectTradeMint(
-        this.market.quoteMint,
-        order.state.requested.unit
-      )
+      this.cashu.inspectTradeMint(baseRequest.mint, baseRequest.unit),
+      this.cashu.inspectTradeMint(quoteRequest.mint, quoteRequest.unit)
     ]);
-    const exactBase = assertPreflight(
-      base,
-      order.state.offered.mint,
-      order.state.offered.unit
-    );
-    const exactQuote = assertPreflight(
-      quote,
-      this.market.quoteMint,
-      order.state.requested.unit
-    );
+    const exactBase = assertPreflight(base, baseRequest.mint, baseRequest.unit);
+    const exactQuote = assertPreflight(quote, quoteRequest.mint, quoteRequest.unit);
+    if (exactBase.mintUrl !== this.market.baseMint ||
+        exactBase.unit !== this.market.baseUnit ||
+        exactQuote.mintUrl !== this.market.quoteMint ||
+        exactQuote.unit !== this.market.quoteUnit) {
+      throw new Error("Trade mint preflight does not match the exact configured market");
+    }
     return {
       baseMint: exactBase.mintUrl,
       baseUnit: exactBase.unit,

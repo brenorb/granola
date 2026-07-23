@@ -15,35 +15,22 @@
     <header class="masthead">
       <a class="wordmark" href="./" aria-label="Granola home">GRANOLA<span>/00</span></a>
       <div class="environment"><i></i> FAKE TESTNET ECASH</div>
-      <p id="profile-label">Local browser wallet</p>
+      <p id="profile-label">Wallet profile: …</p>
     </header>
 
     <main>
-      <section class="hero" aria-labelledby="hero-title">
-        <p class="eyebrow">Cashu atomic swap workbench</p>
-        <h1 id="hero-title">Hold the proofs.<br /><em>Test the trade.</em></h1>
-        <p class="lede">A local bearer-token wallet built for humans and agents. No account, no server, no real money.</p>
-        <aside class="warning"><strong>Laboratory only.</strong> Testnut tokens are fake, unbacked, and may disappear. Anyone holding a backup token can spend it.</aside>
-      </section>
-
-      <section class="ledger" aria-labelledby="balances-title">
-        <div class="section-heading">
-          <div><p class="eyebrow">01 / Wallet</p><h2 id="balances-title">Balances &amp; liabilities</h2></div>
-          <div class="section-actions">
-            <div id="mint-actions" class="mint-actions" aria-label="Quick mint fake tokens"></div>
-            <button id="refresh" class="quiet" type="button">Refresh</button>
-          </div>
-        </div>
-        <div id="dashboard"></div>
-      </section>
-
       <section class="exchange" aria-labelledby="orderbook-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">02 / Public market</p>
+            <p class="eyebrow">01 / Public market</p>
             <h2 id="orderbook-title">SAT / USD test order book</h2>
           </div>
           <button id="refresh-orderbook" class="quiet" type="button">Refresh book</button>
+        </div>
+        <div class="market-wallet">
+          <div id="wallet-summary" aria-label="Wallet balances"></div>
+          <div id="mint-actions" class="mint-actions" aria-label="Fund fake tokens"></div>
+          <button id="refresh" class="quiet" type="button">Refresh balances</button>
         </div>
         <div class="market-tape">
           <p><span>Base issuer</span><strong>testnut.cashu.space · SAT</strong></p>
@@ -54,8 +41,14 @@
         <div id="orderbook"></div>
         <div id="pending-publications" class="pending-publications" hidden></div>
 
-        <details class="order-entry">
-          <summary>Publish a test limit order</summary>
+        <section class="order-entry" aria-labelledby="send-order-title">
+          <div class="order-entry__heading">
+            <div>
+              <p class="eyebrow">Send an order</p>
+              <h3 id="send-order-title">Publish a test limit order</h3>
+            </div>
+            <p class="hint">Your balance is checked before the signed order is published.</p>
+          </div>
           <form id="order-form">
             <div class="field-pair">
               <label>Side
@@ -74,9 +67,23 @@
               </label>
             </div>
             <p id="order-settlement-hint" class="hint" aria-live="polite">Orders are public signed test data, not escrow. Prices are converted to an exact cents-per-SAT ratio before signing.</p>
-            <button type="submit">Sign &amp; publish order</button>
+            <button type="submit">Send order</button>
           </form>
-        </details>
+        </section>
+      </section>
+
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow">Cashu atomic swap workbench</p>
+        <h1 id="hero-title">Hold the proofs.<br /><em>Test the trade.</em></h1>
+        <p class="lede">A local bearer-token wallet built for humans and agents. No account, no server, no real money.</p>
+        <aside class="warning"><strong>Laboratory only.</strong> Testnut tokens are fake, unbacked, and may disappear. Anyone holding a backup token can spend it.</aside>
+      </section>
+
+      <section class="ledger" aria-labelledby="balances-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">02 / Wallet</p><h2 id="balances-title">Balances &amp; liabilities</h2></div>
+        </div>
+        <div id="dashboard"></div>
       </section>
 
       <section class="settlement" aria-labelledby="trades-title">
@@ -96,7 +103,7 @@
 
       <div class="work-grid">
         <section class="panel" aria-labelledby="mint-title">
-          <p class="eyebrow">02 / Acquire</p>
+            <p class="eyebrow">04 / Acquire</p>
           <h2 id="mint-title">Mint fake tokens</h2>
           <p class="hint">Use the compact SAT or USD actions above for a 10,000-unit issue, or open the full form for another amount or mint.</p>
           <details id="mint-details">
@@ -119,21 +126,10 @@
           </details>
         </section>
 
-        <section class="panel" aria-labelledby="receive-title">
-          <p class="eyebrow">03 / Import</p>
-          <h2 id="receive-title">Receive a token</h2>
-          <form id="receive-form">
-            <label>Cashu token<textarea id="token" name="token" rows="6" placeholder="cashuB…" required spellcheck="false"></textarea></label>
-            <div id="token-preview" class="preview" aria-live="polite">Paste a token to inspect its mint, unit, and amount before receiving.</div>
-            <p class="hint">For this public test harness, tokens must come from one of the two Testnut mints listed in the acquire panel.</p>
-            <button type="submit">Verify &amp; receive</button>
-          </form>
-        </section>
-
         <section class="panel" aria-labelledby="custody-title">
           <p class="eyebrow">04 / Custody</p>
           <h2 id="custody-title">Back up or erase</h2>
-          <p>Your proofs live only in this browser wallet’s local IndexedDB. A backup contains spendable bearer tokens.</p>
+          <p>Your proofs live only in this browser profile’s IndexedDB. A backup contains spendable bearer tokens.</p>
           <button id="backup" type="button">Download bearer backup</button>
           <details>
             <summary>Danger zone</summary>

@@ -396,15 +396,31 @@ describe("trade session factory", () => {
     }, entropy())).rejects.toThrow();
   });
 
-  it("rejects bids, wrong mints, unsafe clocks, and non-canonical keysets", async () => {
-    await expect(createTakerSession({
-      order: record({ state: { ...record().state, side: "buy" } }),
+  it("accepts bids and rejects wrong mints, unsafe clocks, and non-canonical keysets", async () => {
+    const bid = record({
+      state: createOrderState({
+        orderId,
+        createdAt: now - 100,
+        expiresAt: now + 9 * 86_400,
+        side: "buy",
+        baseUnit: "sat",
+        quoteUnit: "usd",
+        offered: { unit: "usd", mint: quoteMint },
+        requested: { unit: "sat", acceptableMints: [baseMint] },
+        amount: "1000",
+        priceCentsPerBtc: "2000000"
+      })
+    });
+    const bidSession = await createTakerSession({
+      order: bid,
       expectedOrderProjectionId: "44".repeat(32),
       expectedOrderRevision: "0",
       market,
       fillBaseAmount: "1000",
       clocks
-    }, entropy())).rejects.toThrow(/sell/i);
+    }, entropy());
+    expect(bidSession.orderSide).toBe("buy");
+    expect(bidSession.terms).toMatchObject({ baseAmount: "1000", quoteAmount: "20" });
     await expect(createTakerSession({
       order: record(),
       expectedOrderProjectionId: "44".repeat(32),
@@ -412,7 +428,7 @@ describe("trade session factory", () => {
       market: { ...market, quoteMint: "https://other.example" },
       fillBaseAmount: "1000",
       clocks
-    }, entropy())).rejects.toThrow(/quote mint/i);
+    }, entropy())).rejects.toThrow(/assets|market/i);
     await expect(createTakerSession({
       order: record(),
       expectedOrderProjectionId: "44".repeat(32),

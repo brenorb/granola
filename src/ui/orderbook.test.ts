@@ -60,7 +60,8 @@ describe("order-book presentation", () => {
     renderOrderBook(root, { status: "ready", book });
 
     expect(root.getAttribute("aria-live")).toBe("polite");
-    expect(root.querySelector("caption")?.textContent).toContain("SAT / USD order book");
+    expect([...root.querySelectorAll("caption")].map((caption) => caption.textContent))
+      .toEqual(["Asks", "Bids"]);
     expect(
       [...root.querySelectorAll<HTMLElement>("[data-order-id], [data-book-midpoint]")]
         .map((node) => node.dataset.orderId ?? "midpoint")
@@ -78,9 +79,11 @@ describe("order-book presentation", () => {
     expect(root.querySelector(`[data-order-id="${askLow}"] [data-price]`)
       ?.getAttribute("data-price-cents-per-btc")).toBe("5050000");
 
-    expect(root.querySelectorAll('th[scope="row"]')).toHaveLength(4);
-    expect(root.querySelector(`[data-order-id="${askLow}"]`)?.textContent).toContain("Best ask");
-    expect(root.querySelector(`[data-order-id="${bidHigh}"]`)?.textContent).toContain("Best bid");
+    expect(root.querySelectorAll(".orderbook-side")).toHaveLength(2);
+    expect(root.querySelector(`[data-order-id="${askLow}"]`)?.getAttribute("aria-label"))
+      .toBe("Best ask");
+    expect(root.querySelector(`[data-order-id="${bidHigh}"]`)?.getAttribute("aria-label"))
+      .toBe("Best bid");
   });
 
   it("offers an explicit take action with the exact verified order record", async () => {
@@ -101,7 +104,7 @@ describe("order-book presentation", () => {
     expect(take).toHaveBeenCalledWith(best, "20");
   });
 
-  it("hides unsupported bid taking and exposes cancellation only for owned orders", async () => {
+  it("offers bid taking and exposes cancellation only for owned orders", async () => {
     const ask = record(askLow, "sell", "5000000", "20");
     const bid = record(bidHigh, "buy", "5000000", "20");
     const book = await buildOrderBook([ask, bid], market, 1_700_000_100);
@@ -114,10 +117,13 @@ describe("order-book presentation", () => {
       canCancel: (order) => order.eventId === ask.eventId
     });
 
-    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-order]`))
-      .toBeNull();
-    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-unavailable]`)
-      ?.textContent).toMatch(/not supported/i);
+    const bidTake = root.querySelector<HTMLButtonElement>(
+      `[data-order-id="${bidHigh}"] [data-take-order]`
+    );
+    expect(bidTake?.textContent).toBe("Sell into bid");
+    bidTake?.click();
+    expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-amount]`)
+      ?.getAttribute("aria-label")).toMatch(/sell/i);
     const cancelButton = root.querySelector<HTMLButtonElement>(
       `[data-order-id="${askLow}"] [data-cancel-order]`
     );
