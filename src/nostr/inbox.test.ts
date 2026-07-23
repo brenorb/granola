@@ -162,6 +162,17 @@ describe("strict NIP-17 inbox transport", () => {
     ], recipient, now, 2)).toThrow(/quorum|split/i);
   });
 
+  it("accepts one matching discovery relay by default", () => {
+    const latest = createInboxList(inboxRelays, recipientKey, now);
+
+    const selected = selectInboxList([
+      { relay: discoveryRelays[0]!, event: latest }
+    ], recipient, now);
+
+    expect(selected.event.id).toBe(latest.id);
+    expect(selected.relays).toEqual(inboxRelays);
+  });
+
   it("returns immutable validated inbox-list snapshots isolated from relay mutation", () => {
     const candidate = createInboxList(inboxRelays, recipientKey, now);
     const validated = validateInboxList(candidate, recipient, now);
@@ -203,6 +214,17 @@ describe("strict NIP-17 inbox transport", () => {
     )).toBe(true);
     expect(port.published.every((call) => call.id === list.id && call.authPubkey === recipient)).toBe(true);
     expect(port.queried.every((call) => call.authPubkey === recipient)).toBe(true);
+  });
+
+  it("accepts one authenticated ACK and exact readback by default", async () => {
+    const port = new FakeRelayPort();
+    port.hideReadback.add(discoveryRelays[1]!);
+    port.hideReadback.add(discoveryRelays[2]!);
+    const list = createInboxList(inboxRelays, recipientKey, now);
+
+    const result = await publishInboxList(list, discoveryRelays, recipientKey, port, now);
+
+    expect(result.confirmed).toEqual([discoveryRelays[0]]);
   });
 
   it("does not count a malformed relay substitution as exact readback", async () => {

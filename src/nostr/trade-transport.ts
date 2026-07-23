@@ -108,7 +108,7 @@ export class NostrTradeTransport {
         keySnapshot,
         this.port,
         now,
-        2
+        1
       );
     } finally {
       keySnapshot.fill(0);
@@ -137,7 +137,7 @@ export class NostrTradeTransport {
           return [];
         }
       }));
-      const selected = selectInboxList(observations.flat(), authorPubkey, now, 2);
+      const selected = selectInboxList(observations.flat(), authorPubkey, now, 1);
       return {
         event: snapshotNostrEvent(selected.event),
         eventId: selected.event.id,

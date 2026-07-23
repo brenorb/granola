@@ -29,6 +29,11 @@ describe("manual testnet swap tutorial", () => {
     expect(html).toContain('id="order-settlement-hint"');
   });
 
+  it("advertises the one-relay public order acknowledgement policy", () => {
+    expect(html).toContain("1 of 3 acknowledgements");
+    expect(html).not.toContain("2 of 3 acknowledgements");
+  });
+
   it("keeps minimum fill out of the current order form", () => {
     expect(html).not.toContain("Minimum fill");
     expect(html).not.toContain('name="minimumFillAmount"');

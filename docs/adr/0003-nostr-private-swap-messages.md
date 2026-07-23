@@ -329,11 +329,11 @@ A Granola kind `10050` is accepted only when:
 The receiving key republishes its list before the seven-day limit or whenever
 the list changes. It publishes the exact signed event to the three public
 Granola discovery relays and requires ACK plus readback of that exact ID from at
-least two. A sender queries all three discovery relays, verifies every candidate,
-applies the NIP-01 replaceable-event rule (greatest `created_at`, then lowest ID
-on a tie), and sends only after the same selected event ID is readable from at
-least two relays. A split, stale list, missing quorum, or unsupported inbox fails
-closed.
+least one. Additional relay results are best-effort redundancy and do not affect
+the registration decision. A sender queries all three discovery relays, verifies every
+candidate, applies the NIP-01 replaceable-event rule (greatest `created_at`,
+then lowest ID on a tie), and accepts the selected event when it is readable
+from at least one relay. A stale or unsupported inbox fails closed.
 
 For kind `1059` retrieval, the recipient authenticates to each inbox relay with
 a NIP-42 event signed by the exact key in the wrapper `p` tag. Unauthenticated

@@ -213,7 +213,7 @@ export function selectInboxList(
   observations: readonly InboxObservation[],
   expectedAuthor: string,
   now: number,
-  quorum = 2
+  quorum = 1
 ): ValidatedInboxList {
   if (!Number.isSafeInteger(quorum) || quorum < 1) throw new Error("Inbox discovery quorum is invalid");
   const valid: Array<{ relay: string; list: ValidatedInboxList }> = [];
@@ -282,7 +282,7 @@ export async function publishInboxList(
   protocolSecretKey: Uint8Array,
   port: InboxRelayPort,
   now: number,
-  quorum = 2
+  quorum = 1
 ): Promise<InboxPublicationResult> {
   const eventSnapshot = snapshotNostrEvent(event);
   const keySnapshot = Uint8Array.from(protocolSecretKey);
