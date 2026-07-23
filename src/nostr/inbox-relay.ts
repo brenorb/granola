@@ -28,6 +28,15 @@ export type InboxInfoFetcher = (
   init?: RequestInit
 ) => Promise<Response>;
 
+export interface PersistentInboxSubscription {
+  close(reason?: string): void;
+}
+
+export interface PersistentInboxCallbacks {
+  onevent(event: NostrEvent): void;
+  onclose(reason: string): void;
+}
+
 function nip11Url(relay: string): string {
   const url = new URL(relay);
   if (url.protocol !== "wss:") throw new Error("Inbox relay must use wss://");
@@ -158,5 +167,40 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
         onclose: (reason) => finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)))
       });
     });
+  }
+
+  async subscribe(
+    relay: string,
+    filter: Record<string, unknown>,
+    auth: AuthHandler,
+    callbacks: PersistentInboxCallbacks
+  ): Promise<PersistentInboxSubscription> {
+    const connection = await this.open(relay, auth);
+    let closed = false;
+    let subscription: { close(reason?: string): void } | undefined;
+    const closeConnection = (reason: string, report: boolean): void => {
+      if (closed) return;
+      closed = true;
+      subscription?.close(reason);
+      connection.close();
+      if (report) callbacks.onclose(reason);
+    };
+    try {
+      subscription = connection.subscribe([structuredClone(filter)], {
+        onevent: (event) => {
+          if (!closed) callbacks.onevent(structuredClone(event));
+        },
+        // EOSE ends the stored backlog, not the live subscription.
+        oneose: () => undefined,
+        onclose: (reason) => closeConnection(reason, true)
+      });
+    } catch (error) {
+      connection.close();
+      throw error;
+    }
+    return {
+      close: (reason = "granola subscription closed") =>
+        closeConnection(reason, false)
+    };
   }
 }

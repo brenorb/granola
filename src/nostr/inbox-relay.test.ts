@@ -44,7 +44,7 @@ class FakeConnection implements InboxRelayConnection {
   subscribe(
     _filters: Record<string, unknown>[],
     callbacks: { onevent: (value: NostrEvent) => void; oneose: () => void; onclose: (reason: string) => void }
-  ) {
+  ): { close(reason?: string): void } {
     queueMicrotask(() => {
       callbacks.onevent(event());
       callbacks.oneose();
@@ -139,5 +139,122 @@ describe("nostr-tools inbox relay port", () => {
       createNip42AuthEvent(relayUrl, challenge, protocolKey, now)))
       .resolves.toBe("stored");
     expect(connection.challenged).toBe(true);
+  });
+
+  it("keeps an authenticated inbox subscription open after EOSE until explicitly closed", async () => {
+    class PersistentConnection extends FakeConnection {
+      closed = false;
+      subscriptionClosed = false;
+      callbacks:
+        | {
+            onevent: (value: NostrEvent) => void;
+            oneose: () => void;
+            onclose: (reason: string) => void;
+          }
+        | undefined;
+
+      override subscribe(
+        _filters: Record<string, unknown>[],
+        callbacks: {
+          onevent: (value: NostrEvent) => void;
+          oneose: () => void;
+          onclose: (reason: string) => void;
+        }
+      ) {
+        this.callbacks = callbacks;
+        return {
+          close: () => {
+            this.subscriptionClosed = true;
+          }
+        };
+      }
+
+      override close(): void {
+        this.closed = true;
+      }
+    }
+
+    const connection = new PersistentConnection();
+    const port = new NostrToolsInboxRelayPort(
+      async () => connection,
+      async () => new Response(JSON.stringify({
+        supported_nips: [17, 40, 42],
+        limitation: { auth_required: true }
+      }), { status: 200 }),
+      1_000
+    );
+    const received: string[] = [];
+    const closed: string[] = [];
+    const subscription = await port.subscribe(
+      relayUrl,
+      { kinds: [1059], "#p": [protocolPubkey], since: now },
+      async (challenge) => createNip42AuthEvent(relayUrl, challenge, protocolKey, now),
+      {
+        onevent: (value) => received.push(value.id),
+        onclose: (reason) => closed.push(reason)
+      }
+    );
+
+    connection.callbacks?.oneose();
+    connection.callbacks?.onevent(event());
+    expect(received).toEqual([event().id]);
+    expect(connection.closed).toBe(false);
+    expect(connection.subscriptionClosed).toBe(false);
+
+    subscription.close("test complete");
+    expect(connection.subscriptionClosed).toBe(true);
+    expect(connection.closed).toBe(true);
+    expect(closed).toEqual([]);
+  });
+
+  it("closes the connection and reports an unexpected persistent subscription failure once", async () => {
+    class ClosingConnection extends FakeConnection {
+      closed = false;
+      callbacks:
+        | {
+            onevent: (value: NostrEvent) => void;
+            oneose: () => void;
+            onclose: (reason: string) => void;
+          }
+        | undefined;
+
+      override subscribe(
+        _filters: Record<string, unknown>[],
+        callbacks: {
+          onevent: (value: NostrEvent) => void;
+          oneose: () => void;
+          onclose: (reason: string) => void;
+        }
+      ) {
+        this.callbacks = callbacks;
+        return { close: vi.fn() };
+      }
+
+      override close(): void {
+        this.closed = true;
+      }
+    }
+
+    const connection = new ClosingConnection();
+    const port = new NostrToolsInboxRelayPort(
+      async () => connection,
+      async () => new Response(JSON.stringify({
+        supported_nips: [17, 40, 42],
+        limitation: { auth_required: true }
+      }), { status: 200 }),
+      1_000
+    );
+    const closed: string[] = [];
+    await port.subscribe(
+      relayUrl,
+      { kinds: [1059], "#p": [protocolPubkey], since: now },
+      async (challenge) => createNip42AuthEvent(relayUrl, challenge, protocolKey, now),
+      { onevent: vi.fn(), onclose: (reason) => closed.push(reason) }
+    );
+
+    connection.callbacks?.onclose("relay unavailable");
+    connection.callbacks?.onclose("duplicate close");
+    expect(connection.closed).toBe(true);
+    expect(closed).toEqual(["relay unavailable"]);
   });
 });
