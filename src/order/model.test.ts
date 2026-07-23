@@ -4,7 +4,9 @@ import {
   buildOrderBook,
   createOrderState,
   eligibleMarketIds,
+  fillOrder,
   marketId,
+  reserveOrder,
   type OrderRecord
 } from "./model.js";
 
@@ -154,5 +156,89 @@ describe("Granola order model", () => {
     await expect(marketId(market)).resolves.toBe(
       "79da04f634a843c37c7a5ffb4aa29742a2551d238d9a443b39338c52b8fd1d5b"
     );
+  });
+
+  it("reserves an exact all-or-none amount without reducing the remaining amount", () => {
+    const initial = createOrderState({
+      orderId: askOne,
+      createdAt: 1_700_000_000,
+      expiresAt: 1_700_010_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "20",
+      price: { numerator: "1", denominator: "20" }
+    });
+
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "20",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_900,
+      proposalEventId: "a".repeat(64),
+      takerCommitment: "b".repeat(64)
+    });
+
+    expect(reserved).toMatchObject({
+      revision: "1",
+      remaining_amount: "20",
+      reserved_amount: "20",
+      status: "reserved",
+      reservation: {
+        id: "99999999-9999-4999-8999-999999999999",
+        amount: "20",
+        accepted_at: 1_700_000_100,
+        expires_at: 1_700_001_900
+      }
+    });
+    expect(() => reserveOrder(reserved, {
+      reservationId: "88888888-8888-4888-8888-888888888888",
+      amount: "20",
+      acceptedAt: 1_700_000_101,
+      expiresAt: 1_700_001_901,
+      proposalEventId: "c".repeat(64),
+      takerCommitment: "d".repeat(64)
+    })).toThrow("live reservation");
+  });
+
+  it("fills only the matching reservation and reaches a terminal zero balance", () => {
+    const initial = createOrderState({
+      orderId: askOne,
+      createdAt: 1_700_000_000,
+      expiresAt: 1_700_010_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "20",
+      price: { numerator: "1", denominator: "20" }
+    });
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "20",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_900,
+      proposalEventId: "a".repeat(64),
+      takerCommitment: "b".repeat(64)
+    });
+
+    expect(() => fillOrder(reserved, {
+      reservationId: "88888888-8888-4888-8888-888888888888",
+      amount: "20"
+    })).toThrow("reservation ID");
+
+    expect(fillOrder(reserved, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "20"
+    })).toMatchObject({
+      revision: "2",
+      remaining_amount: "0",
+      reserved_amount: "0",
+      reservation: null,
+      status: "filled"
+    });
   });
 });

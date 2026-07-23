@@ -72,6 +72,20 @@ export interface CreateOrderInput {
   minimumFillAmount?: string;
 }
 
+export interface ReserveOrderInput {
+  reservationId: string;
+  amount: string;
+  acceptedAt: number;
+  expiresAt: number;
+  proposalEventId: string;
+  takerCommitment: string;
+}
+
+export interface FillOrderInput {
+  reservationId: string;
+  amount: string;
+}
+
 export interface ExactMarket {
   baseUnit: string;
   baseMint: string;
@@ -97,6 +111,7 @@ export interface OrderBook {
 }
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const HEX_32 = /^[0-9a-f]{64}$/;
 
 function canonicalUnit(value: string): string {
   const unit = value.trim().toLowerCase();
@@ -196,6 +211,99 @@ export function createOrderState(input: CreateOrderInput): OrderState {
     reservation: null,
     replaces: null,
     replaced_by: null
+  };
+}
+
+function nextRevision(state: OrderState): string {
+  if (!/^(0|[1-9]\d*)$/.test(state.revision)) throw new Error("Order revision is invalid");
+  return (BigInt(state.revision) + 1n).toString();
+}
+
+function assertMutable(state: OrderState): void {
+  if (["filled", "canceled", "expired"].includes(state.status)) {
+    throw new Error("Terminal orders cannot change");
+  }
+}
+
+function validateFillShape(state: OrderState, amount: bigint, remaining: bigint): void {
+  const minimum = integer(state.minimum_fill_amount, "Minimum fill amount");
+  if (amount > remaining) throw new Error("Amount exceeds the remaining order amount");
+  if (state.execution === "all_or_none" && amount !== remaining) {
+    throw new Error("All-or-none execution must reserve and fill the entire remainder");
+  }
+  if (state.execution === "partial") {
+    const remainder = remaining - amount;
+    if (amount < minimum && amount !== remaining) {
+      throw new Error("Fill amount is below the order minimum");
+    }
+    if (remainder > 0n && remainder < minimum) {
+      throw new Error("Fill would leave dust below the order minimum");
+    }
+  }
+  if ((amount * BigInt(state.limit_price.numerator)) % BigInt(state.limit_price.denominator) !== 0n) {
+    throw new Error("Fill amount and limit price must produce an integer quote amount");
+  }
+}
+
+export function reserveOrder(state: OrderState, input: ReserveOrderInput): OrderState {
+  assertMutable(state);
+  if (state.reservation !== null || state.reserved_amount !== "0" || state.status === "reserved") {
+    throw new Error("Order already has a live reservation");
+  }
+  if (!UUID_V4.test(input.reservationId)) throw new Error("Reservation ID must be a UUID v4");
+  if (!HEX_32.test(input.proposalEventId)) throw new Error("Proposal event ID must be lowercase hex");
+  if (!HEX_32.test(input.takerCommitment)) throw new Error("Taker commitment must be lowercase hex");
+  if (!Number.isSafeInteger(input.acceptedAt) || input.acceptedAt < state.created_at) {
+    throw new Error("Reservation acceptance time is invalid");
+  }
+  if (
+    !Number.isSafeInteger(input.expiresAt) ||
+    input.expiresAt <= input.acceptedAt ||
+    input.expiresAt > state.expires_at
+  ) {
+    throw new Error("Reservation expiry is invalid");
+  }
+  const amount = integer(input.amount, "Reservation amount");
+  const remaining = integer(state.remaining_amount, "Remaining amount");
+  validateFillShape(state, amount, remaining);
+
+  return {
+    ...state,
+    revision: nextRevision(state),
+    reserved_amount: amount.toString(),
+    status: "reserved",
+    reservation: {
+      id: input.reservationId,
+      amount: amount.toString(),
+      accepted_at: input.acceptedAt,
+      expires_at: input.expiresAt,
+      proposal_event_id: input.proposalEventId,
+      taker_commitment: input.takerCommitment
+    }
+  };
+}
+
+export function fillOrder(state: OrderState, input: FillOrderInput): OrderState {
+  assertMutable(state);
+  const reservation = state.reservation;
+  if (!reservation || state.status !== "reserved") throw new Error("Fill requires a live reservation");
+  if (input.reservationId !== reservation.id) throw new Error("Fill reservation ID does not match");
+  const amount = integer(input.amount, "Fill amount");
+  const reserved = integer(state.reserved_amount, "Reserved amount");
+  const remaining = integer(state.remaining_amount, "Remaining amount");
+  if (amount !== reserved || input.amount !== reservation.amount) {
+    throw new Error("Fill amount must equal the reserved amount");
+  }
+  validateFillShape(state, amount, remaining);
+  const nextRemaining = remaining - amount;
+
+  return {
+    ...state,
+    revision: nextRevision(state),
+    remaining_amount: nextRemaining.toString(),
+    reserved_amount: "0",
+    status: nextRemaining === 0n ? "filled" : "partially_filled",
+    reservation: null
   };
 }
 
