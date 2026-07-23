@@ -190,7 +190,7 @@ function advanceTrade(sessionId: string): void {
     .then(async (trade) => {
       await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
       log(`Advanced ${trade.role} swap ${trade.reservationId.slice(0, 8)}… to ${trade.phase}`);
-      report(`Completed one checkpointed ${trade.role} action`);
+      report(`Completed one verified ${trade.role} action`);
     })
     .catch((error: unknown) => report(messageOf(error), true));
 }
@@ -370,7 +370,7 @@ async function requestAndClaimMint(input: {
   invoice.textContent = quote.request;
   quoteBox.append(heading, invoice);
   log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
-  report("Quote created; waiting for the fake mint to mark it paid");
+  report("Quote created; waiting for the Testnut mint to mark it paid");
 
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -379,8 +379,8 @@ async function requestAndClaimMint(input: {
     const current = state.quotes.find((item) => item.ref === quote.ref);
     if (current) heading.textContent = `${formatUnitAmount(current.amount, current.unit)} · ${current.state}`;
     if (current?.state === "ISSUED") {
-      log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
-      report("Fake test tokens added to this browser wallet");
+      log(`Received ${formatUnitAmount(current.amount, current.unit)} of Testnut ecash`);
+      report("Testnut tokens added to this browser wallet");
       return;
     }
   }
@@ -438,7 +438,7 @@ byId("refresh-orderbook").addEventListener("click", () => {
 });
 byId("refresh-trades").addEventListener("click", () => {
   void refreshTrades()
-    .then(() => report("Swap sessions refreshed from durable checkpoints"))
+    .then(() => report("Swap sessions refreshed from local state"))
     .catch((error: unknown) => report(messageOf(error), true));
 });
 byId("enable-maker").addEventListener("click", () => {
