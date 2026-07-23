@@ -4,6 +4,7 @@ import { finalizeEvent, getPublicKey, nip44 } from "nostr-tools";
 import {
   createTradeRumor,
   termsHash,
+  unwrapInitialReserveProposal,
   unwrapTradeMessage,
   wrapTradeRumor,
   type GranolaTradeMessage,
@@ -82,6 +83,38 @@ function expected(message: GranolaTradeMessage, extra: Partial<Parameters<typeof
 }
 
 describe("strict Granola NIP-17 messages", () => {
+  it("authenticates an initially unknown taker only for a sequence-zero proposal", async () => {
+    const message = await proposal();
+    const rumor = await createTradeRumor(message, takerKey);
+    const wrapped = wrapTradeRumor(rumor, takerKey, wrapOptions(wrapperKeyA, 8));
+
+    const opened = await unwrapInitialReserveProposal(wrapped.wrapper, makerKey, {
+      now,
+      expectedOrderAddress: message.order_address,
+      expectedOrderHead: message.order_head,
+      expectedTermsHash: message.terms_hash
+    });
+
+    expect(opened.message.author_pubkey).toBe(taker);
+    expect(opened.seal.pubkey).toBe(taker);
+
+    const later = await proposal({
+      type: "ack",
+      sequence: "1",
+      previous_message_id: message.message_id,
+      previous_transcript_hash: "88".repeat(32)
+    });
+    delete later.terms;
+    const laterRumor = await createTradeRumor(later, takerKey, rumor.id);
+    const laterWrap = wrapTradeRumor(laterRumor, takerKey, wrapOptions(wrapperKeyB, 9));
+    await expect(unwrapInitialReserveProposal(laterWrap.wrapper, makerKey, {
+      now,
+      expectedOrderAddress: message.order_address,
+      expectedOrderHead: message.order_head,
+      expectedTermsHash: message.terms_hash
+    })).rejects.toThrow();
+  });
+
   it("wraps one exact rumor into distinct authenticated delivery copies", async () => {
     const message = await proposal();
     const rumor = await createTradeRumor(message, takerKey);

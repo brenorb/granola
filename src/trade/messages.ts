@@ -112,6 +112,16 @@ export interface UnwrapTradeMessageOptions {
   expectedPreviousTranscriptHash?: string;
 }
 
+export type InitialReserveProposalOptions = Omit<
+  UnwrapTradeMessageOptions,
+  | "expectedAuthorPubkey"
+  | "expectedType"
+  | "expectedSequence"
+  | "expectedPreviousRumorId"
+  | "expectedPreviousMessageId"
+  | "expectedPreviousTranscriptHash"
+>;
+
 export interface OpenedTradeMessage {
   wrapper: SignedNostrEvent;
   seal: SignedNostrEvent;
@@ -440,13 +450,17 @@ export async function transcriptHash(previousTranscriptHash: string | null, rumo
   ]);
 }
 
-export async function unwrapTradeMessage(
+async function unwrapTradeMessageInternal(
   outerValue: SignedNostrEvent,
   recipientSecretKey: Uint8Array,
-  options: UnwrapTradeMessageOptions
+  options: Omit<UnwrapTradeMessageOptions, "expectedAuthorPubkey"> & {
+    expectedAuthorPubkey?: string;
+  }
 ): Promise<OpenedTradeMessage> {
   safeTimestamp(options.now, "Current time");
-  requiredString(options.expectedAuthorPubkey, "Expected author pubkey", HEX_32);
+  if (options.expectedAuthorPubkey !== undefined) {
+    requiredString(options.expectedAuthorPubkey, "Expected author pubkey", HEX_32);
+  }
   const recipient = getPublicKey(recipientSecretKey);
   const outer = parseSignedEvent(outerValue, "Outer event");
   if (utf8.encode(outer.content).length > 32 * 1024) {
@@ -506,7 +520,10 @@ export async function unwrapTradeMessage(
   if (rumor.pubkey !== message.author_pubkey || seal.pubkey !== message.author_pubkey) {
     throw new Error("Content, rumor, and seal authors differ");
   }
-  if (message.author_pubkey !== options.expectedAuthorPubkey) throw new Error("Unexpected message author");
+  if (
+    options.expectedAuthorPubkey !== undefined &&
+    message.author_pubkey !== options.expectedAuthorPubkey
+  ) throw new Error("Unexpected message author");
   if (message.recipient_pubkey !== recipient) throw new Error("Unexpected message recipient");
   if (message.order_address !== options.expectedOrderAddress) throw new Error("Unexpected order address");
   if (message.order_head !== options.expectedOrderHead) throw new Error("Unexpected order head");
@@ -551,4 +568,37 @@ export async function unwrapTradeMessage(
     message,
     transcriptHash: await transcriptHash(message.previous_transcript_hash, rumor.id)
   };
+}
+
+export async function unwrapTradeMessage(
+  outerValue: SignedNostrEvent,
+  recipientSecretKey: Uint8Array,
+  options: UnwrapTradeMessageOptions
+): Promise<OpenedTradeMessage> {
+  return unwrapTradeMessageInternal(outerValue, recipientSecretKey, options);
+}
+
+/**
+ * Opens only the first reservation proposal, where the taker's fresh session
+ * public key cannot be known until its authenticated NIP-17 seal is decrypted.
+ */
+export async function unwrapInitialReserveProposal(
+  outerValue: SignedNostrEvent,
+  recipientSecretKey: Uint8Array,
+  options: InitialReserveProposalOptions
+): Promise<OpenedTradeMessage> {
+  const opened = await unwrapTradeMessageInternal(outerValue, recipientSecretKey, {
+    ...options,
+    expectedType: "reserve_propose",
+    expectedSequence: "0"
+  });
+  if (
+    opened.message.type !== "reserve_propose" ||
+    opened.message.sequence !== "0" ||
+    opened.message.previous_message_id !== null ||
+    opened.message.previous_transcript_hash !== null
+  ) {
+    throw new Error("Message is not an initial reservation proposal");
+  }
+  return opened;
 }
