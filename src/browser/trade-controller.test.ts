@@ -320,10 +320,15 @@ describe("BrowserTradeController", () => {
   });
 
   it("automatically advances an accepted maker session", async () => {
-    const { controller, api, subscriptions } = setup();
+    const makerTrade = { ...view(), role: "maker" as const };
+    const { controller, api, subscriptions } = setup({
+      trades: [makerTrade]
+    });
+    api.acceptReserveProposal.mockResolvedValue(makerTrade);
+    api.getTrade.mockResolvedValue(makerTrade);
     api.advanceTrade.mockResolvedValueOnce({
-      ...view(1),
-      role: "maker",
+      ...makerTrade,
+      revision: 1,
       phase: "filled"
     });
 
@@ -363,9 +368,43 @@ describe("BrowserTradeController", () => {
     expect(api.advanceTrade).toHaveBeenCalledWith(newer.sessionId);
   });
 
-  it("reports maker relay failures through the maker status callback", async () => {
+  it("prefers the session that already advanced the order projection", async () => {
+    const advanced = {
+      ...view(),
+      sessionId: "aa".repeat(32),
+      role: "maker" as const,
+      phase: "reserved" as const,
+      createdAt: 1_800_000_000,
+      updatedAt: 1_800_000_001
+    };
+    const staleNewer = {
+      ...advanced,
+      sessionId: "bb".repeat(32),
+      phase: "negotiating" as const,
+      createdAt: 1_800_000_002,
+      updatedAt: 1_800_000_003
+    };
+    const { controller, api } = setup({
+      trades: [advanced, staleNewer]
+    });
+    api.getTrade.mockImplementation(async (id: string) =>
+      id === advanced.sessionId ? advanced : staleNewer
+    );
+    api.advanceTrade.mockImplementation(async (id: string) => ({
+      ...(id === advanced.sessionId ? advanced : staleNewer),
+      revision: 1,
+      phase: "filled"
+    }));
+
+    await controller.resume();
+
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    expect(api.advanceTrade).toHaveBeenCalledWith(advanced.sessionId);
+  });
+
+  it("silently reconnects a maker inbox after a transient relay close", async () => {
     const onMakerError = vi.fn();
-    const { controller, subscriptions } = setup({ onMakerError });
+    const { controller, subscriptions, stops } = setup({ onMakerError });
     await controller.enableMaker();
 
     subscriptions[0]!.onError({
@@ -374,9 +413,35 @@ describe("BrowserTradeController", () => {
       message: "Inbox relay subscription closed unexpectedly"
     });
 
-    expect(onMakerError).toHaveBeenCalledWith(
-      "Inbox relay subscription closed unexpectedly"
-    );
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(2));
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(onMakerError).not.toHaveBeenCalled();
+  });
+
+  it("recovers when the relay closes before subscription startup completes", async () => {
+    let releaseSubscription!: () => void;
+    const subscriptionGate = new Promise<void>((resolve) => {
+      releaseSubscription = resolve;
+    });
+    const onMakerError = vi.fn();
+    const { controller, subscriptions, stops } = setup({
+      startGates: [subscriptionGate],
+      onMakerError
+    });
+
+    const enabling = controller.enableMaker();
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(1));
+    subscriptions[0]!.onError({
+      relay: "wss://inbox.example",
+      kind: "relay_closed",
+      message: "Inbox relay subscription closed unexpectedly"
+    });
+    releaseSubscription();
+    await enabling;
+
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(2));
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(onMakerError).not.toHaveBeenCalled();
   });
 
   it("starts the session inbox and advances only one coordinator action per call", async () => {
@@ -477,6 +542,40 @@ describe("BrowserTradeController", () => {
 
     await subscriptions[1]!.onEvent(wrapper, "wss://inbox.example");
     expect(api.advanceTrade).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart a stale duplicate maker session from relay backlog", async () => {
+    const older = {
+      ...view(),
+      sessionId: "aa".repeat(32),
+      role: "maker" as const,
+      createdAt: 1_800_000_000,
+      updatedAt: 1_800_000_001
+    };
+    const newer = {
+      ...older,
+      sessionId: "bb".repeat(32),
+      createdAt: 1_800_000_002,
+      updatedAt: 1_800_000_003
+    };
+    const { controller, api, subscriptions } = setup({
+      trades: [older, newer]
+    });
+    api.acceptReserveProposal.mockResolvedValue(older);
+    api.getTrade.mockImplementation(async (id: string) =>
+      id === older.sessionId ? older : newer
+    );
+    api.advanceTrade.mockImplementation(async (id: string) => ({
+      ...(id === older.sessionId ? older : newer),
+      revision: 1,
+      phase: "filled"
+    }));
+
+    await controller.enableMaker();
+    await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
+
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    expect(api.advanceTrade).toHaveBeenCalledWith(newer.sessionId);
   });
 
   it("single-flights a reconnect racing durable resume", async () => {
