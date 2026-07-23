@@ -7,7 +7,8 @@ import type { MakerIdentity } from "../nostr/identity.js";
 import {
   startTradeSubscription,
   type StartTradeSubscriptionInput,
-  type TradeSubscription
+  type TradeSubscription,
+  type TradeSubscriptionError
 } from "../nostr/trade-subscription.js";
 import type { NostrTradeTransport } from "../nostr/trade-transport.js";
 import type { NostrEvent } from "../order/events.js";
@@ -90,6 +91,8 @@ export class BrowserTradeController {
   private readonly onChange: (trade: PublicTradeView) => void;
   private readonly onError: (message: string) => void;
   private readonly subscriptions = new Map<string, TradeSubscription>();
+  private readonly subscriptionStarts = new Map<string, Promise<void>>();
+  private subscriptionGeneration = 0;
 
   constructor(options: BrowserTradeControllerOptions) {
     this.api = options.api;
@@ -139,43 +142,48 @@ export class BrowserTradeController {
 
   async enableMaker(): Promise<MakerInboxStatus> {
     const makerPubkey = await this.makerIdentity.publicKey();
-    if (this.subscriptions.has("maker-order-key")) {
-      return { makerPubkey, inboxRelay: this.inboxRelay };
-    }
-    await this.makerIdentity.useSecretKey(async (secretKey) => {
-      const registration = this.transport.createRegistration(secretKey);
-      await this.transport.publishRegistration(registration, secretKey);
-      const subscription = await this.startSubscription({
-        recipientPubkey: makerPubkey,
-        recipientSecretKey: secretKey,
-        inboxRelays: [this.inboxRelay],
-        cursor: { since: Math.max(0, this.now() - GIFT_WRAP_LOOKBACK) },
-        port: this.inboxPort,
-        now: this.now,
-        onEvent: async (event) => {
-          try {
-            const proposal = await this.makerIdentity.useSecretKey(
-              (makerOrderSecretKey) => this.openProposal(
-                event,
-                makerOrderSecretKey,
-                { now: this.now() }
-              )
-            );
-            const trade = await this.api.acceptReserveProposal(proposal);
-            await this.ensureSessionSubscription(trade.sessionId);
-            this.onChange(trade);
-          } catch (error) {
-            this.onError(messageOf(error));
-          }
-        },
-        onError: (error) => this.onError(error.message)
-      });
-      this.subscriptions.set("maker-order-key", subscription);
-    });
+    await this.startSubscriptionOnce("maker-order-key", () =>
+      this.makerIdentity.useSecretKey(async (secretKey) => {
+        const registration = this.transport.createRegistration(secretKey);
+        await this.transport.publishRegistration(registration, secretKey);
+        return this.startSubscription({
+          recipientPubkey: makerPubkey,
+          recipientSecretKey: secretKey,
+          inboxRelays: [this.inboxRelay],
+          cursor: { since: Math.max(0, this.now() - GIFT_WRAP_LOOKBACK) },
+          port: this.inboxPort,
+          now: this.now,
+          onEvent: async (event) => {
+            try {
+              const proposal = await this.makerIdentity.useSecretKey(
+                (makerOrderSecretKey) => this.openProposal(
+                  event,
+                  makerOrderSecretKey,
+                  { now: this.now() }
+                )
+              );
+              const trade = await this.api.acceptReserveProposal(proposal);
+              await this.ensureSessionSubscription(trade.sessionId);
+              this.onChange(trade);
+            } catch (error) {
+              this.onError(messageOf(error));
+            }
+          },
+          onError: (error) => this.handleSubscriptionError(
+            "maker-order-key",
+            error,
+            async () => {
+              await this.enableMaker();
+            }
+          )
+        });
+      })
+    );
     return { makerPubkey, inboxRelay: this.inboxRelay };
   }
 
   stop(): void {
+    this.subscriptionGeneration += 1;
     for (const subscription of this.subscriptions.values()) {
       subscription.stop();
     }
@@ -184,37 +192,86 @@ export class BrowserTradeController {
 
   private async ensureSessionSubscription(sessionId: string): Promise<void> {
     const key = `session:${sessionId}`;
-    if (this.subscriptions.has(key)) return;
-    const session = await this.sessions.get(sessionId);
-    if (
-      session === undefined ||
-      session.privateState.inbox.status !== "registered"
-    ) return;
-    const secretKey = bytes(session.privateState.nostrPrivateKey);
-    try {
-      const subscription = await this.startSubscription({
-        recipientPubkey: this.sessionPubkey(session),
-        recipientSecretKey: secretKey,
-        inboxRelays: session.privateState.inbox.inboxRelays,
-        cursor: {
-          since: Math.max(0, session.createdAt - GIFT_WRAP_LOOKBACK)
-        },
-        port: this.inboxPort,
-        now: this.now,
-        onEvent: async () => {
-          try {
-            const trade = await this.api.advanceTrade(sessionId);
-            this.onChange(trade);
-          } catch (error) {
-            this.onError(messageOf(error));
-          }
-        },
-        onError: (error) => this.onError(error.message)
-      });
+    await this.startSubscriptionOnce(key, async () => {
+      const session = await this.sessions.get(sessionId);
+      if (
+        session === undefined ||
+        session.privateState.inbox.status !== "registered"
+      ) return undefined;
+      const secretKey = bytes(session.privateState.nostrPrivateKey);
+      try {
+        return await this.startSubscription({
+          recipientPubkey: this.sessionPubkey(session),
+          recipientSecretKey: secretKey,
+          inboxRelays: session.privateState.inbox.inboxRelays,
+          cursor: {
+            since: Math.max(0, session.createdAt - GIFT_WRAP_LOOKBACK)
+          },
+          port: this.inboxPort,
+          now: this.now,
+          onEvent: async () => {
+            try {
+              const trade = await this.api.advanceTrade(sessionId);
+              this.onChange(trade);
+            } catch (error) {
+              this.onError(messageOf(error));
+            }
+          },
+          onError: (error) => this.handleSubscriptionError(
+            key,
+            error,
+            () => this.ensureSessionSubscription(sessionId)
+          )
+        });
+      } finally {
+        secretKey.fill(0);
+      }
+    });
+  }
+
+  private startSubscriptionOnce(
+    key: string,
+    create: () => Promise<TradeSubscription | undefined>
+  ): Promise<void> {
+    if (this.subscriptions.has(key)) return Promise.resolve();
+    const existing = this.subscriptionStarts.get(key);
+    if (existing !== undefined) return existing;
+    const generation = this.subscriptionGeneration;
+    let start!: Promise<void>;
+    start = (async () => {
+      const subscription = await create();
+      if (subscription === undefined) return;
+      if (
+        this.subscriptionGeneration !== generation ||
+        this.subscriptions.has(key)
+      ) {
+        subscription.stop();
+        return;
+      }
       this.subscriptions.set(key, subscription);
-    } finally {
-      secretKey.fill(0);
-    }
+    })().finally(() => {
+      if (this.subscriptionStarts.get(key) === start) {
+        this.subscriptionStarts.delete(key);
+      }
+    });
+    this.subscriptionStarts.set(key, start);
+    return start;
+  }
+
+  private handleSubscriptionError(
+    key: string,
+    error: TradeSubscriptionError,
+    restart: () => Promise<void>
+  ): void {
+    this.onError(error.message);
+    if (error.kind !== "relay_closed") return;
+    const subscription = this.subscriptions.get(key);
+    if (subscription === undefined) return;
+    subscription.stop();
+    this.subscriptions.delete(key);
+    void restart().catch((restartError: unknown) => {
+      this.onError(messageOf(restartError));
+    });
   }
 
   private sessionPubkey(session: TradeSession): string {

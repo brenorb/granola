@@ -167,7 +167,9 @@ function privateSession(): TradeSession {
   } as unknown as TradeSession;
 }
 
-function setup(): {
+function setup(options: {
+  startGates?: Array<Promise<void> | undefined>;
+} = {}): {
   controller: BrowserTradeController;
   api: {
     listTrades: ReturnType<typeof vi.fn>;
@@ -213,9 +215,11 @@ function setup(): {
     },
     now: () => 1_800_000_000,
     startSubscription: vi.fn(async (input) => {
+      const startIndex = subscriptions.length;
       subscriptions.push(input);
       const stop = vi.fn();
       stops.push(stop);
+      await options.startGates?.[startIndex];
       return { restart: {
         recipientPubkey: input.recipientPubkey,
         inboxRelays: [...input.inboxRelays],
@@ -271,6 +275,89 @@ describe("BrowserTradeController", () => {
     expect(api.advanceTrade).toHaveBeenCalledTimes(1);
     await controller.advanceTrade(sessionId);
     expect(api.advanceTrade).toHaveBeenCalledTimes(2);
+  });
+
+  it("reopens a session inbox after its relay subscription closes", async () => {
+    const { controller, api, subscriptions, stops } = setup();
+    await controller.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: view().orderAddress,
+      expectedHeadId: view().offeredOrderHead,
+      fillBaseAmount: "1000"
+    });
+
+    subscriptions[0]!.onError({
+      relay: "wss://inbox.example",
+      kind: "relay_closed",
+      message: "Inbox relay subscription closed unexpectedly"
+    });
+
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(2));
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(subscriptions[1]).toMatchObject({
+      recipientPubkey: sessionPubkey,
+      cursor: { since: 1_799_827_200 }
+    });
+
+    await subscriptions[1]!.onEvent(wrapper, "wss://inbox.example");
+    expect(api.advanceTrade).toHaveBeenCalledTimes(1);
+  });
+
+  it("single-flights a reconnect racing durable resume", async () => {
+    let releaseReconnect!: () => void;
+    const reconnectGate = new Promise<void>((resolve) => {
+      releaseReconnect = resolve;
+    });
+    const { controller, subscriptions } = setup({
+      startGates: [undefined, reconnectGate]
+    });
+    await controller.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: view().orderAddress,
+      expectedHeadId: view().offeredOrderHead,
+      fillBaseAmount: "1000"
+    });
+
+    subscriptions[0]!.onError({
+      relay: "wss://inbox.example",
+      kind: "relay_closed",
+      message: "Inbox relay subscription closed unexpectedly"
+    });
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(2));
+    const resumed = controller.resume();
+    releaseReconnect();
+    await resumed;
+
+    expect(subscriptions).toHaveLength(2);
+  });
+
+  it("discards a reconnect that completes after the controller stops", async () => {
+    let releaseReconnect!: () => void;
+    const reconnectGate = new Promise<void>((resolve) => {
+      releaseReconnect = resolve;
+    });
+    const { controller, subscriptions, stops } = setup({
+      startGates: [undefined, reconnectGate]
+    });
+    await controller.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: view().orderAddress,
+      expectedHeadId: view().offeredOrderHead,
+      fillBaseAmount: "1000"
+    });
+
+    subscriptions[0]!.onError({
+      relay: "wss://inbox.example",
+      kind: "relay_closed",
+      message: "Inbox relay subscription closed unexpectedly"
+    });
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(2));
+    controller.stop();
+    releaseReconnect();
+    await vi.waitFor(() => expect(stops[1]).toHaveBeenCalledOnce());
+    controller.stop();
+
+    expect(stops[1]).toHaveBeenCalledOnce();
   });
 
   it("closes retained subscriptions and never returns their secret keys", async () => {
