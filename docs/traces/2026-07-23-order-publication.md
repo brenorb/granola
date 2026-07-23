@@ -14,10 +14,10 @@ token, quote ID, or preimage was persisted or printed.
 - Current projection: NIP-78 addressable kind `30078`
 - Required publication quorum: 2 relays per event
 
-## Validated publication batch
+## Accepted UUID-conforming publication batch
 
-The batch ran from `2026-07-23T00:58:05.785Z` to
-`2026-07-23T00:58:22.707Z`. Every transition and projection received an `OK`
+The replacement batch ran from `2026-07-23T01:22:35.837Z` to
+`2026-07-23T01:22:50.871Z`. Every transition and projection received an `OK`
 from all three relays and was then independently read back from all three:
 
 - `wss://nos.lol`
@@ -26,20 +26,31 @@ from all three relays and was then independently read back from all three:
 
 | Side | Size SAT | USD/BTC | Exact cents/SAT | Order ID | Maker public key | Transition ID | Projection ID | ACK | Readback |
 |---|---:|---:|---:|---|---|---|---|---:|---:|
-| Ask | 2,000 | 50,500.00 | `101/2000` | `seed-20260723-ask-50500-c2018189-10a8-4792-8e20-f264dcc308bb` | `b2b8c5194d9985355f13d7e60740f3de7a74e62eb237e418b455d1c0a817c708` | `d7c356c59e7e00567be8e9817d0c5b4a4dfb249593ebfcbe3fc52302f501a2bb` | `8e227344a23f8c68241728b7f8405b8a2cdf1e54b7acdcac0c3b6f49b96851b1` | 3/3 + 3/3 | 3/3 + 3/3 |
-| Ask | 1,000 | 51,000.00 | `51/1000` | `seed-20260723-ask-51000-3e8084a3-232e-4296-9238-c48b8d4dfdbe` | `773a432031821d8a2ac3c7d644d7058407850e163440c429c2027984d331c7db` | `28979e8ae9ca1a061a89add537d6f2583b5d3137bd0d8fce6b69922815d13554` | `51cdad0b789c01a74def9c7a3fe7ce8f95635ffba2c77941d58bba4e67104453` | 3/3 + 3/3 | 3/3 + 3/3 |
-| Ask | 1,000 | 52,000.00 | `13/250` | `seed-20260723-ask-52000-76e80857-c5de-48c1-8433-d5f8f8d37efc` | `6c9559a66b0f23ab2fe8bf99ead1f63ffcad0562d787c027f33a797e5f8a716d` | `1065604ff5c14c29b6be9722291235cf912291dad173a8de1865cbabe29e45e0` | `7c2a1e986f80b1bb7236647094fc1358afd83730ce9162d54eb6f33e9458aa45` | 3/3 + 3/3 | 3/3 + 3/3 |
-| Bid | 2,000 | 49,500.00 | `99/2000` | `seed-20260723-bid-49500-8a67656e-44b3-4a84-bc48-3fd60e2edb62` | `66fcd86723a0ee3d3150ffd366e0dba7374862c15d28a5a063f2b2f275c8f6c2` | `bc423933ee6912bc359fac539ea034a33ee8ea1bdc806705d39ff63b9873994a` | `fc0deb5893649289d917775e94ef7025e0eb951e585d01a86e7751c8c27e4206` | 3/3 + 3/3 | 3/3 + 3/3 |
-| Bid | 1,000 | 49,000.00 | `49/1000` | `seed-20260723-bid-49000-9e0559cb-16fc-427f-afaa-1da1ad59cf67` | `6c70938e96cb72a349640ed7dbd4e7b8a406ed85930f05bc1a41b4e949b771d9` | `606adef2f6824ed7a74dc202e6a50d8d396da99b19f153c5a63bab159c730d75` | `9680a3f832cf52a73adf3967566e00b196da9e2c19e2cd4e7c35e3cf02ea9abb` | 3/3 + 3/3 | 3/3 + 3/3 |
-| Bid | 1,000 | 48,000.00 | `6/125` | `seed-20260723-bid-48000-cf3bf873-6a4e-45a4-a716-3b7f26976636` | `65f1774227e48af5f82a1096d80c517555466512e085476516075d8714de8532` | `9e2fd801fd9dab6a1bd3741bf5ed2501ba2007aaaf86380455b8d0bcdd9199c3` | `e5e3c84212f479bea7cf34db909bbddcbe75e42dbec77012c6def026231fffa9` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Ask | 2,000 | 50,500.00 | `101/2000` | `40edd3fc-0175-47a5-ba72-e128be534680` | `aead5df02653b178b4ba59d5dd9fb2a6bf29ccdd67aeb37f4fa0c06bd4fe004f` | `496c946c9e285766d38dee92476101878ab344f26af80e05404ff2c7544aea0d` | `51ef1229b08efe8d7de64957526e75cef3217f798c67f784276f46f3bf0d1a1f` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Ask | 1,000 | 51,000.00 | `51/1000` | `f6116057-569e-4381-adbe-88bcc8f8a811` | `39871ea164b7ebd30c5c0f6ce92c844a7d3e6125cf9f48058c2c80770f22464d` | `1bef3058211983e537a9a9dbb870db454f51306bba3b870ec37207b910f5a9a1` | `5233d6f3a973beccdc3e6c7f181737faaca09e7e349dc46379e80a59d7d048b8` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Ask | 1,000 | 52,000.00 | `13/250` | `ac5347c1-c5b5-4c83-8ace-df0f0232c6e6` | `de3517a5de981a8714a7d92773584fbd38f8656318088150f3420dc080f4d64d` | `47b2991291aee288d8e08d2783c9b5491b10cf529a7ce7b04f7c2ba1d2e8eb4c` | `bfebdf1c4ca33dd37230418294514798d069f4bc3ff6372db2b1cf4b4afe0d8a` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Bid | 2,000 | 49,500.00 | `99/2000` | `c95f2085-d477-4384-8852-e4c9d1534c22` | `b34041dd682a39e83887b7e99d9bef259f05b93a08ba07402b18b200018a3b69` | `569bd36bfb0a6cc865648e098de396e66928f4db6820df5e4650df311ca59803` | `88510f7aca7d188bbbd18f7aff8d6f88b45cbbcabc4f1a70cf62760d912af859` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Bid | 1,000 | 49,000.00 | `49/1000` | `93e0fb64-bc0c-4076-9c94-7d20eff537e6` | `682cfb53198d760555a701dca6c923b4eb985faf81f3069177f0782d3ebf4e1b` | `b3e733c44b3dea8c82ba0176d6a5ac1dcabca0f1d913331ad677342e2a7a36d0` | `4a167baf5956a687c9521bba1e4a2881bc8f7690bced4dc3fb7129931f069a5d` | 3/3 + 3/3 | 3/3 + 3/3 |
+| Bid | 1,000 | 48,000.00 | `6/125` | `8e0719a8-08e8-4aa6-bc5a-a90e9497e58d` | `ccd1c8c5a7102bb1db93ef6853307e3965cd72295e32edf6430933ea6ceb1d9e` | `877fa5c8ff9921d6f8836e8f209074a7df3037edb5db27c21520b1a4439e64ee` | `1600cc054a3624a658fdbc3097e8c40cdf268c2b167195b71efc9a20bda4870e` | 3/3 + 3/3 | 3/3 + 3/3 |
 
 `ACK` shows transition plus projection acknowledgements. `Readback` shows
 transition plus projection retrieval. Relay acceptance proves replication, not
 consensus or future retention.
 
 The browser independently loaded these signed projections, recomputed the
-issuer-pair market tag, and displayed a best ask of USD 50,500/BTC, best bid of
-USD 49,500/BTC, and USD 1,000/BTC spread.
+issuer-pair market tag, fetched and verified each referenced transition head,
+and displayed a best ask of USD 50,500/BTC, best bid of USD 49,500/BTC, and USD
+1,000/BTC spread.
+
+## Legacy decorated-ID batch
+
+An earlier six-order batch used IDs such as
+`seed-20260723-ask-50500-c2018189-10a8-4792-8e20-f264dcc308bb`. Those IDs did
+not satisfy ADR 0001's UUID requirement. Their events remain on public relays,
+but the corrected domain boundary and parser reject all six projections. Along
+with the three published asks in the stopped run below, the browser reports
+nine ignored invalid projections. Commit `e043a27` retains their complete maker,
+transition, projection, acknowledgement, and readback identifiers for audit.
 
 ## Earlier stopped run
 
