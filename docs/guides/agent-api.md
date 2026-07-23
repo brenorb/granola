@@ -4,18 +4,23 @@ The static app exposes the same wallet used by the human interface as
 `window.granola`. It is intentionally small. Read methods return summaries;
 bearer secrets are returned only by the explicitly dangerous backup method.
 
-## Isolated test actors
+## One shared page and optional local workspaces
 
-Choose a local wallet profile with the URL query parameter:
+The deployed site is one shared page. Maker and taker are ephemeral roles tied
+to individual orders and sessions; the same browser wallet can publish orders
+and take other orders concurrently.
+
+For isolated local fixtures only, choose a storage workspace with the URL query
+parameter:
 
 ```text
 https://brenorb.com/granola/?wallet=maker
 https://brenorb.com/granola/?wallet=taker
 ```
 
-Profile names are 1–32 lowercase letters, numbers, or hyphens. Each profile
-gets a separate IndexedDB database. Mutations sharing a profile are serialized
-with the Web Locks API.
+Workspace names are 1–32 lowercase letters, numbers, or hyphens. Each
+workspace gets a separate IndexedDB database. A workspace is not a protocol
+role, and mutations sharing it are serialized with the Web Locks API.
 
 ## Methods
 
@@ -80,9 +85,10 @@ use that reference with `claimMint`.
 `createBackup()` is the deliberate exception: its encoded tokens are spendable
 bearer instruments. Do not log, paste, publish, or commit its return value.
 
-`enableMaker()` publishes the profile's authenticated order-key inbox
-registration and keeps its NIP-17 subscription open for the life of the page.
-Call it on the maker page before a taker starts. `takeOrder()` accepts only a
+`enableMaker()` publishes each active order's authenticated order-key inbox
+registration and keeps the NIP-17 subscriptions open for the life of the page.
+The human page calls it automatically on startup and after publishing an order;
+call it manually only to retry synchronization. `takeOrder()` accepts only a
 verified current sell projection for the configured SAT/USD issuer pair. Its
 lowercase UUIDv4 `requestId` is an idempotency key: reuse that exact ID,
 address, projection ID, revision, and fill amount if the caller did not receive
@@ -97,8 +103,8 @@ commitments, public projection IDs and revisions, and redacted mint evidence. Th
 return proofs, encoded tokens, private keys, preimages, witnesses, private
 message bodies, or mint quote IDs.
 
-Agents should normally run `runUntilSettled(sessionId)` concurrently on the
-maker and taker pages. It repeatedly invokes the same one-action coordinator,
+Agents should normally run `runUntilSettled(sessionId)` on the same shared page
+for each local session. It repeatedly invokes the same one-action coordinator,
 waits when the peer has not delivered the next private message, and stops only
 at `filled` or a terminal error. It does not merge or skip durable checkpoints.
 Its result contains only session ID, final phase, and redacted

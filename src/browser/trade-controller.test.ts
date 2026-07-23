@@ -176,6 +176,7 @@ function setup(options: {
   startGates?: Array<Promise<void> | undefined>;
   wait?: (delayMs: number) => Promise<void>;
   onMakerError?: (message: string) => void;
+  makerOrderIds?: string[];
 } = {}): {
   controller: BrowserTradeController;
   api: {
@@ -218,6 +219,9 @@ function setup(options: {
     inboxRelay: "wss://inbox.example",
     makerIdentity: {
       publicKey: vi.fn(async () => getPublicKey(makerKey)),
+      ...(options.makerOrderIds === undefined ? {} : {
+        listOrderIds: vi.fn(async () => options.makerOrderIds!)
+      }),
       useSecretKey: vi.fn(async (action) => action(makerKey.slice()))
     },
     now: () => 1_800_000_000,
@@ -273,6 +277,25 @@ describe("BrowserTradeController", () => {
     await Promise.all([first, second]);
 
     expect(subscriptions).toHaveLength(1);
+  });
+
+  it("syncs maker listeners when orders are added or removed without reloading", async () => {
+    const orderA = "11111111-1111-4111-8111-111111111111";
+    const orderB = "22222222-2222-4222-8222-222222222222";
+    const orderIds = [orderA];
+    const { controller, subscriptions, stops } = setup({ makerOrderIds: orderIds });
+
+    await controller.enableMaker();
+    expect(subscriptions).toHaveLength(1);
+
+    orderIds.push(orderB);
+    await controller.enableMaker();
+    expect(subscriptions).toHaveLength(2);
+
+    orderIds.splice(0, 1);
+    await controller.enableMaker();
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(subscriptions).toHaveLength(2);
   });
 
   it("opens a proposal from the live maker inbox and persists its maker session", async () => {

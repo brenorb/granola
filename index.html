@@ -15,7 +15,7 @@
     <header class="masthead">
       <a class="wordmark" href="./" aria-label="Granola home">GRANOLA<span>/00</span></a>
       <div class="environment"><i></i> FAKE TESTNET ECASH</div>
-      <p id="profile-label">Wallet profile: …</p>
+      <p id="profile-label">Local browser wallet</p>
     </header>
 
     <main>
@@ -86,11 +86,11 @@
             <h2 id="trades-title">Swap sessions</h2>
           </div>
           <div class="section-actions">
-            <button id="enable-maker" class="quiet" type="button">Enable maker inbox · <span id="maker-inbox-state">offline</span></button>
+            <button id="enable-maker" class="quiet" type="button">Sync maker listener · <span id="maker-inbox-state">idle</span></button>
             <button id="refresh-trades" class="quiet" type="button">Check sessions</button>
           </div>
         </div>
-        <p class="section-intro">Each click advances at most one verified protocol action. Mint observations—not peer messages—decide when value moved.</p>
+        <p class="section-intro">This is one shared page: publish an order to act as its maker, take another order to act as its taker, or do both at once. Each click advances at most one verified protocol action. Mint observations—not peer messages—decide when value moved.</p>
         <div id="trades"></div>
       </section>
 
@@ -133,7 +133,7 @@
         <section class="panel" aria-labelledby="custody-title">
           <p class="eyebrow">04 / Custody</p>
           <h2 id="custody-title">Back up or erase</h2>
-          <p>Your proofs live only in this browser profile’s IndexedDB. A backup contains spendable bearer tokens.</p>
+          <p>Your proofs live only in this browser wallet’s local IndexedDB. A backup contains spendable bearer tokens.</p>
           <button id="backup" type="button">Download bearer backup</button>
           <details>
             <summary>Danger zone</summary>

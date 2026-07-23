@@ -117,6 +117,7 @@ export class BrowserTradeController {
   private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
+  private makerSubscriptionKeys = new Set<string>();
   private readonly subscriptionStarts = new Map<string, Promise<void>>();
   private subscriptionGeneration = 0;
 
@@ -236,6 +237,17 @@ export class BrowserTradeController {
     const orderIds = this.makerIdentity.listOrderIds
       ? await this.makerIdentity.listOrderIds()
       : [undefined];
+    const makerSubscriptionKeys = new Set(
+      orderIds.map((orderId) =>
+        orderId ? `maker-order-key:${orderId}` : "maker-order-key"
+      )
+    );
+    for (const key of this.makerSubscriptionKeys) {
+      if (makerSubscriptionKeys.has(key)) continue;
+      this.subscriptions.get(key)?.stop();
+      this.subscriptions.delete(key);
+    }
+    this.makerSubscriptionKeys = makerSubscriptionKeys;
     const makerPubkeys: string[] = [];
     await Promise.all(orderIds.map(async (orderId) => {
       const makerPubkey = await this.makerIdentity.publicKey(orderId);
@@ -303,6 +315,7 @@ export class BrowserTradeController {
       subscription.stop();
     }
     this.subscriptions.clear();
+    this.makerSubscriptionKeys.clear();
   }
 
   private async ensureSessionSubscription(sessionId: string): Promise<void> {

@@ -1,26 +1,26 @@
 # Manually reproduce the Granola testnet swap
 
-This tutorial reproduces the demonstrated happy path: one browser profile sells
-20 fake testnet SAT for one USD cent held by a second profile. The result has no
-monetary value.
+This tutorial reproduces the demonstrated happy path: one browser wallet sells
+20 fake testnet SAT for one USD cent while a second browser wallet takes the
+order. The result has no monetary value.
 
 Allow 10–20 minutes. Use a desktop browser with IndexedDB, Web Locks, WebSocket,
 and developer tools enabled. Keep both pages open throughout the swap.
 
 ## Before you start
 
-Open these in two tabs or windows:
+Open the shared site in two tabs or windows when testing two local wallets:
 
-- Maker: <https://brenorb.com/granola/?wallet=maker-tutorial>
-- Taker: <https://brenorb.com/granola/?wallet=taker-tutorial>
+- Maker wallet: <https://brenorb.com/granola/?wallet=maker-tutorial>
+- Taker wallet: <https://brenorb.com/granola/?wallet=taker-tutorial>
 
-Confirm the header says `Wallet profile: maker-tutorial` in one and
-`Wallet profile: taker-tutorial` in the other. Each name selects an isolated
-local wallet. Do not open a second tab with either exact profile name.
+The `wallet` query is only an optional local storage namespace for this
+two-wallet fixture. It does not put the page into a maker or taker mode. On one
+page, the user can publish orders and take other orders at the same time.
 
-If you already used these profiles, choose a new lowercase suffix in both URLs,
+If you already used these workspaces, choose a new lowercase suffix in both URLs,
 such as `maker-tutorial-2` and `taker-tutorial-2`. Absolute balances depend on
-what that profile already holds, so a fresh pair is easier to verify.
+what each local wallet already holds, so a fresh pair is easier to verify.
 
 The fake mint quote remains visible after issuance and contains an invoice.
 Do not include that panel in screenshots or a public trace. Never publish a
@@ -28,7 +28,7 @@ bearer backup, encoded Cashu token, proof, private key, preimage, or witness.
 
 ## 1. Give the maker 100 SAT
 
-On the maker page, find **Mint fake tokens** and set:
+On the maker wallet tab, find **Mint fake tokens** and set:
 
 | Control | Value |
 | --- | --- |
@@ -42,7 +42,7 @@ liabilities** shows 100 SAT. This can take up to one minute.
 
 ## 2. Give the taker USD 0.10
 
-On the taker page, set:
+On the taker wallet tab, set:
 
 | Control | Value |
 | --- | --- |
@@ -55,7 +55,7 @@ Wait for `0.10 USD · ISSUED` and confirm the wallet balance.
 
 ## 3. Publish the 20 SAT ask
 
-On the maker page, expand **Publish a test limit order** and enter:
+On the maker wallet tab, expand **Publish a test limit order** and enter:
 
 | Control | Value |
 | --- | --- |
@@ -86,17 +86,16 @@ Press **Refresh book** and find the row with all of these values:
 It will normally be at the top ask price, although other public test orders can
 tie it.
 
-## 4. Start the maker inbox
+## 4. Confirm the maker listener
 
-After the order is published, the maker page automatically registers and listens
-with each active order's ephemeral Nostr key. Wait until the button reads
-**Enable maker inbox · listening**. If startup fails, the button shows an error;
-press it to retry. Keep the page open; after a reload, startup runs again for
-each active order.
+After the order is published, the same page automatically registers and listens
+with the order's ephemeral Nostr key. Wait until the button reads
+**Sync maker listener · listening**. If startup fails, the button shows an
+error; press it to retry. No page reload or role switch is required.
 
 ## 5. Take the ask
 
-On the taker page, press **Refresh book**. In the matching row, leave the action
+On the taker wallet tab, press **Refresh book**. In the matching row, leave the action
 amount at `20` and press **Take ask**.
 
 Wait for:
@@ -106,7 +105,8 @@ Wait for:
 - a taker session card starting at **Negotiating**.
 
 The taker still needs to advance once or start the automatic executor before
-the maker can receive the reservation proposal. Do not take a second order.
+the maker session can receive the reservation proposal. Do not take a second
+order.
 
 ## 6. Settle the same session
 
@@ -116,7 +116,7 @@ This uses the public, secret-free coordinator API from developer tools. It
 still executes every persisted one-action checkpoint; it only removes the need
 to click dozens of times.
 
-Open the taker page's developer console and run:
+Open the taker wallet tab's developer console and run:
 
 ```js
 window.granola.listTrades().then((trades) =>
@@ -124,9 +124,9 @@ window.granola.listTrades().then((trades) =>
 )
 ```
 
-Leave that promise running. On the maker page, wait briefly, then press
-**Check sessions** until the matching maker card appears. Open the maker
-developer console and run the same command:
+Leave that promise running. On the maker wallet tab, wait briefly, then press
+**Check sessions** until the matching maker card appears. Open its developer
+console and run the same command:
 
 ```js
 window.granola.listTrades().then((trades) =>
@@ -171,9 +171,9 @@ base HTLC uses a 7-day long lock, and the reservation recovery horizon is
 
 Press **Refresh** in both wallets and **Refresh book** on the taker.
 
-For fresh profiles funded exactly as above, expect approximately:
+For fresh workspaces funded exactly as above, expect approximately:
 
-| Profile | Before | Expected after |
+| Wallet | Before | Expected after |
 | --- | --- | --- |
 | Maker | 100 SAT | 78 SAT + USD 0.01 |
 | Taker | USD 0.10 | 20 SAT + USD 0.09 |
@@ -198,9 +198,9 @@ discovery. These do not require a replacement trade.
 
 1. Do not create another order or session.
 2. Do not erase either wallet.
-3. Keep or reopen the same `?wallet=` profile.
-4. If the maker page reloaded, wait for the automatic maker inbox startup or
-   press **Enable maker inbox** to retry it.
+3. Keep or reopen the same `?wallet=` workspace.
+4. If the maker tab reloaded, wait for the automatic maker listener startup or
+   press **Sync maker listener** to retry it.
 5. Press **Check sessions** and resume the same cards.
 6. For the fast demo, run the same `runUntilSettled` command again only on the
    side whose promise rejected.
@@ -216,7 +216,7 @@ A useful secret-free manual trace contains:
 - UTC start and completion times;
 - deployed commit, if known;
 - only a truncated session or reservation prefix;
-- both profile names;
+- both workspace names;
 - mint URLs and units;
 - 20 SAT, one USD minor unit, USD 50,000/BTC, all-or-none, and 30-day order
   lifetime;

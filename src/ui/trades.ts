@@ -47,9 +47,15 @@ export function renderTrades(
     const card = element("article");
     card.className = "trade-card";
     card.dataset.tradeSession = trade.sessionId;
+    card.dataset.tradeRole = trade.role;
     const heading = element("div");
     heading.className = "trade-card__heading";
-    heading.append(element("p", `${trade.role === "maker" ? "Maker" : "Taker"} · ${trade.reservationId.slice(0, 8)}…`));
+    const role = element(
+      "p",
+      `${trade.role === "maker" ? "Maker" : "Taker"} session · ${trade.reservationId.slice(0, 8)}…`
+    );
+    role.className = `trade-card__role trade-card__role--${trade.role}`;
+    heading.append(role);
     heading.append(element("h3", phaseLabel(trade.phase)));
     card.append(heading);
 

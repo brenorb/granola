@@ -102,4 +102,17 @@ describe("trade session presentation", () => {
     expect(advance).toHaveBeenCalledWith(trade.sessionId);
     expect(root.innerHTML).not.toMatch(/private|preimage|token|proof/i);
   });
+
+  it("keeps maker and taker sessions visibly distinct on the shared page", () => {
+    const root = document.createElement("section");
+    renderTrades(root, [
+      trade,
+      { ...trade, sessionId: "aa".repeat(32), role: "maker" }
+    ]);
+
+    expect(root.querySelectorAll("[data-trade-role='taker']")).toHaveLength(1);
+    expect(root.querySelectorAll("[data-trade-role='maker']")).toHaveLength(1);
+    expect(root.textContent).toContain("Taker session");
+    expect(root.textContent).toContain("Maker session");
+  });
 });

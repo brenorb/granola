@@ -28,9 +28,13 @@ npm test
 npm run dev
 ```
 
-Use `http://localhost:5173/?wallet=maker` and `?wallet=taker` for isolated test
-actors. Follow the
-[manual two-profile testnet tutorial](docs/guides/manual-testnet-swap.md) to
+Open `http://localhost:5173/`. One page supports both sides of the exchange:
+publishing an order creates an ephemeral maker role for that order, while
+taking an order creates an ephemeral taker session. The same browser wallet can
+hold both roles concurrently without a reload. The optional `?wallet=<name>`
+query is only a local storage namespace for isolated test fixtures; it does not
+select a maker or taker role. Follow the
+[manual shared-page testnet tutorial](docs/guides/manual-testnet-swap.md) to
 reproduce the demonstrated swap. The
 [agent API](docs/guides/agent-api.md) documents exact amounts, trust prompts,
 and the methods that can return bearer material.

@@ -86,7 +86,17 @@ async function publishOrderWithFunding(input: PublishOrderInput) {
     input.amount,
     input.priceCentsPerBtc
   );
-  return orderApi.publishOrder(input);
+  const publication = await orderApi.publishOrder(input);
+  // Publishing creates the order's fresh maker key. Keep the shared page's
+  // maker side live without requiring a reload or a role-specific page.
+  try {
+    await syncMakerInboxes();
+  } catch (error) {
+    // A relay/listener refresh must not turn an already-published order into
+    // a failed API result. The visible listener status remains actionable.
+    report(messageOf(error), true);
+  }
+  return publication;
 }
 const dashboard = byId("dashboard");
 const orderbook = byId("orderbook");
@@ -216,7 +226,11 @@ function takeOrderFromBook(
 function retryPendingPublication(orderId: string): void {
   void granola.retryOrderPublication(orderId)
     .then(async (publication) => {
-      await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
+      await Promise.all([
+        refreshOrderBook(),
+        refreshPendingPublications(),
+        syncMakerInboxes()
+      ]);
       log(`Republished exact order projection ${publication.orderId.slice(0, 8)}…`);
       report("Pending signed projection received a relay acknowledgement");
     })
@@ -232,7 +246,11 @@ function cancelOrderFromBook(order: OrderRecord): void {
     expectedProjectionId: order.eventId,
     expectedRevision: order.state.revision
   }).then(async () => {
-    await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
+    await Promise.all([
+      refreshOrderBook(),
+      refreshPendingPublications(),
+      syncMakerInboxes()
+    ]);
     log(`Canceled order ${order.state.order_id.slice(0, 8)}…`);
     report("Canceled order projection received a relay acknowledgement");
   }).catch((error: unknown) => report(messageOf(error), true));
@@ -278,15 +296,47 @@ const granola: GranolaBrowserFacade = {
 window.granola = granola;
 
 let makerInboxStartPromise: Promise<void> | undefined;
+let makerInboxResyncQueued = false;
+
+async function refreshMakerPublicKeys(): Promise<string[]> {
+  const publicKeys = await granola.getMakerPublicKeys();
+  const publicKey = publicKeys[0] ?? "";
+  byId("maker-pubkey").textContent = publicKey
+    ? `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`
+    : "none (publish an order to become a maker)";
+  byId("maker-pubkey").title = publicKeys.join("\n");
+  return publicKeys;
+}
+
+async function syncMakerInboxes(): Promise<void> {
+  const publicKeys = await refreshMakerPublicKeys();
+  if (publicKeys.length === 0) {
+    byId("maker-inbox-state").textContent = "idle";
+    return;
+  }
+  await startMakerInbox();
+}
 
 function startMakerInbox(): Promise<void> {
-  if (makerInboxStartPromise !== undefined) return makerInboxStartPromise;
+  if (makerInboxStartPromise !== undefined) {
+    makerInboxResyncQueued = true;
+    const current = makerInboxStartPromise;
+    return current.then(() => {
+      if (!makerInboxResyncQueued) return;
+      makerInboxResyncQueued = false;
+      return startMakerInbox();
+    });
+  }
   byId("maker-inbox-state").textContent = "starting";
   makerInboxStartPromise = granola.enableMaker()
     .then(({ makerPubkey, inboxRelay }) => {
+      if (!makerPubkey) {
+        byId("maker-inbox-state").textContent = "idle";
+        return;
+      }
       byId("maker-inbox-state").textContent = "listening";
-      log(`Maker inbox ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
-      report("Maker order inbox is authenticated and listening");
+      log(`Maker listener ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
+      report("Maker listener is authenticated and listening");
     })
     .catch((error: unknown) => {
       byId("maker-inbox-state").textContent = "error";
@@ -374,7 +424,9 @@ const requestedAgentRun = new URL(window.location.href).searchParams
   .get("runUntilSettled");
 if (requestedAgentRun !== null) runAgentSettlement(requestedAgentRun);
 
-byId("profile-label").textContent = `Wallet profile: ${profile}`;
+byId("profile-label").textContent = profile === "default"
+  ? "Local browser wallet"
+  : `Local wallet workspace: ${profile}`;
 byId("refresh").addEventListener("click", () => {
   void refresh().then(() => report("Wallet state refreshed")).catch((error: unknown) => report(messageOf(error), true));
 });
@@ -389,7 +441,7 @@ byId("refresh-trades").addEventListener("click", () => {
     .catch((error: unknown) => report(messageOf(error), true));
 });
 byId("enable-maker").addEventListener("click", () => {
-  void startMakerInbox();
+  void syncMakerInboxes();
 });
 
 const orderForm = byId<HTMLFormElement>("order-form");
@@ -563,17 +615,10 @@ void Promise.all([
   refreshPendingPublications(),
   startInboxListeners({
     startSessions: refreshTrades,
-    startMaker: startMakerInbox
+    startMaker: syncMakerInboxes
   }),
-  granola.getMakerPublicKeys().then((publicKeys) => {
-    const publicKey = publicKeys[0] ?? "";
-    byId("maker-pubkey").textContent = publicKey
-      ? `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`
-      : "none (create an order)";
-    byId("maker-pubkey").title = publicKeys.join("\n");
-  })
 ])
-  .then(() => log(`Opened isolated wallet profile “${profile}”`))
+  .then(() => log("Opened the shared maker/taker workspace"))
   .catch((error: unknown) => report(messageOf(error), true));
 
 window.addEventListener("pagehide", () => {

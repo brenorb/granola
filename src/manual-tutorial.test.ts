@@ -4,12 +4,12 @@ import tutorial from "../docs/guides/manual-testnet-swap.md?raw";
 import html from "../index.html?raw";
 
 describe("manual testnet swap tutorial", () => {
-  it("keeps the complete two-profile happy-path recipe", () => {
+  it("keeps the complete shared-page happy-path recipe", () => {
     expect(tutorial).toContain("?wallet=maker-tutorial");
     expect(tutorial).toContain("?wallet=taker-tutorial");
     expect(tutorial).toContain("100 SAT");
     expect(tutorial).toContain("USD 0.10");
-    expect(tutorial).toContain("Enable maker inbox");
+    expect(tutorial).toContain("Sync maker listener");
     expect(tutorial).toContain("20 SAT");
     expect(tutorial).toContain("50,000.00");
     expect(tutorial).toContain("Retry same signed projection");

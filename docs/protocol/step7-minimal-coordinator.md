@@ -92,7 +92,7 @@ namespace. Before advertising the private inbox, the page performs a disposable
 recipient-only live probe against `wss://auth.nostr1.com`; all probe keys are
 zeroized afterward.
 
-The maker page automatically enables each active order-key inbox, with the
+The shared page automatically enables each active order-key inbox, with the
 button remaining available for retry. A valid `reserve_propose` opens a maker
 session through the same exact-order and exact-funding preflight used by the
 agent API. Once either role's per-session kind `10050` registration is
