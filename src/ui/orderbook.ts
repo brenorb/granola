@@ -10,6 +10,10 @@ export type OrderBookRenderState =
   | { status: "error"; message: string }
   | { status: "ready"; book: OrderBook };
 
+export interface OrderBookRenderOptions {
+  onTake?: (order: OrderRecord) => void;
+}
+
 interface ExactRational {
   numerator: bigint;
   denominator: bigint;
@@ -122,7 +126,8 @@ function priceCell(order: OrderRecord, market: ExactMarket): HTMLTableCellElemen
 function orderRow(
   order: OrderRecord,
   market: ExactMarket,
-  best: "ask" | "bid" | undefined
+  best: "ask" | "bid" | undefined,
+  options: OrderBookRenderOptions
 ): HTMLTableRowElement {
   const row = element("tr");
   row.className = `order-row order-row--${order.state.side === "sell" ? "ask" : "bid"}`;
@@ -151,6 +156,15 @@ function orderRow(
   time.dateTime = new Date(order.state.expires_at * 1000).toISOString();
   expiry.append(time);
   row.append(expiry);
+  const action = element("td");
+  const take = element("button", `Take ${order.state.side === "sell" ? "ask" : "bid"}`);
+  take.type = "button";
+  take.className = "quiet";
+  take.dataset.takeOrder = "true";
+  take.disabled = !order.verified || options.onTake === undefined;
+  if (options.onTake) take.addEventListener("click", () => options.onTake?.(order));
+  action.append(take);
+  row.append(action);
   return row;
 }
 
@@ -201,7 +215,7 @@ function midpointText(book: OrderBook): string {
   return `Spread ${decimal(spread, scale)} ${scale.label}`;
 }
 
-function renderReady(root: HTMLElement, book: OrderBook): void {
+function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRenderOptions): void {
   if (book.asks.length === 0 && book.bids.length === 0) {
     const empty = element("div");
     empty.className = "empty-state";
@@ -222,7 +236,7 @@ function renderReady(root: HTMLElement, book: OrderBook): void {
   );
   const head = element("thead");
   const headers = element("tr");
-  for (const label of ["Side", "Limit price", "Remaining", "Execution", "Expires (UTC)"]) {
+  for (const label of ["Side", "Limit price", "Remaining", "Execution", "Expires (UTC)", "Action"]) {
     const header = element("th", label);
     header.scope = "col";
     headers.append(header);
@@ -235,7 +249,7 @@ function renderReady(root: HTMLElement, book: OrderBook): void {
   asks.setAttribute("aria-label", "Asks");
   for (const order of [...book.asks].reverse()) {
     asks.append(
-      orderRow(order, book.market, order.address === book.topAsk?.address ? "ask" : undefined)
+      orderRow(order, book.market, order.address === book.topAsk?.address ? "ask" : undefined, options)
     );
   }
   table.append(asks);
@@ -245,7 +259,7 @@ function renderReady(root: HTMLElement, book: OrderBook): void {
   const midpointRow = element("tr");
   midpointRow.dataset.bookMidpoint = "true";
   const midpointCell = element("td", midpointText(book));
-  midpointCell.colSpan = 5;
+  midpointCell.colSpan = 6;
   midpointRow.append(midpointCell);
   midpoint.append(midpointRow);
   table.append(midpoint);
@@ -255,7 +269,7 @@ function renderReady(root: HTMLElement, book: OrderBook): void {
   bids.setAttribute("aria-label", "Bids");
   for (const order of book.bids) {
     bids.append(
-      orderRow(order, book.market, order.address === book.topBid?.address ? "bid" : undefined)
+      orderRow(order, book.market, order.address === book.topBid?.address ? "bid" : undefined, options)
     );
   }
   table.append(bids);
@@ -266,7 +280,11 @@ function renderReady(root: HTMLElement, book: OrderBook): void {
   root.append(scroller);
 }
 
-export function renderOrderBook(root: HTMLElement, state: OrderBookRenderState): void {
+export function renderOrderBook(
+  root: HTMLElement,
+  state: OrderBookRenderState,
+  options: OrderBookRenderOptions = {}
+): void {
   root.replaceChildren();
   root.setAttribute("aria-live", "polite");
   root.removeAttribute("role");
@@ -282,5 +300,5 @@ export function renderOrderBook(root: HTMLElement, state: OrderBookRenderState):
     root.append(element("p", state.message));
     return;
   }
-  renderReady(root, state.book);
+  renderReady(root, state.book, options);
 }

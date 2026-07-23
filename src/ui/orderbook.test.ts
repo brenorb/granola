@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 
 import { buildOrderBook, createOrderState, type OrderRecord } from "../order/model.js";
 import { renderOrderBook } from "./orderbook.js";
@@ -82,6 +83,20 @@ describe("order-book presentation", () => {
     expect(root.querySelectorAll('th[scope="row"]')).toHaveLength(4);
     expect(root.querySelector(`[data-order-id="${askLow}"]`)?.textContent).toContain("Best ask");
     expect(root.querySelector(`[data-order-id="${bidHigh}"]`)?.textContent).toContain("Best bid");
+  });
+
+  it("offers an explicit take action with the exact verified order record", async () => {
+    const best = record(askLow, "sell", "1", "20", "20");
+    const book = await buildOrderBook([best], market, 1_700_000_100);
+    const root = document.createElement("section");
+    const take = vi.fn();
+
+    renderOrderBook(root, { status: "ready", book }, { onTake: take });
+    const button = root.querySelector<HTMLButtonElement>(`[data-order-id="${askLow}"] [data-take-order]`);
+    button?.click();
+
+    expect(button?.textContent).toBe("Take ask");
+    expect(take).toHaveBeenCalledWith(best);
   });
 
   it("preserves a sub-safe-integer spread as an exact rational", async () => {
