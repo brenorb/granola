@@ -293,47 +293,95 @@ export async function publishInboxList(
     if (!Number.isSafeInteger(quorum) || quorum < 1 || quorum > relays.length) {
       throw new Error("Inbox publication quorum is invalid");
     }
-    const receipts = await Promise.all(relays.map(async (relay): Promise<InboxReceipt> => {
+
+    type Attempt = {
+      relay: string;
+      receipt: InboxReceipt;
+      readback: InboxPublicationResult["readback"][number];
+      confirmed: boolean;
+    };
+
+    const attempts = relays.map((relay) => (async (): Promise<Attempt> => {
+      const relayKey = Uint8Array.from(keySnapshot);
       try {
-        return {
-          relay,
-          ok: true,
-          message: await port.publish(
+        let receipt: InboxReceipt;
+        try {
+          receipt = {
             relay,
-            eventSnapshot,
-            authHandler(relay, keySnapshot, now)
-          )
-        };
-      } catch (error) {
-        return { relay, ok: false, message: relayError(error) };
+            ok: true,
+            message: await port.publish(
+              relay,
+              eventSnapshot,
+              authHandler(relay, relayKey, now)
+            )
+          };
+        } catch (error) {
+          return {
+            relay,
+            receipt: { relay, ok: false, message: relayError(error) },
+            readback: { relay, found: false, event: null, observedAt: now },
+            confirmed: false
+          };
+        }
+
+        try {
+          const events = await port.query(relay, {
+            ids: [eventSnapshot.id],
+            authors: [eventSnapshot.pubkey],
+            kinds: [10050],
+            limit: 1
+          }, authHandler(relay, relayKey, now));
+          const exactCandidate = events.find((candidate) => {
+            try {
+              validateInboxList(candidate, eventSnapshot.pubkey, now);
+              return candidate.id === eventSnapshot.id;
+            } catch {
+              return false;
+            }
+          }) ?? null;
+          const exact = exactCandidate === null ? null : snapshotNostrEvent(exactCandidate);
+          return {
+            relay,
+            receipt,
+            readback: { relay, found: exact !== null, event: exact, observedAt: now },
+            confirmed: exact !== null
+          };
+        } catch {
+          return {
+            relay,
+            receipt,
+            readback: { relay, found: false, event: null, observedAt: now },
+            confirmed: false
+          };
+        }
+      } finally {
+        relayKey.fill(0);
       }
+    })());
+
+    const pending = attempts.map((promise, index) => ({
+      index,
+      promise: promise.then((attempt) => ({ index, attempt }))
     }));
-    const readback = await Promise.all(relays.map(async (relay) => {
-      try {
-        const events = await port.query(relay, {
-          ids: [eventSnapshot.id],
-          authors: [eventSnapshot.pubkey],
-          kinds: [10050],
-          limit: 1
-        }, authHandler(relay, keySnapshot, now));
-        const exactCandidate = events.find((candidate) => {
-          try {
-            validateInboxList(candidate, eventSnapshot.pubkey, now);
-            return candidate.id === eventSnapshot.id;
-          } catch {
-            return false;
-          }
-        }) ?? null;
-        const exact = exactCandidate === null ? null : snapshotNostrEvent(exactCandidate);
-        return { relay, found: exact !== null, event: exact, observedAt: now };
-      } catch {
-        return { relay, found: false, event: null, observedAt: now };
-      }
-    }));
-    const confirmed = relays.filter((relay) =>
-      receipts.some((receipt) => receipt.relay === relay && receipt.ok) &&
-      readback.some((result) => result.relay === relay && result.found)
-    );
+    const completed: Array<Attempt | undefined> = [];
+    let confirmedCount = 0;
+    while (pending.length > 0 && confirmedCount < quorum) {
+      const outcome = await Promise.race(pending.map(({ promise }) => promise));
+      const pendingIndex = pending.findIndex(({ index }) => index === outcome.index);
+      if (pendingIndex >= 0) pending.splice(pendingIndex, 1);
+      completed[outcome.index] = outcome.attempt;
+      if (outcome.attempt.confirmed) confirmedCount += 1;
+    }
+
+    if (confirmedCount < quorum) {
+      const remaining = await Promise.all(pending.map(({ promise }) => promise));
+      for (const outcome of remaining) completed[outcome.index] = outcome.attempt;
+    }
+
+    const settled = completed.filter((attempt): attempt is Attempt => attempt !== undefined);
+    const receipts = settled.map(({ receipt }) => receipt);
+    const readback = settled.map(({ readback: result }) => result);
+    const confirmed = settled.filter(({ confirmed: isConfirmed }) => isConfirmed).map(({ relay }) => relay);
     if (confirmed.length < quorum) {
       throw new Error("Inbox-list ACK and readback quorum was not reached");
     }

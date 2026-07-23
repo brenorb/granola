@@ -223,7 +223,7 @@ describe("Nostr trade transport", () => {
       persisted
     ]);
     expect(registration.event).toEqual(persisted);
-    expect(registration.confirmed).toHaveLength(3);
+    expect(registration.confirmed).toHaveLength(1);
   });
 
   it("rejects a tampered, wrongly signed, or differently configured registration before I/O", async () => {
@@ -342,7 +342,7 @@ describe("Nostr trade transport", () => {
 
     expect(result.event).toEqual(persisted);
     expect(result.readback.filter(({ found }) => found).map(({ event }) => event))
-      .toEqual([persisted, persisted, persisted]);
+      .toEqual([persisted]);
     expect(port.publications.map(({ event }) => event))
       .toEqual([persisted, persisted, persisted]);
     expect(port.publications.every(({ authPubkey }) => authPubkey === expectedSigner)).toBe(true);
@@ -366,7 +366,7 @@ describe("Nostr trade transport", () => {
     const selected = await transport.discover(getPublicKey(recipientKey), key(2));
 
     expect(registration.event).toEqual(persisted);
-    expect(registration.confirmed).toHaveLength(3);
+    expect(registration.confirmed).toHaveLength(1);
     expect(exact).toEqual({ event: persisted, eventId: persisted.id, relays: inboxes });
     expect(selected).toEqual(inboxes);
   });
