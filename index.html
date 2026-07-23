@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://testnut.cashu.space https://nofee.testnut.cashu.space wss:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://testnut.cashu.space https://nofee.testnut.cashu.space wss://nostr.ltd wss://relay.damus.io wss://nos.lol; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <meta name="description" content="Granola — an experimental Cashu atomic swap workbench." />
     <title>Granola / Cashu swap workbench</title>
@@ -32,6 +32,55 @@
           <button id="refresh" class="quiet" type="button">Refresh</button>
         </div>
         <div id="dashboard"></div>
+      </section>
+
+      <section class="exchange" aria-labelledby="orderbook-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">02 / Public market</p>
+            <h2 id="orderbook-title">SAT / USD test order book</h2>
+          </div>
+          <button id="refresh-orderbook" class="quiet" type="button">Refresh book</button>
+        </div>
+        <div class="market-tape">
+          <p><span>Base issuer</span><strong>testnut.cashu.space · SAT</strong></p>
+          <p><span>Quote issuer</span><strong>nofee.testnut.cashu.space · USD cents</strong></p>
+          <p><span>Relay policy</span><strong>2 of 3 acknowledgements</strong></p>
+          <p><span>Local maker</span><strong id="maker-pubkey">loading…</strong></p>
+        </div>
+        <div id="orderbook"></div>
+
+        <details class="order-entry">
+          <summary>Publish a test limit order</summary>
+          <form id="order-form">
+            <div class="field-pair">
+              <label>Side
+                <select name="side"><option value="sell">Sell SAT</option><option value="buy">Buy SAT</option></select>
+              </label>
+              <label>Size (SAT)
+                <input name="amount" inputmode="numeric" pattern="[1-9][0-9]*" value="2000" required />
+              </label>
+            </div>
+            <div class="field-pair">
+              <label>Limit price (USD / BTC)
+                <input name="fiatPrice" inputmode="decimal" pattern="(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?" value="50500.00" required />
+              </label>
+              <label>Good for (days)
+                <input name="days" type="number" min="1" max="30" value="30" required />
+              </label>
+            </div>
+            <div class="field-pair">
+              <label>Execution
+                <select id="order-execution" name="execution"><option value="all_or_none">All or none</option><option value="partial">Allow partial fill</option></select>
+              </label>
+              <label>Minimum fill (SAT)
+                <input id="minimum-fill" name="minimumFillAmount" inputmode="numeric" pattern="[1-9][0-9]*" disabled />
+              </label>
+            </div>
+            <p class="hint">Orders are public signed test data, not escrow. Prices are converted to an exact cents-per-SAT ratio before signing.</p>
+            <button type="submit">Sign &amp; publish order</button>
+          </form>
+        </details>
       </section>
 
       <div class="work-grid">

@@ -17,6 +17,10 @@ mint fake Testnut `sat` and `usd` tokens, receive encoded Cashu tokens, show
 balances by unit and mint, download explicit bearer backups, and expose the same
 operations to agents through `window.granola`.
 
+The page also verifies and displays a public, issuer-specific SAT/USD Nostr
+order book with an exchange-style best bid, best ask, and spread. Test makers
+can sign and publish exact-rational limit orders through the UI or agent API.
+
 ```bash
 npm ci
 npm test

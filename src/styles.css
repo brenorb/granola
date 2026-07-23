@@ -37,6 +37,7 @@ h1 em { color: var(--orange); font-weight: 500; }
 h2 { margin: 0 0 1.4rem; font-size: clamp(1.65rem,3vw,2.6rem); line-height: 1; letter-spacing: -.035em; font-weight: 500; }
 
 .ledger { padding: 3rem 0; border-bottom: 1px solid var(--ink); }
+.exchange { padding: 3rem 0; border-bottom: 1px solid var(--ink); }
 .section-heading { display: flex; justify-content: space-between; align-items: start; }
 .balance-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 1px; background: var(--ink); border: 1px solid var(--ink); }
 .balance-card { min-height: 160px; display: flex; flex-direction: column; background: var(--paper); padding: 1.2rem; }
@@ -48,6 +49,24 @@ caption { padding: .65rem 0; text-align: left; font-weight: 700; text-transform:
 th, td { padding: .7rem; border: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .empty-state { padding: 3rem; border: 1px dashed var(--ink); text-align: center; }
+.market-tape { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: 1.5rem 0; border: 1px solid var(--ink); background: var(--ink); gap: 1px; }
+.market-tape p { min-width: 0; margin: 0; padding: .8rem; background: var(--paper); }
+.market-tape span, .market-tape strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: .66rem/1.5 "Courier New", monospace; }
+.market-tape span { color: #696c62; text-transform: uppercase; }
+.orderbook-summary { display: grid; grid-template-columns: repeat(3,auto 1fr); margin: 1.5rem 0 0; border: 1px solid var(--ink); }
+.orderbook-summary dt, .orderbook-summary dd { margin: 0; padding: .75rem; font: 700 .7rem/1.2 "Courier New", monospace; }
+.orderbook-summary dt { background: var(--ink); color: var(--paper); text-transform: uppercase; }
+.orderbook-summary dd { background: var(--paper); }
+.orderbook-table { font-variant-numeric: tabular-nums; }
+.orderbook-asks tr { background: rgba(233,99,44,.09); }
+.orderbook-bids tr { background: rgba(200,241,53,.13); }
+.orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
+.orderbook-bids tr[data-best="bid"] { background: rgba(200,241,53,.3); }
+.orderbook-midpoint td { padding: .45rem .7rem; color: var(--paper); background: var(--ink); text-align: center; font-weight: 700; }
+.order-price-exact { display: block; margin-top: .2rem; color: #696c62; font-size: .58rem; }
+.order-entry { margin-top: 2rem; padding: 1.2rem; border: 1px solid var(--ink); background: rgba(245,241,229,.55); }
+.order-entry[open] summary { margin-bottom: 1.2rem; }
+.order-entry form { max-width: 58rem; }
 
 .work-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .panel { padding: clamp(1.5rem,4vw,3rem); border-bottom: 1px solid var(--ink); }
@@ -89,6 +108,8 @@ code { font-family: "Courier New", monospace; }
   .work-grid { grid-template-columns: 1fr; }
   .panel:nth-child(odd) { border-right: 0; }
   .field-pair { grid-template-columns: 1fr; }
+  .market-tape { grid-template-columns: 1fr 1fr; }
+  .orderbook-summary { grid-template-columns: auto 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

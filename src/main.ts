@@ -1,10 +1,16 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
+import { OrderApi, type PublishOrderInput } from "./api/order-api.js";
 import { withWalletLock } from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { CashuClient } from "./cashu/client.js";
+import { fiatPerBtcPrice } from "./order/human-price.js";
+import { NostrOrderService } from "./order/service.js";
+import { MakerIdentity } from "./nostr/identity.js";
+import { RelayClient } from "./nostr/relay.js";
 import { IndexedDbStorageDriver, WalletRepository } from "./storage/wallet-repository.js";
 import { renderDashboard } from "./ui/dashboard.js";
 import { formatUnitAmount } from "./ui/format.js";
+import { renderOrderBook } from "./ui/orderbook.js";
 
 interface GranolaBrowserFacade {
   getState: BrowserGranolaApi["getState"];
@@ -15,6 +21,9 @@ interface GranolaBrowserFacade {
   receiveToken: BrowserGranolaApi["receiveToken"];
   createBackup: BrowserGranolaApi["createBackup"];
   clearWallet: BrowserGranolaApi["clearWallet"];
+  getMakerIdentity: OrderApi["getMakerIdentity"];
+  getOrderBook: OrderApi["getOrderBook"];
+  publishOrder: OrderApi["publishOrder"];
 }
 
 declare global {
@@ -29,8 +38,16 @@ function byId<T extends HTMLElement>(id: string): T {
 
 const profile = profileFromLocation(window.location.href);
 const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
+const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
 const api = new GranolaApi(new WalletRepository(driver), new QuoteRepository(driver), new CashuClient());
+const makerIdentity = new MakerIdentity(driver, locked);
+const relayClient = new RelayClient();
+const orderApi = new OrderApi(
+  makerIdentity,
+  new NostrOrderService(makerIdentity, relayClient)
+);
 const dashboard = byId("dashboard");
+const orderbook = byId("orderbook");
 const status = byId("status");
 const activity = byId<HTMLOListElement>("activity-log");
 
@@ -59,7 +76,20 @@ async function refresh(state?: GranolaState): Promise<GranolaState> {
   return next;
 }
 
-const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
+async function refreshOrderBook(): Promise<void> {
+  renderOrderBook(orderbook, { status: "loading" });
+  try {
+    const result = await orderApi.getOrderBook();
+    renderOrderBook(orderbook, { status: "ready", book: result.book });
+    if (result.rejected > 0) {
+      log(`Ignored ${result.rejected} invalid or conflicting public order event(s)`);
+    }
+  } catch (error) {
+    renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
+    throw error;
+  }
+}
+
 const granola: GranolaBrowserFacade = {
   getState: api.getState.bind(api),
   inspectMint: api.inspectMint.bind(api),
@@ -68,13 +98,62 @@ const granola: GranolaBrowserFacade = {
   claimMint: (ref) => locked(() => api.claimMint(ref)),
   receiveToken: (token) => locked(() => api.receiveToken(token)),
   createBackup: () => locked(() => api.createBackup()),
-  clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation))
+  clearWallet: (confirmation) => locked(() => api.clearWallet(confirmation)),
+  getMakerIdentity: orderApi.getMakerIdentity.bind(orderApi),
+  getOrderBook: orderApi.getOrderBook.bind(orderApi),
+  publishOrder: orderApi.publishOrder.bind(orderApi)
 };
 window.granola = granola;
 
 byId("profile-label").textContent = `Wallet profile: ${profile}`;
 byId("refresh").addEventListener("click", () => {
   void refresh().then(() => report("Wallet state refreshed")).catch((error: unknown) => report(messageOf(error), true));
+});
+byId("refresh-orderbook").addEventListener("click", () => {
+  void refreshOrderBook()
+    .then(() => report("Order book refreshed from public relays"))
+    .catch((error: unknown) => report(messageOf(error), true));
+});
+
+const executionInput = byId<HTMLSelectElement>("order-execution");
+const minimumFillInput = byId<HTMLInputElement>("minimum-fill");
+executionInput.addEventListener("change", () => {
+  const partial = executionInput.value === "partial";
+  minimumFillInput.disabled = !partial;
+  minimumFillInput.required = partial;
+  if (!partial) minimumFillInput.value = "";
+});
+
+byId<HTMLFormElement>("order-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget as HTMLFormElement);
+  void (async () => {
+    const side = String(form.get("side"));
+    const execution = String(form.get("execution"));
+    const days = Number(String(form.get("days")));
+    if (side !== "buy" && side !== "sell") throw new Error("Unknown order side");
+    if (execution !== "all_or_none" && execution !== "partial") {
+      throw new Error("Unknown execution condition");
+    }
+    if (!Number.isSafeInteger(days) || days < 1 || days > 30) {
+      throw new Error("Order lifetime must be 1–30 days");
+    }
+    const input: PublishOrderInput = {
+      side,
+      amount: String(form.get("amount")),
+      price: fiatPerBtcPrice(String(form.get("fiatPrice"))),
+      expiresAt: Math.floor(Date.now() / 1000) + days * 86_400,
+      execution,
+      ...(execution === "partial"
+        ? { minimumFillAmount: String(form.get("minimumFillAmount")) }
+        : {})
+    };
+    const publication = await granola.publishOrder(input);
+    const acknowledgements = publication.projectionReceipts.filter((receipt) => receipt.ok).length;
+    log(`Published ${side} order ${publication.orderId.slice(0, 8)}… to ${acknowledgements} relay(s)`);
+    await refreshOrderBook();
+    report(`Order published with ${acknowledgements} relay acknowledgements`);
+  })().catch((error: unknown) => report(messageOf(error), true));
 });
 
 byId<HTMLFormElement>("mint-form").addEventListener("submit", (event) => {
@@ -160,4 +239,15 @@ byId<HTMLFormElement>("clear-form").addEventListener("submit", (event) => {
     .catch((error: unknown) => report(messageOf(error), true));
 });
 
-void refresh().then(() => log(`Opened isolated wallet profile “${profile}”`)).catch((error: unknown) => report(messageOf(error), true));
+void Promise.all([
+  refresh(),
+  refreshOrderBook(),
+  granola.getMakerIdentity().then(({ publicKey }) => {
+    byId("maker-pubkey").textContent = `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`;
+    byId("maker-pubkey").title = publicKey;
+  })
+])
+  .then(() => log(`Opened isolated wallet profile “${profile}”`))
+  .catch((error: unknown) => report(messageOf(error), true));
+
+window.addEventListener("pagehide", () => relayClient.dispose(), { once: true });
