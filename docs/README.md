@@ -12,6 +12,10 @@
 - [Browser agent API](guides/agent-api.md)
 - [Testnet wallet notes](guides/testnet-wallet.md)
 
+## Architecture decisions
+
+- [ADR 0001: Nostr events for the Granola order book](adr/0001-nostr-order-events.md)
+
 ## Reading rule
 
 The historical material is evidence of intent, not evidence that atomicity or
