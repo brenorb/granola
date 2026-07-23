@@ -5,11 +5,11 @@
 
 ## Context
 
-Every public order transition is authorized by its Nostr event key. The same
-key must remain available to reserve, fill, cancel, or replace that order after
-a page reload. Reusing a person's social Nostr identity would unnecessarily
-link trading activity to their public profile, while a memory-only key would
-orphan every open order when the tab closes.
+Every public order projection is authorized by its Nostr event key. The same
+key must remain available to reserve, fill, cancel, expire, or replace that
+projection after a page reload. Reusing a person's social Nostr identity would
+unnecessarily link trading activity to their public profile, while a
+memory-only key would orphan every open order when the tab closes.
 
 ## Decision
 
@@ -24,7 +24,7 @@ The key is a protocol identity, not a social identity:
   the secret key;
 - creating the key is serialized by the profile's existing Web Lock;
 - clearing Cashu tokens does not clear the maker identity, because doing so
-  would remove the authority needed to close open orders;
+  would remove the authority needed to update open orders;
 - destroying an identity is a separate, explicit operation which must warn that
   its open orders will become unmanageable; and
 - a new wallet profile receives an unlinkable key and separate token storage.
@@ -42,8 +42,8 @@ so a separate social identity would not improve the prototype's browser threat
 model.
 
 The identity is per profile rather than per order so the browser can reliably
-manage all orders it created without maintaining an additional secret-key index.
-Users who need unlinkability can use separate profiles.
+manage all orders it created without maintaining an additional secret-key
+index. Users who need unlinkability can use separate profiles.
 
 ## Consequences
 
@@ -58,7 +58,7 @@ Users who need unlinkability can use separate profiles.
 1. **Reuse a social Nostr key.** Rejected because it links trading and social
    identities and requires a signer-extension dependency for the basic demo.
 2. **One memory-only key per page load.** Rejected because reloads orphan open
-   orders and make cancel or replace impossible.
+   orders and make cancel or replacement impossible.
 3. **One key per order.** Rejected for the prototype because securely indexing,
    retaining, and backing up many authorities adds complexity without improving
    the default single-profile workflow.

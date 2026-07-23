@@ -45,13 +45,19 @@ const pending = await window.granola.getPendingOrderPublications();
 if (pending[0]) {
   await window.granola.retryOrderPublication(pending[0].orderId);
 }
+await window.granola.cancelOrder({
+  address: book.topAsk.address,
+  expectedProjectionId: book.topAsk.eventId,
+  expectedRevision: book.topAsk.state.revision
+});
 
 await window.granola.enableMaker();
 const trades = await window.granola.listTrades();
 const started = await window.granola.takeOrder({
   requestId: crypto.randomUUID(),
   address: book.topAsk.address,
-  expectedHeadId: book.topAsk.headEventId,
+  expectedProjectionId: book.topAsk.eventId,
+  expectedRevision: book.topAsk.state.revision,
   fillBaseAmount: book.topAsk.state.remaining_amount
 });
 const nextCheckpoint = await window.granola.advanceTrade(started.sessionId);
@@ -77,16 +83,17 @@ bearer instruments. Do not log, paste, publish, or commit its return value.
 `enableMaker()` publishes the profile's authenticated order-key inbox
 registration and keeps its NIP-17 subscription open for the life of the page.
 Call it on the maker page before a taker starts. `takeOrder()` accepts only a
-verified current sell head for the fixed SAT/USD issuer pair. Its lowercase
-UUIDv4 `requestId` is an idempotency key: reuse that exact ID, address, head, and
-fill amount if the caller did not receive the first result.
+verified current sell projection for the fixed SAT/USD issuer pair. Its
+lowercase UUIDv4 `requestId` is an idempotency key: reuse that exact ID,
+address, projection ID, revision, and fill amount if the caller did not receive
+the first result.
 
 `advanceTrade(sessionId)` performs at most one planned action. Call it again
 only after inspecting its returned phase. Live inbox messages wake one such
 step automatically, while explicit calls remain useful for local staging,
 relay publication, Cashu execution, and mint observation. `listTrades()` and
 `getTrade()` return only public views: phases, exact amounts, issuer URLs,
-commitments, public transition IDs, and redacted mint evidence. They never
+commitments, public projection IDs and revisions, and redacted mint evidence. They never
 return proofs, encoded tokens, private keys, preimages, witnesses, private
 message bodies, or mint quote IDs.
 
@@ -109,20 +116,23 @@ executor on load and exposes the same redacted status/result attributes.
 
 `getMakerIdentity()` returns only the profile's public protocol key. The secret
 signing key remains in the private IndexedDB store and is never exposed by this
-API. `publishOrder()` signs an immutable kind `78` transition before a kind
-`30078` current projection and requires two relay acknowledgements at each
-stage. Its return value contains public event IDs and per-relay receipts, never
-key material. `getOrderBook()` verifies signatures and schema, rejects
-conflicting projections, and returns exact rational prices.
+API. `publishOrder()` signs one parameterized replaceable kind `30078`
+projection containing the complete current state. One acknowledgement from any
+configured public relay is sufficient. Its return value contains the
+projection ID, revision, and per-relay receipts, never key material.
+`getOrderBook()` verifies signatures and schema, selects the newest event at
+each address, and returns exact rational prices.
 
-Before making a relay request, the browser persists both already-signed public
-events in a private-profile outbox. If either stage misses quorum,
+Before making a relay request, the browser persists the already-signed
+projection in a private-profile outbox. If publication receives no
+acknowledgement,
 `publishOrder()` rejects with a `PendingPublicationError` whose `publication`
-contains the public order ID, both event IDs, and receipts. Call
+contains the public order ID, projection ID, revision, and receipts. Call
 `getPendingOrderPublications()` to inspect the outbox and
-`retryOrderPublication(orderId)` to retry those exact signatures. A retry never
-creates a replacement order ID and the outbox is cleared only after both stages
-reach quorum. The human UI exposes the same recovery action.
+`retryOrderPublication(orderId)` to retry that exact signed event. A retry never
+re-signs or creates another event ID. The outbox is cleared only after an
+acknowledged update is explicitly committed. The human UI exposes the same
+recovery action.
 
 The prototype market is issuer-specific: SAT from
 `https://testnut.cashu.space` against USD cents from

@@ -79,9 +79,9 @@ Leave **Minimum fill (SAT)** disabled. Press **Sign & publish order**.
 Publication is deliberately durable and staged. If **Pending relay publication**
 appears:
 
-1. Press **Retry same signed events** for this newest order.
-2. Wait for the projection to show relay acknowledgements, normally `3/3`.
-3. Press **Retry same signed events** once more to commit the acknowledged
+1. Press **Retry same signed projection** for this newest order.
+2. Wait for at least one relay acknowledgement.
+3. Press **Retry same signed projection** once more to commit the acknowledged
    projection locally.
 
 Do not submit a second order. Continue only when the pending entry disappears.
@@ -205,7 +205,7 @@ discovery. These do not require a replacement trade.
 6. For the fast demo, run the same `runUntilSettled` command again only on the
    side whose promise rejected.
 
-Granola reuses the persisted signed Nostr events and prepared Cashu operations.
+Granola reuses the persisted signed Nostr projection and prepared Cashu operations.
 A simple peer-wait message is not a failure: advance the other side and retry
 after a short pause.
 

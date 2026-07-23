@@ -13,7 +13,7 @@ timeout/refund safeguards remain available, but further recovery hardening is
 not a prerequisite for this happy-path demonstration.
 
 The implementation accepts only the exact signer, recipient, session,
-reservation, order address, current order head, message type, sequence,
+reservation, order address, current projection ID and revision, message type, sequence,
 predecessor, and transcript hash required by the current choreography. A valid
 Nostr signature alone is not enough.
 
@@ -40,7 +40,7 @@ replacement artifact just because the previous result is unknown.
 | --- | --- | --- |
 | Inbox registration | exact signed kind 10050 and target relay | relay receipt and exact readback |
 | Private delivery | exact kind 1059 wrapper, rumor/transcript IDs, recipient relays | authenticated relay receipts; the next private message must bind its predecessor |
-| Public order transition | exact signed transition/projection and expected prior head | receipts for the current publication stage, then committed head |
+| Public order projection | exact signed projection and expected current ID/revision | one relay acknowledgement, then local commit |
 | Cashu lock, claim, or refund | prepared operation, exact expected HTLC, selected proof secrets reserved to the session | immutable mint result, wallet reconciliation, then reservation release |
 | Incoming private message | raw wrapper and receive time | authenticated opened message and deterministic next choreography |
 
@@ -58,7 +58,8 @@ Legacy prototype sessions retain their originally signed shorter profile.
 ## Happy-path choreography
 
 1. Taker sends `reserve_propose` to the maker order key.
-2. Maker publishes the public reserve transition and sends `reserve_accept`.
+2. Maker replaces the order with its reserved projection and sends
+   `reserve_accept` bound to that event ID and revision.
 3. Taker sends `session_ack` to the maker session key.
 4. Maker creates and sends the base SAT HTLC.
 5. Taker validates it and sends `base_lock_ack`.
@@ -66,8 +67,8 @@ Legacy prototype sessions retain their originally signed shorter profile.
 7. Maker validates it, claims the USD leg, and sends `claim_notice`.
 8. Taker independently observes that spend, recovers the preimage, claims the
    SAT leg, and sends `fill_request`.
-9. Maker independently observes both spends, publishes the public fill, and
-   sends `settlement_ack`.
+9. Maker independently observes both spends, replaces the order with its fill
+   projection, and sends `settlement_ack` bound to that event ID and revision.
 10. Taker accepts the exact settlement acknowledgement. Both public views become
     filled only when the authoritative fill and the two mint observations agree.
 
@@ -107,7 +108,8 @@ The first testnet swap does not block on:
 - every malicious nested-storage corruption case;
 - generalized multi-device coordination;
 - long-running reconnect/backoff and relay failover policy;
-- production relay quorum policy beyond the configured test relay evidence;
+- production relay availability policy beyond one configured public-relay
+  acknowledgement;
 - every abort/equivocation permutation; or
 - production monitoring, rate limiting, and key-erasure policy.
 
