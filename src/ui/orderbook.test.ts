@@ -78,6 +78,9 @@ describe("order-book presentation", () => {
       .toBe("100000");
     expect(root.querySelector(`[data-order-id="${askLow}"] [data-price]`)
       ?.getAttribute("data-price-cents-per-btc")).toBe("5050000");
+    expect(root.querySelectorAll("[data-order-info]")).toHaveLength(4);
+    expect(root.querySelector(`[data-order-id="${askLow}"] [data-order-info]`)?.textContent)
+      .toContain("All or none");
 
     expect(root.querySelectorAll(".orderbook-side")).toHaveLength(2);
     expect(root.querySelector(`[data-order-id="${askLow}"]`)?.getAttribute("aria-label"))
