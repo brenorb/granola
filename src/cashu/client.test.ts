@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => {
   const wallet = {
     loadMint: vi.fn(),
     getMintInfo: vi.fn(),
+    keyChain: {
+      getCheapestKeyset: vi.fn()
+    },
+    maxSpendableAfterFees: vi.fn(),
     createMintQuoteBolt11: vi.fn(),
     checkMintQuoteBolt11: vi.fn(),
     mintProofsBolt11: vi.fn(),
@@ -42,8 +46,11 @@ const mocks = vi.hoisted(() => {
     Amount: FakeAmount,
     getTokenMetadata: vi.fn(),
     getEncodedToken: vi.fn(() => "cashuBexported"),
-    deserializeProofs: vi.fn((proofs: Array<Record<string, unknown>>) =>
-      proofs.map((proof) => ({ ...proof, amount: amount(String(proof.amount)) }))
+    deserializeProofs: vi.fn((proofs: string[]) =>
+      proofs.map((encoded) => {
+        const proof = JSON.parse(encoded) as Record<string, unknown>;
+        return { ...proof, amount: amount(String(proof.amount)) };
+      })
     )
   };
 });
@@ -81,14 +88,23 @@ describe("Cashu client adapter", () => {
           },
           "5": { disabled: false, methods: [] },
           "7": { supported: true },
+          "10": { supported: true },
+          "11": { supported: true },
           "12": { supported: true },
           "14": { supported: true }
         }
       },
       isSupported: vi.fn((nut: number) => ({
-        supported: [7, 12, 14].includes(nut)
+        supported: [7, 10, 11, 12, 14].includes(nut)
       }))
     });
+    mocks.wallet.keyChain.getCheapestKeyset.mockReturnValue({
+      id: "00deadbeefcafeee",
+      unit: "sat",
+      isActive: true,
+      fee: 100
+    });
+    mocks.wallet.maxSpendableAfterFees.mockReturnValue(mocks.amount("999"));
   });
 
   it("reports mintable units from NUT-04 instead of inferring them from keysets", async () => {
@@ -104,9 +120,80 @@ describe("Cashu client adapter", () => {
         { unit: "sat", minAmount: "1", maxAmount: "500000" },
         { unit: "usd", minAmount: "1", maxAmount: "500000" }
       ],
-      supports: { nut07: true, nut12: true, nut14: true }
+      supports: {
+        nut07: true,
+        nut10: true,
+        nut11: true,
+        nut12: true,
+        nut14: true
+      }
     });
     expect(capabilities.bolt11.map((method) => method.unit)).not.toContain("eur");
+  });
+
+  it("preflights the exact active keyset and HTLC capabilities before a trade", async () => {
+    await expect(new CashuClient().inspectTradeMint(
+      "https://testnut.cashu.space",
+      "sat"
+    )).resolves.toEqual({
+      mintUrl: "https://testnut.cashu.space",
+      unit: "sat",
+      keysetId: "00deadbeefcafeee",
+      inputFeePpk: 100,
+      supportsDleq: true
+    });
+  });
+
+  it("rejects a trade mint before locking when a required NUT or active keyset is missing", async () => {
+    const info = mocks.wallet.getMintInfo();
+    info.isSupported = vi.fn((nut: number) => ({
+      supported: [7, 10, 12, 14].includes(nut)
+    }));
+    mocks.wallet.getMintInfo.mockReturnValue(info);
+    const client = new CashuClient();
+
+    await expect(client.inspectTradeMint(
+      "https://testnut.cashu.space",
+      "sat"
+    )).rejects.toThrow(/NUT-11/);
+
+    info.isSupported = vi.fn(() => ({ supported: true }));
+    mocks.wallet.keyChain.getCheapestKeyset.mockReturnValue({
+      id: "00deadbeefcafeee",
+      unit: "sat",
+      isActive: false,
+      fee: 100
+    });
+    await expect(client.inspectTradeMint(
+      "https://testnut.cashu.space",
+      "sat"
+    )).rejects.toThrow(/active keyset/i);
+  });
+
+  it("computes spendable trade balance with the actual proof keyset fees", async () => {
+    const client = new CashuClient();
+    const pocket = {
+      mintUrl: "https://testnut.cashu.space",
+      unit: "sat",
+      proofs: [{
+        amount: "1000",
+        id: "00deadbeefcafeee",
+        secret: "proof-secret",
+        C: "02".repeat(33)
+      }]
+    };
+
+    await expect(client.inspectTradeSpendability(pocket)).resolves.toEqual({
+      mintUrl: "https://testnut.cashu.space",
+      unit: "sat",
+      faceAmount: "1000",
+      spendableAmount: "999",
+      inputFee: "1",
+      proofCount: 1
+    });
+    expect(mocks.wallet.maxSpendableAfterFees).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "00deadbeefcafeee" })
+    ]);
   });
 
   it("checks a quote and only mints exact proofs after it is PAID", async () => {
