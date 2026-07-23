@@ -55,6 +55,7 @@ const started = await window.granola.takeOrder({
   fillBaseAmount: book.topAsk.state.remaining_amount
 });
 const nextCheckpoint = await window.granola.advanceTrade(started.sessionId);
+const settled = await window.granola.runUntilSettled(started.sessionId);
 const currentTrade = await window.granola.getTrade(started.sessionId);
 
 const backup = await window.granola.createBackup();
@@ -88,6 +89,13 @@ relay publication, Cashu execution, and mint observation. `listTrades()` and
 commitments, public transition IDs, and redacted mint evidence. They never
 return proofs, encoded tokens, private keys, preimages, witnesses, private
 message bodies, or mint quote IDs.
+
+Agents should normally run `runUntilSettled(sessionId)` concurrently on the
+maker and taker pages. It repeatedly invokes the same one-action coordinator,
+waits when the peer has not delivered the next private message, and stops only
+at `filled` or a terminal error. It does not merge or skip durable checkpoints.
+Its result contains only session ID, final phase, and redacted
+revision/phase/role checkpoints.
 
 `getMakerIdentity()` returns only the profile's public protocol key. The secret
 signing key remains in the private IndexedDB store and is never exposed by this

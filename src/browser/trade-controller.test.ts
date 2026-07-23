@@ -169,6 +169,7 @@ function privateSession(): TradeSession {
 
 function setup(options: {
   startGates?: Array<Promise<void> | undefined>;
+  wait?: (delayMs: number) => Promise<void>;
 } = {}): {
   controller: BrowserTradeController;
   api: {
@@ -214,6 +215,7 @@ function setup(options: {
       useSecretKey: vi.fn(async (action) => action(makerKey.slice()))
     },
     now: () => 1_800_000_000,
+    ...(options.wait === undefined ? {} : { wait: options.wait }),
     startSubscription: vi.fn(async (input) => {
       const startIndex = subscriptions.length;
       subscriptions.push(input);
@@ -275,6 +277,35 @@ describe("BrowserTradeController", () => {
     expect(api.advanceTrade).toHaveBeenCalledTimes(1);
     await controller.advanceTrade(sessionId);
     expect(api.advanceTrade).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs one durable action at a time until filled and returns only redacted checkpoints", async () => {
+    const wait = vi.fn(async () => undefined);
+    const { controller, api } = setup({ wait });
+    api.getTrade
+      .mockResolvedValueOnce(view())
+      .mockResolvedValueOnce(view());
+    api.advanceTrade
+      .mockRejectedValueOnce(new Error("No next private trade message is available"))
+      .mockResolvedValueOnce(view(1))
+      .mockResolvedValueOnce({ ...view(2), phase: "filled" });
+
+    const result = await controller.runUntilSettled(sessionId);
+
+    expect(wait).toHaveBeenCalledWith(250);
+    expect(api.advanceTrade).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({
+      sessionId,
+      finalPhase: "filled",
+      checkpoints: [
+        { revision: 0, phase: "negotiating", role: "taker" },
+        { revision: 1, phase: "negotiating", role: "taker" },
+        { revision: 2, phase: "filled", role: "taker" }
+      ]
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /token|proof|preimage|private|secret|nostr|cashu/i
+    );
   });
 
   it("reopens a session inbox after its relay subscription closes", async () => {

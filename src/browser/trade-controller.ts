@@ -40,6 +40,18 @@ export interface MakerInboxStatus {
   inboxRelay: string;
 }
 
+export interface RedactedTradeCheckpoint {
+  revision: number;
+  phase: PublicTradeView["phase"];
+  role: PublicTradeView["role"];
+}
+
+export interface RunUntilSettledResult {
+  sessionId: string;
+  finalPhase: "filled";
+  checkpoints: readonly RedactedTradeCheckpoint[];
+}
+
 type StartSubscription = (
   input: StartTradeSubscriptionInput
 ) => Promise<TradeSubscription>;
@@ -70,6 +82,7 @@ export interface BrowserTradeControllerOptions {
   ) => Promise<VerifiedInitialReserveProposal>;
   onChange?: (trade: PublicTradeView) => void;
   onError?: (message: string) => void;
+  wait?: (delayMs: number) => Promise<void>;
 }
 
 function messageOf(error: unknown): string {
@@ -90,6 +103,7 @@ export class BrowserTradeController {
   >;
   private readonly onChange: (trade: PublicTradeView) => void;
   private readonly onError: (message: string) => void;
+  private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
   private readonly subscriptionStarts = new Map<string, Promise<void>>();
   private subscriptionGeneration = 0;
@@ -108,6 +122,8 @@ export class BrowserTradeController {
         unwrapInitialReserveProposalForMaker(event, secretKey, openOptions));
     this.onChange = options.onChange ?? (() => undefined);
     this.onError = options.onError ?? (() => undefined);
+    this.wait = options.wait ?? ((delayMs) =>
+      new Promise((resolve) => globalThis.setTimeout(resolve, delayMs)));
   }
 
   listTrades(): Promise<PublicTradeView[]> {
@@ -138,6 +154,60 @@ export class BrowserTradeController {
       this.ensureSessionSubscription(trade.sessionId)
     ));
     return trades;
+  }
+
+  async runUntilSettled(sessionId: string): Promise<RunUntilSettledResult> {
+    let current = await this.api.getTrade(sessionId);
+    if (current === undefined) throw new Error("Trade session does not exist");
+    const checkpoints: RedactedTradeCheckpoint[] = [];
+    const record = (trade: PublicTradeView): void => {
+      const latest = checkpoints.at(-1);
+      if (latest?.revision === trade.revision) return;
+      checkpoints.push({
+        revision: trade.revision,
+        phase: trade.phase,
+        role: trade.role
+      });
+    };
+    record(current);
+    let actions = 0;
+    let idlePolls = 0;
+    while (current.phase !== "filled") {
+      if (current.phase === "frozen" || current.phase === "released") {
+        throw new Error(`Trade stopped in terminal phase ${current.phase}`);
+      }
+      if (actions >= 200) {
+        throw new Error("Trade did not settle within 200 coordinator actions");
+      }
+      try {
+        current = await this.advanceTrade(sessionId);
+        record(current);
+        actions += 1;
+        idlePolls = 0;
+      } catch (error) {
+        if (messageOf(error) !== "No next private trade message is available") {
+          throw error;
+        }
+        idlePolls += 1;
+        if (idlePolls >= 2_400) {
+          throw new Error("Trade peer did not respond before the agent deadline");
+        }
+        await this.wait(250);
+        const observed = await this.api.getTrade(sessionId);
+        if (observed === undefined) {
+          throw new Error("Trade session disappeared while settling");
+        }
+        current = observed;
+        record(current);
+      }
+    }
+    return Object.freeze({
+      sessionId,
+      finalPhase: "filled" as const,
+      checkpoints: Object.freeze(checkpoints.map((checkpoint) =>
+        Object.freeze({ ...checkpoint })
+      ))
+    });
   }
 
   async enableMaker(): Promise<MakerInboxStatus> {

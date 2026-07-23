@@ -37,6 +37,7 @@ interface GranolaBrowserFacade {
   getTrade: TradeApi["getTrade"];
   takeOrder: TradeApi["takeOrder"];
   advanceTrade: TradeApi["advanceTrade"];
+  runUntilSettled: BrowserTradeController["runUntilSettled"];
   enableMaker: BrowserTradeController["enableMaker"];
 }
 
@@ -220,6 +221,8 @@ const granola: GranolaBrowserFacade = {
   getTrade: async (sessionId) => (await tradeController()).getTrade(sessionId),
   takeOrder: async (input: TakeOrderInput) => (await tradeController()).takeOrder(input),
   advanceTrade: async (sessionId) => (await tradeController()).advanceTrade(sessionId),
+  runUntilSettled: async (sessionId) =>
+    (await tradeController()).runUntilSettled(sessionId),
   enableMaker: async () => (await tradeController()).enableMaker()
 };
 window.granola = granola;
