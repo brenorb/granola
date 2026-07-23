@@ -531,18 +531,14 @@ byId("backup").addEventListener("click", () => {
   })().catch((error: unknown) => report(messageOf(error), true));
 });
 
-byId<HTMLFormElement>("clear-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const form = event.currentTarget as HTMLFormElement;
-  void granola.clearWallet(String(new FormData(form).get("confirmation")))
-    .then(async () => { form.reset(); await refresh(); log("Erased this profile’s local wallet"); report("Local wallet erased"); })
+byId("clear-wallet").addEventListener("click", () => {
+  void granola.clearWallet("DELETE TEST WALLET")
+    .then(async () => { await refresh(); log("Erased this profile’s local wallet"); report("Local wallet erased"); })
     .catch((error: unknown) => report(messageOf(error), true));
 });
 
-byId<HTMLFormElement>("reset-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const form = event.currentTarget as HTMLFormElement;
-  void granola.resetProfile(String(new FormData(form).get("confirmation")))
+byId("reset-profile").addEventListener("click", () => {
+  void granola.resetProfile("RESET GRANOLA PROFILE")
     .then(() => window.location.reload())
     .catch((error: unknown) => report(messageOf(error), true));
 });
