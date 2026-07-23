@@ -1,13 +1,25 @@
+import { verifyEvent } from "nostr-tools/pure";
+
 import {
   createOrderState,
+  fillOrder as fillOrderState,
+  reserveOrder as reserveOrderState,
   type CreateOrderInput,
   type ExactMarket,
+  type FillOrderInput,
   type OrderState,
-  type RationalPrice
+  type RationalPrice,
+  type ReserveOrderInput
 } from "../order/model.js";
+import {
+  parseTransitionEvent,
+  type NostrEvent,
+  type TransitionEvidence
+} from "../order/events.js";
 import type {
   LoadedOrderBook,
   OrderPublication,
+  SuccessorOperation,
   StagedOrderPublication
 } from "../order/service.js";
 import { PublicationQuorumError } from "../order/service.js";
@@ -26,7 +38,15 @@ export interface MakerIdentityPort {
 
 export interface OrderServicePort {
   stage(state: OrderState): Promise<StagedOrderPublication>;
+  stageSuccessor(
+    state: OrderState,
+    operation: SuccessorOperation,
+    previous: NostrEvent,
+    evidence?: TransitionEvidence,
+    createdAt?: number
+  ): Promise<StagedOrderPublication>;
   publishStaged(staged: StagedOrderPublication): Promise<OrderPublication>;
+  loadCurrentTransition(address: string, expectedHeadId: string): Promise<NostrEvent>;
   loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook>;
 }
 
@@ -46,6 +66,17 @@ export interface PublicOrderPublication {
   projectionId: string;
   transitionReceipts: OrderPublication["transitionReceipts"];
   projectionReceipts: OrderPublication["projectionReceipts"];
+}
+
+export interface PublishReserveInput extends Omit<ReserveOrderInput, "acceptedAt"> {
+  address: string;
+  expectedHeadId: string;
+}
+
+export interface PublishFillInput extends FillOrderInput {
+  address: string;
+  expectedHeadId: string;
+  evidence: TransitionEvidence;
 }
 
 class VolatileOrderOutbox implements OrderOutboxPort {
@@ -112,6 +143,8 @@ function orderAssets(side: PublishOrderInput["side"]): Pick<CreateOrderInput, "o
 }
 
 export class OrderApi {
+  private readonly successorQueues = new Map<string, Promise<void>>();
+
   constructor(
     private readonly identity: MakerIdentityPort,
     private readonly orders: OrderServicePort,
@@ -130,6 +163,49 @@ export class OrderApi {
 
   async getPendingOrderPublications(): Promise<PublicOrderPublication[]> {
     return (await this.outbox.list()).map(publicPublication);
+  }
+
+  private async serializeSuccessor<T>(
+    address: string,
+    action: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.successorQueues.get(address) ?? Promise.resolve();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queued = previous.then(() => gate);
+    this.successorQueues.set(address, queued);
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.successorQueues.get(address) === queued) {
+        this.successorQueues.delete(address);
+      }
+    }
+  }
+
+  private async loadMakerHead(
+    address: string,
+    expectedHeadId: string
+  ): Promise<{ previous: NostrEvent; state: OrderState }> {
+    const previous = await this.orders.loadCurrentTransition(address, expectedHeadId);
+    if (previous.id !== expectedHeadId) {
+      throw new Error("Order service returned a different transition head");
+    }
+    const record = parseTransitionEvent(previous, (event) => verifyEvent(event));
+    if (record.address !== address) {
+      throw new Error("Order service returned a transition for another address");
+    }
+    if (record.makerPubkey !== await this.identity.publicKey()) {
+      throw new Error("Order transition belongs to another maker");
+    }
+    if (await this.outbox.load(record.state.order_id)) {
+      throw new Error("Order has a pending publication; retry it before publishing a successor");
+    }
+    return { previous, state: record.state };
   }
 
   private async settle(staged: StagedOrderPublication): Promise<PublicOrderPublication> {
@@ -172,5 +248,55 @@ export class OrderApi {
     const staged = await this.orders.stage(state);
     await this.outbox.save(staged);
     return this.settle(staged);
+  }
+
+  async reserveOrder(input: PublishReserveInput): Promise<PublicOrderPublication> {
+    return this.serializeSuccessor(input.address, async () => {
+      const { previous, state } = await this.loadMakerHead(
+        input.address,
+        input.expectedHeadId
+      );
+      const acceptedAt = this.now();
+      const next = reserveOrderState(state, {
+        reservationId: input.reservationId,
+        amount: input.amount,
+        acceptedAt,
+        expiresAt: input.expiresAt,
+        proposalEventId: input.proposalEventId,
+        takerCommitment: input.takerCommitment
+      });
+      const staged = await this.orders.stageSuccessor(
+        next,
+        "reserve",
+        previous,
+        undefined,
+        acceptedAt
+      );
+      await this.outbox.save(staged);
+      return this.settle(staged);
+    });
+  }
+
+  async fillOrder(input: PublishFillInput): Promise<PublicOrderPublication> {
+    return this.serializeSuccessor(input.address, async () => {
+      const { previous, state } = await this.loadMakerHead(
+        input.address,
+        input.expectedHeadId
+      );
+      const createdAt = this.now();
+      const next = fillOrderState(state, {
+        reservationId: input.reservationId,
+        amount: input.amount
+      });
+      const staged = await this.orders.stageSuccessor(
+        next,
+        "fill",
+        previous,
+        input.evidence,
+        createdAt
+      );
+      await this.outbox.save(staged);
+      return this.settle(staged);
+    });
   }
 }
