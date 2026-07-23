@@ -71,8 +71,15 @@ function orderInfo(order: OrderRecord): HTMLDetailsElement {
   const popup = element("div");
   popup.className = "order-info__popup";
   const expiry = new Date(order.state.expires_at * 1000).toISOString();
+  const execution = order.state.execution === "all_or_none"
+    ? "AON"
+    : "Partial";
   popup.append(
-    infoLine("Execution", order.state.execution === "all_or_none" ? "All or none" : "Partial fill"),
+    infoLine(
+      "Execution",
+      execution,
+      order.state.execution === "all_or_none" ? "All or none (AON)" : "Partial fill"
+    ),
     infoLine("Expires", expiry),
     infoLine("Order", `${order.state.order_id.slice(0, 8)}…`, order.state.order_id)
   );

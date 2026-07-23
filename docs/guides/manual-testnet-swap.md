@@ -47,7 +47,7 @@ On the maker wallet tab, expand **Publish a test limit order** and enter:
 | Size (SAT) | `20` |
 | Limit price (USD / BTC) | `50000.00` |
 | Good for (days) | `30` |
-| Execution | `All or none` |
+| Execution | `AON` (all or none) |
 
 The browser form publishes all-or-none orders. Press **Send order**.
 
@@ -64,7 +64,7 @@ Press **Refresh book** and find the row with all of these values:
 
 - `20 SAT`;
 - `50,000.00 USD/BTC`;
-- `All or none`; and
+- `AON`; and
 - an expiry about 30 days from now.
 
 It will normally be at the top ask price, although other public test orders can
