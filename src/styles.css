@@ -65,28 +65,34 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .market-wallet .mint-actions { display: flex; align-items: center; gap: 1px; padding: 1px; background: var(--ink); }
 .market-wallet .quick-mint { min-height: 100%; border: 0; box-shadow: none; }
 .market-wallet > #refresh { min-width: max-content; border: 0; background: var(--paper); }
-.orderbook-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(10rem,13rem) minmax(0,1fr); gap: 1px; margin-top: 1.5rem; border: 1px solid var(--ink); background: var(--ink); }
-.orderbook-side { min-width: 0; padding: 0 .7rem .7rem; background: var(--paper); }
+.orderbook-frame { margin-top: 1.5rem; border: 1px solid var(--ink); background: var(--ink); }
+.orderbook-market-strip { padding: 1px; background: var(--ink); }
+.orderbook-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; margin: 0; background: var(--ink); }
+.orderbook-summary > div { display: grid; grid-template-columns: max-content minmax(0,1fr); align-items: center; min-width: 0; background: var(--paper); }
+.orderbook-summary dt, .orderbook-summary dd { margin: 0; padding: .55rem .7rem; font: 700 .64rem/1.2 "Courier New", monospace; }
+.orderbook-summary dt { align-self: stretch; display: grid; place-items: center; color: var(--paper); background: var(--ink); text-transform: uppercase; }
+.orderbook-summary dd { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.orderbook-columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1px; margin-top: 1px; background: var(--ink); }
+.orderbook-side { min-width: 0; padding: 0 .55rem .55rem; background: var(--paper); }
 .orderbook-side .table-scroll { margin-top: 0; }
 .orderbook-side .orderbook-table { min-width: 0; table-layout: fixed; }
-.orderbook-side caption { padding: 1rem .2rem .7rem; border-bottom: 2px solid var(--ink); font-size: .9rem; }
+.orderbook-side caption { padding: .75rem .15rem .55rem; border-bottom: 2px solid var(--ink); font-size: .8rem; }
 .orderbook-side--asks caption { color: var(--orange); }
 .orderbook-side--bids caption { color: #688900; }
-.orderbook-midpoint { display: flex; flex-direction: column; justify-content: center; gap: 1rem; min-width: 0; padding: 1rem; background: var(--paper); }
-.orderbook-midpoint > p { margin: 0; padding-top: 1rem; border-top: 1px solid var(--ink); text-align: center; font: 700 .68rem/1.4 "Courier New", monospace; text-transform: uppercase; }
-.orderbook-summary { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border: 1px solid var(--ink); }
-.orderbook-summary dt, .orderbook-summary dd { margin: 0; padding: .75rem; font: 700 .7rem/1.2 "Courier New", monospace; }
-.orderbook-summary dt { background: var(--ink); color: var(--paper); text-transform: uppercase; }
-.orderbook-summary dd { overflow: hidden; background: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
-.orderbook-table { font-variant-numeric: tabular-nums; }
-.orderbook-table th:nth-child(1), .orderbook-table td:nth-child(1) { width: 42%; }
+.orderbook-table { font-size: .7rem; font-variant-numeric: tabular-nums; }
+.orderbook-table th, .orderbook-table td { padding: .42rem .55rem; }
+.orderbook-table tbody tr { height: 3.15rem; }
+.orderbook-table th:nth-child(1), .orderbook-table td:nth-child(1) { width: 36%; }
 .orderbook-table th:nth-child(2), .orderbook-table td:nth-child(2) { width: 22%; }
-.orderbook-table td:last-child { position: relative; display: grid; grid-template-columns: minmax(4rem,5.5rem) minmax(0,1fr) auto; align-items: center; gap: .45rem; }
-.orderbook-table td:last-child input { min-width: 0; width: auto; padding: .55rem; }
-.orderbook-table td:last-child > [data-take-order] { min-width: 0; padding: .55rem .6rem; font-size: .64rem; }
-.orderbook-table td:last-child button { white-space: nowrap; }
-.order-info { position: relative; flex: none; }
-.order-info summary { display: grid; width: 1.7rem; height: 1.7rem; place-items: center; border: 1px solid var(--ink); border-radius: 50%; cursor: pointer; font: 700 .8rem/1 Georgia, serif; list-style: none; }
+.orderbook-table th:nth-child(3), .orderbook-table td:nth-child(3) { width: 42%; }
+.order-action { position: relative; }
+.order-action__controls { display: grid; grid-template-columns: minmax(3.5rem,4.75rem) minmax(3.8rem,5.6rem) 1.55rem; justify-content: end; align-items: center; gap: .35rem; min-height: 2.3rem; }
+.order-action__controls input { min-width: 0; width: 100%; height: 2rem; padding: .35rem .45rem; font-size: .68rem; }
+.order-action__controls > [data-take-order] { min-width: 0; height: 2rem; padding: .45rem .6rem; font-size: .62rem; }
+.order-action__controls > [data-take-order][data-busy="true"] { padding-left: 1.55rem; font-size: .56rem; }
+.order-action__controls button { white-space: nowrap; }
+.order-info { position: relative; flex: none; margin: 0; padding: 0; border: 0; }
+.order-info summary { display: grid; width: 1.55rem; height: 1.55rem; place-items: center; border: 1px solid var(--ink); border-radius: 50%; cursor: pointer; font: 700 .72rem/1 Georgia, serif; list-style: none; }
 .order-info summary::-webkit-details-marker { display: none; }
 .order-info summary:hover, .order-info[open] summary { color: var(--paper); background: var(--ink); }
 .order-info__popup { position: absolute; z-index: 4; top: calc(100% + .45rem); right: 0; width: min(17rem, calc(100vw - 2rem)); padding: .7rem; border: 1px solid var(--ink); background: var(--paper); box-shadow: 3px 3px 0 var(--ink); white-space: normal; }
@@ -98,7 +104,11 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-bids tr { background: rgba(200,241,53,.13); }
 .orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
 .orderbook-bids tr[data-best="bid"] { background: rgba(200,241,53,.3); }
-.orderbook-midpoint td { padding: .45rem .7rem; color: var(--paper); background: var(--ink); text-align: center; font-weight: 700; }
+.orderbook-side__footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 2.65rem; padding: .45rem .1rem 0; border-top: 1px solid var(--ink); }
+.orderbook-side__footer small { color: #696c62; font: .6rem/1 "Courier New", monospace; text-transform: uppercase; }
+.orderbook-toggle { padding: .5rem .65rem; border: 0; font-size: .6rem; box-shadow: none; }
+.orderbook-toggle::after { content: " ↓"; }
+.orderbook-toggle[aria-expanded="true"]::after { content: " ↑"; }
 .order-entry { margin-top: 1.5rem; padding: 1.2rem; border: 1px solid var(--ink); background: rgba(245,241,229,.55); }
 .order-entry__heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
 .order-entry__heading h3 { margin: 0; font-size: clamp(1.35rem,2.5vw,2rem); font-weight: 500; }
@@ -184,13 +194,17 @@ code { font-family: "Courier New", monospace; }
   .market-wallet .mint-actions { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2,minmax(0,1fr)); min-width: 0; padding: 1px; }
   .market-wallet .quick-mint { width: 100%; min-width: 0; padding-inline: .5rem; }
   .market-wallet > #refresh { grid-column: 1 / -1; width: 100%; min-width: 0; }
+  .orderbook-summary { grid-template-columns: 1fr; }
+  .orderbook-summary > div { grid-template-columns: 5.5rem minmax(0,1fr); }
   .orderbook-columns { grid-template-columns: 1fr; }
-  .orderbook-midpoint { order: 2; }
-  .orderbook-side--bids { order: 3; }
-  .orderbook-table th, .orderbook-table td { padding: .55rem .4rem; }
-  .orderbook-table td:last-child { grid-template-columns: minmax(4rem,1fr) auto; }
-  .orderbook-table td:last-child input { grid-column: 1 / -1; width: 100%; }
-  .orderbook-table td:last-child > [data-take-order] { padding-inline: .5rem; font-size: .6rem; }
+  .orderbook-side--bids { border-top: 1px solid var(--ink); }
+  .orderbook-table th, .orderbook-table td { padding-inline: .35rem; }
+  .orderbook-table th:nth-child(1), .orderbook-table td:nth-child(1) { width: 34%; }
+  .orderbook-table th:nth-child(2), .orderbook-table td:nth-child(2) { width: 20%; }
+  .orderbook-table th:nth-child(3), .orderbook-table td:nth-child(3) { width: 46%; }
+  .order-action__controls { grid-template-columns: minmax(3rem,3.8rem) minmax(3.5rem,4.5rem) 1.4rem; gap: .25rem; }
+  .order-action__controls > [data-take-order] { padding-inline: .35rem; font-size: .58rem; }
+  .order-info summary { width: 1.4rem; height: 1.4rem; }
   .order-entry__heading { align-items: start; flex-direction: column; }
   .order-entry__heading .hint { text-align: left; }
   .section-heading { gap: 1rem; }

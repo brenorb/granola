@@ -48,7 +48,7 @@ function record(
 }
 
 describe("order-book presentation", () => {
-  it("renders asks above the midpoint, bids below, and identifies the inside market", async () => {
+  it("renders a compact market strip above asks and bids and identifies the inside market", async () => {
     const book = await buildOrderBook([
       record(askHigh, "sell", "5200000"),
       record(bidLow, "buy", "4800000"),
@@ -65,7 +65,7 @@ describe("order-book presentation", () => {
     expect(
       [...root.querySelectorAll<HTMLElement>("[data-order-id], [data-book-midpoint]")]
         .map((node) => node.dataset.orderId ?? "midpoint")
-    ).toEqual([askLow, askHigh, "midpoint", bidHigh, bidLow]);
+    ).toEqual(["midpoint", askLow, askHigh, bidHigh, bidLow]);
 
     expect(root.querySelector(`[data-order-id="${askLow}"]`)?.getAttribute("data-best"))
       .toBe("ask");
@@ -124,7 +124,7 @@ describe("order-book presentation", () => {
     const bidTake = root.querySelector<HTMLButtonElement>(
       `[data-order-id="${bidHigh}"] [data-take-order]`
     );
-    expect(bidTake?.textContent).toBe("Sell into bid");
+    expect(bidTake?.textContent).toBe("Sell");
     bidTake?.click();
     expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-take-amount]`)
       ?.getAttribute("aria-label")).toMatch(/sell/i);
@@ -135,6 +135,39 @@ describe("order-book presentation", () => {
     expect(cancel).toHaveBeenCalledWith(ask, expect.any(HTMLButtonElement));
     expect(root.querySelector(`[data-order-id="${bidHigh}"] [data-cancel-order]`))
       .toBeNull();
+  });
+
+  it("shows the best three orders per side and toggles the rest", async () => {
+    const orders = [
+      record("11111111-1111-4111-8111-111111111111", "sell", "5000000"),
+      record("22222222-2222-4222-8222-222222222222", "sell", "5100000"),
+      record("33333333-3333-4333-8333-333333333333", "sell", "5200000"),
+      record("44444444-4444-4444-8444-444444444444", "sell", "5300000"),
+      record("55555555-5555-4555-8555-555555555555", "sell", "5400000")
+    ];
+    const book = await buildOrderBook(orders, market, 1_700_000_100);
+    const root = document.createElement("section");
+
+    renderOrderBook(root, { status: "ready", book });
+
+    const rows = [...root.querySelectorAll<HTMLTableRowElement>(
+      ".orderbook-asks [data-order-id]"
+    )];
+    const toggle = root.querySelector<HTMLButtonElement>(
+      '[data-orderbook-toggle="asks"]'
+    )!;
+    expect(rows).toHaveLength(5);
+    expect(rows.map((row) => row.hidden)).toEqual([false, false, false, true, true]);
+    expect(toggle.textContent).toBe("See more");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    toggle.click();
+    expect(rows.every((row) => !row.hidden)).toBe(true);
+    expect(toggle.textContent).toBe("See less");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    toggle.click();
+    expect(rows.map((row) => row.hidden)).toEqual([false, false, false, true, true]);
   });
 
   it("validates exact all-or-none and partial-fill amounts before taking an order", async () => {
