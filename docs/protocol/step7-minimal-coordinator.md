@@ -91,10 +91,11 @@ namespace. Before advertising the private inbox, the page performs a disposable
 recipient-only live probe against `wss://auth.nostr1.com`; all probe keys are
 zeroized afterward.
 
-The maker explicitly enables each active order-key inbox. A valid `reserve_propose`
-opens a maker session through the same exact-order and exact-funding preflight
-used by the agent API. Once either role's per-session kind `10050` registration
-is committed, the page opens a persistent subscription using that session key.
+The maker page automatically enables each active order-key inbox, with the
+button remaining available for retry. A valid `reserve_propose` opens a maker
+session through the same exact-order and exact-funding preflight used by the
+agent API. Once either role's per-session kind `10050` registration is
+committed, the page opens a persistent subscription using that session key.
 A live event is only a wakeup: the coordinator queries the stored wrapper,
 authenticates and decrypts it through the persisted state machine, and advances
 at most one action. Gift-wrap reads and subscriptions use the protocol's
