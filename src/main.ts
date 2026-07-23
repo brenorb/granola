@@ -227,6 +227,30 @@ const granola: GranolaBrowserFacade = {
 };
 window.granola = granola;
 
+document.addEventListener("granola:run-until-settled", () => {
+  const root = document.documentElement;
+  const sessionId = root.dataset.granolaRunSession ?? "";
+  if (!/^[0-9a-f]{64}$/.test(sessionId)) {
+    root.dataset.granolaRunStatus = "error";
+    root.dataset.granolaRunError = "Agent run requires a lowercase hex session ID";
+    return;
+  }
+  if (root.dataset.granolaRunStatus === "running") return;
+  root.dataset.granolaRunStatus = "running";
+  delete root.dataset.granolaRunResult;
+  delete root.dataset.granolaRunError;
+  void granola.runUntilSettled(sessionId)
+    .then(async (result) => {
+      root.dataset.granolaRunResult = JSON.stringify(result);
+      root.dataset.granolaRunStatus = "filled";
+      await refreshTrades();
+    })
+    .catch((error: unknown) => {
+      root.dataset.granolaRunError = messageOf(error);
+      root.dataset.granolaRunStatus = "error";
+    });
+});
+
 byId("profile-label").textContent = `Wallet profile: ${profile}`;
 byId("refresh").addEventListener("click", () => {
   void refresh().then(() => report("Wallet state refreshed")).catch((error: unknown) => report(messageOf(error), true));

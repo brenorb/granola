@@ -97,6 +97,12 @@ at `filled` or a terminal error. It does not merge or skip durable checkpoints.
 Its result contains only session ID, final phase, and redacted
 revision/phase/role checkpoints.
 
+Browser automation running in an isolated script world can set
+`document.documentElement.dataset.granolaRunSession`, dispatch
+`granola:run-until-settled`, and poll `data-granola-run-status`. A filled run
+places the same redacted JSON result in `data-granola-run-result`; failures put
+only a sanitized message in `data-granola-run-error`.
+
 `getMakerIdentity()` returns only the profile's public protocol key. The secret
 signing key remains in the private IndexedDB store and is never exposed by this
 API. `publishOrder()` signs an immutable kind `78` transition before a kind
