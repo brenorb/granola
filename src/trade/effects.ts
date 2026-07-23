@@ -796,6 +796,20 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const entry = await this.requiredOrderEntry(progress.orderId);
     const next = bump(session, now);
     next.pendingOrderPublication = exactPendingPublication(session, entry, now);
+    if (entry.intent.operation === "reserve") {
+      const takerCommitment =
+        (entry.intent.state.reservation as { taker_commitment?: string } | null)
+          ?.taker_commitment;
+      if (!takerCommitment || !HEX_32.test(takerCommitment)) {
+        throw new Error("Staged reserve lacks the taker commitment");
+      }
+      next.reserveTransitionId = entry.publication.transition.id;
+      next.evidence.reserveTransitionId = entry.publication.transition.id;
+      next.evidence.reservation.takerCommitment = takerCommitment;
+    } else if (entry.intent.operation === "fill") {
+      next.fillTransitionId = entry.publication.transition.id;
+      next.evidence.fillTransitionId = entry.publication.transition.id;
+    }
     return next;
   }
 

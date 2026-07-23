@@ -1316,11 +1316,23 @@ function assertSession(value: unknown): asserts value is TradeSession {
     const expectedCounterparty = session.role === "maker"
       ? participants.takerSessionPubkey
       : participants.makerSessionPubkey;
+    const pendingBody = pending.message.body as Record<string, unknown>;
+    const reserveAcceptanceHandoff =
+      session.role === "taker" &&
+      session.reserveTransitionId === null &&
+      transcript.choreography.phase === "awaiting_reserve_accept" &&
+      pending.message.type === "reserve_accept" &&
+      typeof pendingBody.reserve_transition_id === "string" &&
+      HEX_32.test(pendingBody.reserve_transition_id) &&
+      pending.message.order_head === pendingBody.reserve_transition_id;
     if (
       pending.message.sequence !== transcript.nextSequence ||
       pending.message.maker_order_pubkey !== evidence.makerPubkey ||
-      pending.message.order_head !==
-        (session.reserveTransitionId ?? session.offeredOrderHead) ||
+      (
+        pending.message.order_head !==
+          (session.reserveTransitionId ?? session.offeredOrderHead) &&
+        !reserveAcceptanceHandoff
+      ) ||
       pending.message.previous_message_id !== transcript.lastMessageId ||
       pending.message.previous_transcript_hash !== transcript.lastTranscriptHash ||
       canonicalJson(pending.rumor.tags) !==
