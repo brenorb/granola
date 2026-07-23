@@ -363,9 +363,12 @@ export function validateHtlcLock(input: HtlcValidationInput): HtlcValidationSumm
     expected.deadlines.long - expected.deadlines.short >= expected.deadlines.minimumGap,
     "deadline-gap"
   );
+  // The market leg names the asset, not its protocol role. A buy-side maker
+  // offers the quote asset in the long-lock slot and the taker pays the base
+  // asset in the short-lock slot.
   assertInvariant(
-    expected.locktime ===
-      (expected.leg === "base" ? expected.deadlines.long : expected.deadlines.short),
+    expected.locktime === expected.deadlines.long ||
+      expected.locktime === expected.deadlines.short,
     "leg-deadline"
   );
   assertInvariant(expected.refundHorizon >= expected.locktime, "refund-horizon");

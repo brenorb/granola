@@ -1131,11 +1131,12 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       }
       case "base_lock_ack":
       case "quote_lock_ack": {
-        const leg = type === "base_lock_ack" ? "base" : "quote";
+        const slot = type === "base_lock_ack" ? "base" : "quote";
+        const leg = slotLeg(session, slot);
         const evidence = session.evidence.legs[leg];
         if (!transcript.lastMessageId || !transcript.lastTranscriptHash ||
           !evidence.tokenCommitment || !evidence.validationCommitment || !htlcHash) {
-          throw new Error(`${leg} lock acknowledgement lacks exact evidence`);
+          throw new Error(`${slot} lock acknowledgement lacks exact evidence`);
         }
         return {
           schema,

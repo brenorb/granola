@@ -404,7 +404,7 @@ export function nextCoordinatorAction(
     case "awaiting_base_lock":
       if (now >= session.plan.makerClaimCutoff) return { kind: "enter_recovery" };
       return session.role === "maker"
-        ? session.privateState.legs.base.token === null
+        ? session.privateState.legs[slotLeg(session, "base")].token === null
           ? { kind: "prepare_base_lock" }
           : lockReady(session, "base")
             ? { kind: "stage_base_lock" }
@@ -417,7 +417,7 @@ export function nextCoordinatorAction(
     case "awaiting_quote_lock":
       if (now >= session.plan.makerClaimCutoff) return { kind: "enter_recovery" };
       return session.role === "taker"
-        ? session.privateState.legs.quote.token === null
+        ? session.privateState.legs[slotLeg(session, "quote")].token === null
           ? { kind: "prepare_quote_lock" }
           : lockReady(session, "quote")
             ? { kind: "stage_quote_lock" }
