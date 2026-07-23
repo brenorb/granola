@@ -308,6 +308,28 @@ describe("BrowserTradeController", () => {
     );
   });
 
+  it("keeps settling while a live inbox subscription is still connecting", async () => {
+    let releaseSubscription!: () => void;
+    const subscriptionGate = new Promise<void>((resolve) => {
+      releaseSubscription = resolve;
+    });
+    const { controller, api, subscriptions } = setup({
+      startGates: [subscriptionGate]
+    });
+    api.advanceTrade.mockResolvedValueOnce({ ...view(1), phase: "filled" });
+
+    const result = await Promise.race([
+      controller.runUntilSettled(sessionId),
+      new Promise<"timed-out">((resolve) =>
+        setTimeout(() => resolve("timed-out"), 50)
+      )
+    ]);
+
+    expect(result).toMatchObject({ finalPhase: "filled" });
+    expect(subscriptions).toHaveLength(1);
+    releaseSubscription();
+  });
+
   it("reopens a session inbox after its relay subscription closes", async () => {
     const { controller, api, subscriptions, stops } = setup();
     await controller.takeOrder({

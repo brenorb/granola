@@ -164,6 +164,7 @@ export class BrowserTradeController {
   async runUntilSettled(sessionId: string): Promise<RunUntilSettledResult> {
     let current = await this.api.getTrade(sessionId);
     if (current === undefined) throw new Error("Trade session does not exist");
+    this.startSessionSubscriptionInBackground(sessionId);
     const checkpoints: RedactedTradeCheckpoint[] = [];
     const record = (trade: PublicTradeView): void => {
       const latest = checkpoints.at(-1);
@@ -185,7 +186,9 @@ export class BrowserTradeController {
         throw new Error("Trade did not settle within 200 coordinator actions");
       }
       try {
-        current = await this.advanceTrade(sessionId);
+        current = await this.api.advanceTrade(sessionId);
+        this.startSessionSubscriptionInBackground(sessionId);
+        this.onChange(current);
         record(current);
         actions += 1;
         idlePolls = 0;
@@ -212,6 +215,12 @@ export class BrowserTradeController {
       checkpoints: Object.freeze(checkpoints.map((checkpoint) =>
         Object.freeze({ ...checkpoint })
       ))
+    });
+  }
+
+  private startSessionSubscriptionInBackground(sessionId: string): void {
+    void this.ensureSessionSubscription(sessionId).catch((error: unknown) => {
+      this.onError(messageOf(error));
     });
   }
 
