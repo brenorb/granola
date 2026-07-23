@@ -258,21 +258,11 @@ function tradeController(): Promise<BrowserTradeController> {
   return tradeControllerPromise;
 }
 
-function advanceTrade(sessionId: string): void {
-  void granola.advanceTrade(sessionId)
-    .then(async (trade) => {
-      await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
-      tradeTrace(trade);
-      report(`Completed one checkpointed ${trade.role} action`);
-    })
-    .catch((error: unknown) => report(messageOf(error), true));
-}
-
 async function refreshTrades(): Promise<void> {
   const controller = await tradeController();
   const current = await controller.resume();
   current.forEach(tradeTrace);
-  renderTrades(trades, current, { onAdvance: advanceTrade });
+  renderTrades(trades, current);
 }
 
 const takeRequestIds = new Map<string, string>();
@@ -291,11 +281,13 @@ function takeOrderFromBook(
     expectedRevision: order.state.revision,
     fillBaseAmount
   }).then(async (trade) => {
-    takeRequestIds.delete(retryKey);
-    await refreshTrades();
     tradeTrace(trade);
-    report("Swap session persisted; advance one verified action at a time");
-  }).catch((error: unknown) => report(messageOf(error), true));
+    report("Order taken; settling automatically");
+    const result = await granola.runUntilSettled(trade.sessionId);
+    await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
+    report(`Swap filled after ${result.checkpoints.length} verified checkpoints`);
+  }).catch((error: unknown) => report(messageOf(error), true))
+    .finally(() => takeRequestIds.delete(retryKey));
 }
 
 function retryPendingPublication(orderId: string): void {

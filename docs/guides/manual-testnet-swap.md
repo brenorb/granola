@@ -80,63 +80,20 @@ the page reports the error; reloading the same workspace starts it again.
 ## 5. Take the ask
 
 On the taker wallet tab, press **Refresh book**. In the matching row, leave the action
-amount at `20` and press **Take ask**.
+amount at `20` and press **Take ask**. Granola now runs the verified coordinator
+actions automatically; do not click the button again.
 
 Wait for:
 
-- the status `Swap session persisted; advance one verified action at a time`;
-  and
-- a taker session card starting at **Negotiating**.
 
-The taker still needs to advance once or start the automatic executor before
-the maker session can receive the reservation proposal. Do not take a second
-order.
+- the status `Order taken; settling automatically`;
+- the status `Swap filled after … verified checkpoints`; and
+- both session cards eventually showing **Filled**.
 
-## 6. Settle the same session
+Every coordinator checkpoint still runs and is recorded in the protocol trace.
 
-### Recommended fast demo
+## 6. Verify the result
 
-This uses the public, secret-free coordinator API from developer tools. It
-still executes every persisted one-action checkpoint; it only removes the need
-to click dozens of times.
-
-Open the taker wallet tab's developer console and run:
-
-```js
-window.granola.listTrades().then((trades) =>
-  window.granola.runUntilSettled(trades.at(-1).sessionId)
-)
-```
-
-Leave that promise running. On the maker wallet tab, wait briefly, then press
-**Check sessions** until the matching maker card appears. Open its developer
-console and run the same command:
-
-```js
-window.granola.listTrades().then((trades) =>
-  window.granola.runUntilSettled(trades.at(-1).sessionId)
-)
-```
-
-Both calls run concurrently. Each should eventually resolve with
-`finalPhase: "filled"` and a redacted list containing only role, phase, and
-revision checkpoints.
-
-### UI-only fallback
-
-If you do not want to use developer tools, use **Advance safely** on the two
-session cards:
-
-1. Press **Advance safely** on the taker.
-2. Wait briefly and press **Check sessions** on the maker until its card
-   appears.
-3. Press **Advance safely** on the side that can act.
-4. If a side reports `No private trade message is available` or
-   `No next private trade message is available`, switch to the other page.
-5. Periodically press **Check sessions** on both pages.
-
-Each press performs at most one durable coordinator action, and a live private
-message can wake another action. There is intentionally no fixed click count.
 The visible happy-path phases are:
 
 ```text
@@ -145,13 +102,11 @@ Negotiating → Reserved → Base locked → Quote locked
 ```
 
 The pages can briefly show adjacent phases. Stop only after both cards say
-**Filled** and both **Advance safely** buttons are disabled.
+**Filled**.
 
 Under the signed settlement plan, the quote HTLC uses a 4-day short lock, the
 base HTLC uses a 7-day long lock, and the reservation recovery horizon is
 8 days.
-
-## 7. Verify the result
 
 Press **Refresh** in both wallets and **Refresh book** on the taker.
 
@@ -184,13 +139,12 @@ discovery. These do not require a replacement trade.
 2. Do not erase either wallet.
 3. Keep or reopen the same `?wallet=` workspace.
 4. If the maker tab reloaded, wait for the automatic maker listener startup.
-5. Press **Check sessions** and resume the same cards.
-6. For the fast demo, run the same `runUntilSettled` command again only on the
-   side whose promise rejected.
+5. Press **Check sessions** and keep the same workspace open while the
+   automatic executor retries the persisted session.
 
 Granola reuses the persisted signed Nostr projection and prepared Cashu operations.
-A simple peer-wait message is not a failure: advance the other side and retry
-after a short pause.
+A simple peer-wait message is not a failure: keep both workspaces open and let
+the automatic executor retry after a short pause.
 
 ## What to record
 

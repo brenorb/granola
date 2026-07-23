@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { PublicTradeView } from "../trade/session.js";
 import { renderTrades } from "./trades.js";
@@ -96,22 +96,20 @@ const trade: PublicTradeView = {
 describe("trade session presentation", () => {
   it("renders an honest empty state", () => {
     const root = document.createElement("section");
-    renderTrades(root, [], { onAdvance: vi.fn() });
+    renderTrades(root, []);
 
     expect(root.textContent).toContain("No active swap sessions");
   });
 
-  it("shows progress, exact liabilities, and an advance action without secrets", () => {
+  it("shows progress and exact liabilities without secrets", () => {
     const root = document.createElement("section");
-    const advance = vi.fn();
-    renderTrades(root, [trade], { onAdvance: advance });
+    renderTrades(root, [trade]);
 
     expect(root.textContent).toContain("Quote locked");
     expect(root.textContent).toContain("20 SAT");
     expect(root.textContent).toContain("1 USD");
     expect(root.textContent).toContain("nofee.testnut.cashu.space");
-    root.querySelector<HTMLButtonElement>("[data-advance-trade]")?.click();
-    expect(advance).toHaveBeenCalledWith(trade.sessionId);
+    expect(root.querySelector("[data-advance-trade]")).toBeNull();
     expect(root.innerHTML).not.toMatch(/private|preimage|token|proof/i);
   });
 

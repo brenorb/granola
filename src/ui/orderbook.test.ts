@@ -99,7 +99,8 @@ describe("order-book presentation", () => {
     );
     button?.click();
 
-    expect(button?.textContent).toBe("Take ask");
+    expect(button?.textContent).toBe("Settling…");
+    expect(button?.disabled).toBe(true);
     expect(amount?.value).toBe("20");
     expect(take).toHaveBeenCalledWith(best, "20");
   });
