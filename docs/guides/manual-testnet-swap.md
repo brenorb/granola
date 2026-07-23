@@ -75,7 +75,7 @@ tie it.
 After the order is published, the same page automatically registers and listens
 with the order's ephemeral Nostr key. The listener starts automatically; no
 manual sync action, page reload, or role switch is required. If startup fails,
-the page reports the error; reloading the same workspace starts it again.
+the page retries with bounded backoff until the relay is available.
 
 ## 5. Take the ask
 
@@ -139,12 +139,14 @@ discovery. These do not require a replacement trade.
 2. Do not erase either wallet.
 3. Keep or reopen the same `?wallet=` workspace.
 4. If the maker tab reloaded, wait for the automatic maker listener startup.
-5. Press **Check sessions** and keep the same workspace open while the
-   automatic executor retries the persisted session.
+5. Keep the same workspace open while the automatic executor resumes every
+   active persisted session.
 
 Granola reuses the persisted signed Nostr projection and prepared Cashu operations.
-A simple peer-wait message is not a failure: keep both workspaces open and let
-the automatic executor retry after a short pause.
+A reload or incoming DM wakes the full settlement loop from its durable phase;
+it does not require stepping through checkpoints. A simple peer-wait message is
+not a failure: keep both workspaces open and let the automatic executor retry
+after a short pause.
 
 ## What to record
 
