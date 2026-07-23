@@ -103,6 +103,10 @@ Browser automation running in an isolated script world can set
 places the same redacted JSON result in `data-granola-run-result`; failures put
 only a sanitized message in `data-granola-run-error`.
 
+If the browser sandbox cannot mutate page DOM, navigate the profile page with
+`runUntilSettled=<session-id>` in the query string. The page starts the same
+executor on load and exposes the same redacted status/result attributes.
+
 `getMakerIdentity()` returns only the profile's public protocol key. The secret
 signing key remains in the private IndexedDB store and is never exposed by this
 API. `publishOrder()` signs an immutable kind `78` transition before a kind

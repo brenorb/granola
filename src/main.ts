@@ -227,9 +227,8 @@ const granola: GranolaBrowserFacade = {
 };
 window.granola = granola;
 
-document.addEventListener("granola:run-until-settled", () => {
+function runAgentSettlement(sessionId: string): void {
   const root = document.documentElement;
-  const sessionId = root.dataset.granolaRunSession ?? "";
   if (!/^[0-9a-f]{64}$/.test(sessionId)) {
     root.dataset.granolaRunStatus = "error";
     root.dataset.granolaRunError = "Agent run requires a lowercase hex session ID";
@@ -249,7 +248,15 @@ document.addEventListener("granola:run-until-settled", () => {
       root.dataset.granolaRunError = messageOf(error);
       root.dataset.granolaRunStatus = "error";
     });
+}
+
+document.addEventListener("granola:run-until-settled", () => {
+  runAgentSettlement(document.documentElement.dataset.granolaRunSession ?? "");
 });
+
+const requestedAgentRun = new URL(window.location.href).searchParams
+  .get("runUntilSettled");
+if (requestedAgentRun !== null) runAgentSettlement(requestedAgentRun);
 
 byId("profile-label").textContent = `Wallet profile: ${profile}`;
 byId("refresh").addEventListener("click", () => {
