@@ -794,7 +794,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       progress = await this.orderApi.ensureReleaseStaged(request);
     }
     const entry = await this.requiredOrderEntry(progress.orderId);
-    const next = bump(session, now);
+    const next = bump(session, Math.max(now, entry.intent.createdAt));
     next.pendingOrderPublication = exactPendingPublication(session, entry, now);
     if (entry.intent.operation === "reserve") {
       const takerCommitment =

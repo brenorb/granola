@@ -416,6 +416,7 @@ function walletState(): WalletState {
 interface Harness {
   effects: GranolaCoordinatorEffects;
   orderApi: {
+    ensureReserveStaged: ReturnType<typeof vi.fn>;
     publishNextStage: ReturnType<typeof vi.fn>;
   };
   orderOutbox: {
@@ -446,6 +447,7 @@ interface Harness {
 
 function harness(): Harness {
   const orderApi = {
+    ensureReserveStaged: vi.fn(),
     publishNextStage: vi.fn()
   };
   const orderOutbox = {
@@ -727,6 +729,49 @@ describe("GranolaCoordinatorEffects", () => {
     expect(first.pendingOrderPublication?.status)
       .toBe("transition_acknowledged");
     expect(retry).toEqual(first);
+  });
+
+  it("advances the session clock when order staging crosses a wall-clock second", async () => {
+    const { effects, orderApi, orderOutbox } = harness();
+    const current = baseSession();
+    current.phase = "negotiating";
+    current.reserveTransitionId = null;
+    current.evidence.reserveTransitionId = null;
+    current.evidence.reservation.takerCommitment = null;
+    current.privateState.transcript.choreography.phase =
+      "awaiting_reserve_accept";
+    const transition = event(78, "b1");
+    transition.created_at = NOW + 1;
+    const projection = event(30078, "b2");
+    projection.created_at = NOW + 1;
+    const stagedEntry = {
+      schema: "granola/order-outbox/v2",
+      status: "staged",
+      intent: {
+        operation: "reserve",
+        orderId: ORDER_ID,
+        address: current.orderAddress,
+        createdAt: NOW + 1,
+        state: {
+          reservation: { taker_commitment: "bc".repeat(32) }
+        }
+      },
+      publication: {
+        transition,
+        projection,
+        transitionReceipts: [],
+        projectionReceipts: []
+      }
+    } as unknown as OrderOutboxEntry;
+    orderApi.ensureReserveStaged.mockResolvedValue({ orderId: ORDER_ID });
+    orderOutbox.load.mockResolvedValue(stagedEntry);
+
+    const staged = await effects.performExternal(
+      externalInput({ kind: "stage_order_reserve" }, current)
+    );
+
+    expect(staged.pendingOrderPublication?.stagedAt).toBe(NOW + 1);
+    expect(staged.updatedAt).toBe(NOW + 1);
   });
 
   it("prepares from an unreserved wallet snapshot under the wallet lock without mutating storage", async () => {
