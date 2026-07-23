@@ -4,6 +4,7 @@ import {
   addProofs,
   createEmptyWallet,
   getWalletView,
+  replaceProofs,
   type StoredProof
 } from "./wallet.js";
 
@@ -115,5 +116,41 @@ describe("wallet domain", () => {
     expect(serialized).not.toContain("signature-do-not-leak");
     expect(serialized).not.toContain('"secret"');
     expect(serialized).not.toContain('"C"');
+  });
+
+  it("atomically replaces spent inputs with swap change", () => {
+    const funded = addProofs(createEmptyWallet(), {
+      mintUrl: "https://mint.test",
+      unit: "sat",
+      proofs: [proof(8, "keyset", "spent-a"), proof(4, "keyset", "kept-b")]
+    });
+
+    const changed = replaceProofs(funded, {
+      mintUrl: "https://mint.test",
+      unit: "sat",
+      spentSecrets: ["spent-a"],
+      proofs: [proof(3, "keyset", "fresh-change")]
+    });
+
+    expect(changed.revision).toBe(funded.revision + 1);
+    expect(changed.pockets[0]?.proofs.map((item) => item.secret).sort())
+      .toEqual(["fresh-change", "kept-b"]);
+    expect(getWalletView(changed).balances[0]?.amount).toBe("7");
+  });
+
+  it("does not mutate a wallet when a claimed spent input is absent", () => {
+    const funded = addProofs(createEmptyWallet(), {
+      mintUrl: "https://mint.test",
+      unit: "sat",
+      proofs: [proof(8, "keyset", "present")]
+    });
+
+    expect(() => replaceProofs(funded, {
+      mintUrl: "https://mint.test",
+      unit: "sat",
+      spentSecrets: ["missing"],
+      proofs: []
+    })).toThrow("not in the wallet");
+    expect(getWalletView(funded).balances[0]?.amount).toBe("8");
   });
 });

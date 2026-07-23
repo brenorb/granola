@@ -111,6 +111,45 @@ export function addProofs(
   };
 }
 
+export function replaceProofs(
+  state: WalletState,
+  input: WalletPocket & { spentSecrets: string[] }
+): WalletState {
+  const mintUrl = normalizeMintUrl(input.mintUrl);
+  const unit = input.unit.trim().toLowerCase();
+  if (!unit) throw new Error("Cashu unit is required");
+  if (input.spentSecrets.length === 0) throw new Error("At least one spent proof is required");
+  const spent = new Set<string>();
+  for (const secret of input.spentSecrets) {
+    if (!secret || spent.has(secret)) throw new Error("Spent proof secrets must be unique");
+    spent.add(secret);
+  }
+  input.proofs.forEach(validateProof);
+
+  const pocketIndex = state.pockets.findIndex(
+    (pocket) => pocket.mintUrl === mintUrl && pocket.unit === unit
+  );
+  const pocket = state.pockets[pocketIndex];
+  if (!pocket) throw new Error("Spent proof pocket is not in the wallet");
+  const present = new Set(pocket.proofs.map((proof) => proof.secret));
+  for (const secret of spent) {
+    if (!present.has(secret)) throw new Error("Spent proof is not in the wallet");
+  }
+
+  const retained = pocket.proofs.filter((proof) => !spent.has(proof.secret));
+  const nextSecrets = new Set(retained.map((proof) => proof.secret));
+  for (const proof of input.proofs) {
+    if (nextSecrets.has(proof.secret)) throw new Error("Replacement proof secret already exists");
+    nextSecrets.add(proof.secret);
+  }
+  const nextProofs = [...retained, ...input.proofs];
+  const pockets = state.pockets.map((item) => ({ ...item, proofs: [...item.proofs] }));
+  if (nextProofs.length === 0) pockets.splice(pocketIndex, 1);
+  else pockets[pocketIndex] = { mintUrl, unit, proofs: nextProofs };
+
+  return { version: 1, revision: state.revision + 1, pockets };
+}
+
 function sumProofs(proofs: StoredProof[]): string {
   return proofs
     .reduce((sum, proof) => sum + asPositiveAmount(proof.amount), 0n)
