@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { OrderPublication } from "../order/service.js";
+import {
+  PublicationQuorumError,
+  type OrderPublication,
+  type StagedOrderPublication
+} from "../order/service.js";
 import type { OrderState } from "../order/model.js";
+import { OrderOutboxRepository } from "../storage/order-outbox.js";
+import { MemoryStorageDriver } from "../storage/wallet-repository.js";
 import { OrderApi, TEST_MARKET, type OrderServicePort } from "./order-api.js";
 
 const MAKER = "a".repeat(64);
@@ -9,8 +15,9 @@ const ORDER_ID = "11111111-1111-4111-8111-111111111111";
 
 class FakeOrders implements OrderServicePort {
   state?: OrderState;
+  fail = false;
 
-  async publish(state: OrderState): Promise<OrderPublication> {
+  async stage(state: OrderState): Promise<StagedOrderPublication> {
     this.state = state;
     const transition = {
       kind: 78,
@@ -27,9 +34,21 @@ class FakeOrders implements OrderServicePort {
       state,
       transition,
       projection,
-      transitionReceipts: [{ relay: "wss://one.example", ok: true, message: "stored" }],
-      projectionReceipts: [{ relay: "wss://one.example", ok: true, message: "stored" }]
+      transitionReceipts: [],
+      projectionReceipts: []
     };
+  }
+
+  async publishStaged(staged: StagedOrderPublication): Promise<OrderPublication> {
+    const publication: OrderPublication = {
+      ...staged,
+      transitionReceipts: [{ relay: "wss://one.example", ok: !this.fail, message: this.fail ? "blocked" : "stored" }],
+      projectionReceipts: this.fail
+        ? []
+        : [{ relay: "wss://one.example", ok: true, message: "stored" }]
+    };
+    if (this.fail) throw new PublicationQuorumError("transition", publication, 2);
+    return publication;
   }
 
   async loadBook() {
@@ -105,5 +124,43 @@ describe("order browser API", () => {
 
     await expect(api.getMakerIdentity()).resolves.toEqual({ publicKey: MAKER });
     await expect(api.getOrderBook()).resolves.toMatchObject({ rejected: 0, book: { asks: [], bids: [] } });
+  });
+
+  it("persists a failed publication and retries the exact signed IDs", async () => {
+    const orders = new FakeOrders();
+    orders.fail = true;
+    const outbox = new OrderOutboxRepository(new MemoryStorageDriver());
+    const api = new OrderApi(
+      { publicKey: async () => MAKER },
+      orders,
+      () => 1_700_000_000,
+      () => ORDER_ID,
+      outbox
+    );
+
+    await expect(api.publishOrder({
+      side: "sell",
+      amount: "2000",
+      price: { numerator: "101", denominator: "2000" }
+    })).rejects.toMatchObject({
+      name: "PendingPublicationError",
+      stage: "transition",
+      publication: {
+        orderId: ORDER_ID,
+        transitionId: "b".repeat(64),
+        projectionId: "d".repeat(64)
+      }
+    });
+    await expect(api.getPendingOrderPublications()).resolves.toMatchObject([{
+      orderId: ORDER_ID,
+      transitionId: "b".repeat(64),
+      projectionId: "d".repeat(64)
+    }]);
+
+    orders.fail = false;
+    const retried = await api.retryOrderPublication(ORDER_ID);
+    expect(retried.transitionId).toBe("b".repeat(64));
+    expect(retried.projectionId).toBe("d".repeat(64));
+    await expect(api.getPendingOrderPublications()).resolves.toEqual([]);
   });
 });

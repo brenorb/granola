@@ -7,8 +7,11 @@ import {
 } from "../order/model.js";
 import type {
   LoadedOrderBook,
-  OrderPublication
+  OrderPublication,
+  StagedOrderPublication
 } from "../order/service.js";
+import { PublicationQuorumError } from "../order/service.js";
+import type { OrderOutboxPort } from "../storage/order-outbox.js";
 
 export const TEST_MARKET: ExactMarket = {
   baseUnit: "sat",
@@ -22,7 +25,8 @@ export interface MakerIdentityPort {
 }
 
 export interface OrderServicePort {
-  publish(state: OrderState): Promise<OrderPublication>;
+  stage(state: OrderState): Promise<StagedOrderPublication>;
+  publishStaged(staged: StagedOrderPublication): Promise<OrderPublication>;
   loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook>;
 }
 
@@ -42,6 +46,51 @@ export interface PublicOrderPublication {
   projectionId: string;
   transitionReceipts: OrderPublication["transitionReceipts"];
   projectionReceipts: OrderPublication["projectionReceipts"];
+}
+
+class VolatileOrderOutbox implements OrderOutboxPort {
+  private readonly publications = new Map<string, StagedOrderPublication>();
+
+  async load(orderId: string): Promise<StagedOrderPublication | undefined> {
+    const publication = this.publications.get(orderId);
+    return publication ? structuredClone(publication) : undefined;
+  }
+
+  async list(): Promise<StagedOrderPublication[]> {
+    return [...this.publications.values()].map((publication) => structuredClone(publication));
+  }
+
+  async save(publication: StagedOrderPublication): Promise<void> {
+    this.publications.set(publication.state.order_id, structuredClone(publication));
+  }
+
+  async remove(orderId: string): Promise<void> {
+    this.publications.delete(orderId);
+  }
+}
+
+function publicPublication(publication: StagedOrderPublication): PublicOrderPublication {
+  return {
+    orderId: publication.state.order_id,
+    makerPubkey: publication.projection.pubkey,
+    transitionId: publication.transition.id,
+    projectionId: publication.projection.id,
+    transitionReceipts: publication.transitionReceipts,
+    projectionReceipts: publication.projectionReceipts
+  };
+}
+
+export class PendingPublicationError extends Error {
+  readonly publication: PublicOrderPublication;
+
+  constructor(
+    readonly stage: "transition" | "projection",
+    publication: StagedOrderPublication
+  ) {
+    super(`Order publication is pending at the ${stage} relay quorum`);
+    this.name = "PendingPublicationError";
+    this.publication = publicPublication(publication);
+  }
 }
 
 function orderAssets(side: PublishOrderInput["side"]): Pick<CreateOrderInput, "offered" | "requested"> {
@@ -67,7 +116,8 @@ export class OrderApi {
     private readonly identity: MakerIdentityPort,
     private readonly orders: OrderServicePort,
     private readonly now: () => number = () => Math.floor(Date.now() / 1000),
-    private readonly orderId: () => string = () => crypto.randomUUID()
+    private readonly orderId: () => string = () => crypto.randomUUID(),
+    private readonly outbox: OrderOutboxPort = new VolatileOrderOutbox()
   ) {}
 
   async getMakerIdentity(): Promise<{ publicKey: string }> {
@@ -76,6 +126,30 @@ export class OrderApi {
 
   async getOrderBook(): Promise<LoadedOrderBook> {
     return this.orders.loadBook(TEST_MARKET, this.now());
+  }
+
+  async getPendingOrderPublications(): Promise<PublicOrderPublication[]> {
+    return (await this.outbox.list()).map(publicPublication);
+  }
+
+  private async settle(staged: StagedOrderPublication): Promise<PublicOrderPublication> {
+    try {
+      const publication = await this.orders.publishStaged(staged);
+      await this.outbox.remove(publication.state.order_id);
+      return publicPublication(publication);
+    } catch (error) {
+      if (error instanceof PublicationQuorumError) {
+        await this.outbox.save(error.publication);
+        throw new PendingPublicationError(error.stage, error.publication);
+      }
+      throw error;
+    }
+  }
+
+  async retryOrderPublication(orderId: string): Promise<PublicOrderPublication> {
+    const staged = await this.outbox.load(orderId);
+    if (!staged) throw new Error("No pending publication exists for this order ID");
+    return this.settle(staged);
   }
 
   async publishOrder(input: PublishOrderInput): Promise<PublicOrderPublication> {
@@ -95,14 +169,8 @@ export class OrderApi {
         ? {}
         : { minimumFillAmount: input.minimumFillAmount })
     });
-    const publication = await this.orders.publish(state);
-    return {
-      orderId: state.order_id,
-      makerPubkey: publication.projection.pubkey,
-      transitionId: publication.transition.id,
-      projectionId: publication.projection.id,
-      transitionReceipts: publication.transitionReceipts,
-      projectionReceipts: publication.projectionReceipts
-    };
+    const staged = await this.orders.stage(state);
+    await this.outbox.save(staged);
+    return this.settle(staged);
   }
 }
