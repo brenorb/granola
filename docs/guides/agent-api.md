@@ -46,6 +46,17 @@ if (pending[0]) {
   await window.granola.retryOrderPublication(pending[0].orderId);
 }
 
+await window.granola.enableMaker();
+const trades = await window.granola.listTrades();
+const started = await window.granola.takeOrder({
+  requestId: crypto.randomUUID(),
+  address: book.topAsk.address,
+  expectedHeadId: book.topAsk.headEventId,
+  fillBaseAmount: book.topAsk.state.remaining_amount
+});
+const nextCheckpoint = await window.granola.advanceTrade(started.sessionId);
+const currentTrade = await window.granola.getTrade(started.sessionId);
+
 const backup = await window.granola.createBackup();
 await window.granola.clearWallet("DELETE TEST WALLET");
 ```
@@ -61,6 +72,22 @@ use that reference with `claimMint`.
 
 `createBackup()` is the deliberate exception: its encoded tokens are spendable
 bearer instruments. Do not log, paste, publish, or commit its return value.
+
+`enableMaker()` publishes the profile's authenticated order-key inbox
+registration and keeps its NIP-17 subscription open for the life of the page.
+Call it on the maker page before a taker starts. `takeOrder()` accepts only a
+verified current sell head for the fixed SAT/USD issuer pair. Its lowercase
+UUIDv4 `requestId` is an idempotency key: reuse that exact ID, address, head, and
+fill amount if the caller did not receive the first result.
+
+`advanceTrade(sessionId)` performs at most one planned action. Call it again
+only after inspecting its returned phase. Live inbox messages wake one such
+step automatically, while explicit calls remain useful for local staging,
+relay publication, Cashu execution, and mint observation. `listTrades()` and
+`getTrade()` return only public views: phases, exact amounts, issuer URLs,
+commitments, public transition IDs, and redacted mint evidence. They never
+return proofs, encoded tokens, private keys, preimages, witnesses, private
+message bodies, or mint quote IDs.
 
 `getMakerIdentity()` returns only the profile's public protocol key. The secret
 signing key remains in the private IndexedDB store and is never exposed by this
@@ -96,7 +123,9 @@ The public app has a fixed network allowlist matching its Content Security
 Policy: `https://testnut.cashu.space` and
 `https://nofee.testnut.cashu.space`. `inspectMint`, `requestMint`, and
 `receiveToken` reject every other issuer before making a network request.
-Nostr connections are likewise limited to `wss://nos.lol`,
-`wss://relay.primal.net`, and `wss://offchain.pub`. All three advertise NIP-40
-retention support; the client still validates both NIP-78 event classes through
-acknowledgement and readback because relay capability metadata can be incomplete.
+Nostr connections are limited to `wss://nos.lol`,
+`wss://relay.primal.net`, `wss://offchain.pub`, and the authenticated private
+inbox `wss://auth.nostr1.com`; matching HTTPS origins are allowed only for
+NIP-11 capability documents. Public order events and kind `10050` inbox
+registrations still require acknowledgement/readback evidence because relay
+capability metadata can be incomplete.

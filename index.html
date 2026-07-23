@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://testnut.cashu.space https://nofee.testnut.cashu.space wss://nos.lol wss://relay.primal.net wss://offchain.pub; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://testnut.cashu.space https://nofee.testnut.cashu.space https://auth.nostr1.com https://nos.lol https://relay.primal.net https://offchain.pub wss://auth.nostr1.com wss://nos.lol wss://relay.primal.net wss://offchain.pub; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <meta name="description" content="Granola — an experimental Cashu atomic swap workbench." />
     <title>Granola / Cashu swap workbench</title>
@@ -82,6 +82,21 @@
             <button type="submit">Sign &amp; publish order</button>
           </form>
         </details>
+      </section>
+
+      <section class="settlement" aria-labelledby="trades-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">03 / Atomic settlement</p>
+            <h2 id="trades-title">Swap sessions</h2>
+          </div>
+          <div class="section-actions">
+            <button id="enable-maker" class="quiet" type="button">Enable maker inbox · <span id="maker-inbox-state">offline</span></button>
+            <button id="refresh-trades" class="quiet" type="button">Check sessions</button>
+          </div>
+        </div>
+        <p class="section-intro">Each click advances at most one verified protocol action. Mint observations—not peer messages—decide when value moved.</p>
+        <div id="trades"></div>
       </section>
 
       <div class="work-grid">

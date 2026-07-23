@@ -1,9 +1,13 @@
 import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, type PublishOrderInput } from "./api/order-api.js";
+import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
 import { withOrderOutboxLock, withWalletLock } from "./browser/lock.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
+import { BrowserTradeController } from "./browser/trade-controller.js";
+import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import { fiatPerBtcPrice } from "./order/human-price.js";
+import type { OrderRecord } from "./order/model.js";
 import { NostrOrderService } from "./order/service.js";
 import { MakerIdentity } from "./nostr/identity.js";
 import { RelayClient } from "./nostr/relay.js";
@@ -13,6 +17,7 @@ import { renderDashboard } from "./ui/dashboard.js";
 import { formatUnitAmount } from "./ui/format.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
+import { renderTrades } from "./ui/trades.js";
 
 interface GranolaBrowserFacade {
   getState: BrowserGranolaApi["getState"];
@@ -28,6 +33,11 @@ interface GranolaBrowserFacade {
   publishOrder: OrderApi["publishOrder"];
   getPendingOrderPublications: OrderApi["getPendingOrderPublications"];
   retryOrderPublication: OrderApi["retryOrderPublication"];
+  listTrades: TradeApi["listTrades"];
+  getTrade: TradeApi["getTrade"];
+  takeOrder: TradeApi["takeOrder"];
+  advanceTrade: TradeApi["advanceTrade"];
+  enableMaker: BrowserTradeController["enableMaker"];
 }
 
 declare global {
@@ -45,21 +55,27 @@ const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
 const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
 const outboxLocked = <T>(action: () => Promise<T>): Promise<T> =>
   withOrderOutboxLock(profile, action);
-const api = new GranolaApi(new WalletRepository(driver), new QuoteRepository(driver), new CashuClient());
+const walletRepository = new WalletRepository(driver);
+const cashu = new CashuClient();
+const api = new GranolaApi(walletRepository, new QuoteRepository(driver), cashu);
 const makerIdentity = new MakerIdentity(driver, locked);
 const relayClient = new RelayClient();
+const orderService = new NostrOrderService(makerIdentity, relayClient);
+const orderOutbox = new OrderOutboxRepository(driver, outboxLocked);
 const orderApi = new OrderApi(
   makerIdentity,
-  new NostrOrderService(makerIdentity, relayClient),
+  orderService,
   () => Math.floor(Date.now() / 1000),
   () => crypto.randomUUID(),
-  new OrderOutboxRepository(driver, outboxLocked)
+  orderOutbox
 );
 const dashboard = byId("dashboard");
 const orderbook = byId("orderbook");
 const pendingPublications = byId("pending-publications");
+const trades = byId("trades");
 const status = byId("status");
 const activity = byId<HTMLOListElement>("activity-log");
+let tradeControllerPromise: Promise<BrowserTradeController> | undefined;
 
 function log(message: string): void {
   const item = document.createElement("li");
@@ -90,7 +106,11 @@ async function refreshOrderBook(): Promise<void> {
   renderOrderBook(orderbook, { status: "loading" });
   try {
     const result = await orderApi.getOrderBook();
-    renderOrderBook(orderbook, { status: "ready", book: result.book });
+    renderOrderBook(
+      orderbook,
+      { status: "ready", book: result.book },
+      { onTake: takeOrderFromBook }
+    );
     if (result.rejected > 0) {
       log(`Ignored ${result.rejected} invalid or conflicting public order event(s)`);
     }
@@ -98,6 +118,67 @@ async function refreshOrderBook(): Promise<void> {
     renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
     throw error;
   }
+}
+
+function tradeController(): Promise<BrowserTradeController> {
+  tradeControllerPromise ??= createBrowserTradeRuntime({
+    profile,
+    driver,
+    wallet: walletRepository,
+    makerIdentity,
+    orderApi,
+    orderService,
+    orderOutbox,
+    cashu
+  }).then((runtime) => new BrowserTradeController({
+    api: runtime.api,
+    sessions: runtime.sessions,
+    transport: runtime.transport,
+    inboxPort: runtime.inboxPort,
+    inboxRelay: runtime.inboxRelay,
+    makerIdentity,
+    onChange: () => { void refreshTrades(); },
+    onError: (message) => report(message, true)
+  }));
+  return tradeControllerPromise;
+}
+
+function advanceTrade(sessionId: string): void {
+  void granola.advanceTrade(sessionId)
+    .then(async (trade) => {
+      await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
+      log(`Advanced ${trade.role} swap ${trade.reservationId.slice(0, 8)}… to ${trade.phase}`);
+      report(`Completed one checkpointed ${trade.role} action`);
+    })
+    .catch((error: unknown) => report(messageOf(error), true));
+}
+
+async function refreshTrades(): Promise<void> {
+  const controller = await tradeController();
+  const current = await controller.resume();
+  renderTrades(trades, current, { onAdvance: advanceTrade });
+}
+
+const takeRequestIds = new Map<string, string>();
+
+function takeOrderFromBook(
+  order: OrderRecord,
+  fillBaseAmount: string
+): void {
+  const retryKey = `${order.address}:${order.headEventId}:${fillBaseAmount}`;
+  const requestId = takeRequestIds.get(retryKey) ?? crypto.randomUUID();
+  takeRequestIds.set(retryKey, requestId);
+  void granola.takeOrder({
+    requestId,
+    address: order.address,
+    expectedHeadId: order.headEventId,
+    fillBaseAmount
+  }).then(async (trade) => {
+    takeRequestIds.delete(retryKey);
+    await refreshTrades();
+    log(`Opened taker swap ${trade.reservationId.slice(0, 8)}… for ${fillBaseAmount} ${trade.terms.baseUnit.toUpperCase()}`);
+    report("Swap session persisted; advance one verified action at a time");
+  }).catch((error: unknown) => report(messageOf(error), true));
 }
 
 function retryPendingPublication(orderId: string): void {
@@ -134,7 +215,12 @@ const granola: GranolaBrowserFacade = {
   getOrderBook: orderApi.getOrderBook.bind(orderApi),
   publishOrder: orderApi.publishOrder.bind(orderApi),
   getPendingOrderPublications: orderApi.getPendingOrderPublications.bind(orderApi),
-  retryOrderPublication: orderApi.retryOrderPublication.bind(orderApi)
+  retryOrderPublication: orderApi.retryOrderPublication.bind(orderApi),
+  listTrades: async () => (await tradeController()).listTrades(),
+  getTrade: async (sessionId) => (await tradeController()).getTrade(sessionId),
+  takeOrder: async (input: TakeOrderInput) => (await tradeController()).takeOrder(input),
+  advanceTrade: async (sessionId) => (await tradeController()).advanceTrade(sessionId),
+  enableMaker: async () => (await tradeController()).enableMaker()
 };
 window.granola = granola;
 
@@ -146,6 +232,23 @@ byId("refresh-orderbook").addEventListener("click", () => {
   void refreshOrderBook()
     .then(() => report("Order book refreshed from public relays"))
     .catch((error: unknown) => report(messageOf(error), true));
+});
+byId("refresh-trades").addEventListener("click", () => {
+  void refreshTrades()
+    .then(() => report("Swap sessions refreshed from durable checkpoints"))
+    .catch((error: unknown) => report(messageOf(error), true));
+});
+byId("enable-maker").addEventListener("click", () => {
+  void granola.enableMaker()
+    .then(({ makerPubkey, inboxRelay }) => {
+      byId("maker-inbox-state").textContent = "listening";
+      log(`Maker inbox ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
+      report("Maker order inbox is authenticated and listening");
+    })
+    .catch((error: unknown) => {
+      byId("maker-inbox-state").textContent = "offline";
+      report(messageOf(error), true);
+    });
 });
 
 const executionInput = byId<HTMLSelectElement>("order-execution");
@@ -279,6 +382,7 @@ void Promise.all([
   refresh(),
   refreshOrderBook(),
   refreshPendingPublications(),
+  refreshTrades(),
   granola.getMakerIdentity().then(({ publicKey }) => {
     byId("maker-pubkey").textContent = `${publicKey.slice(0, 12)}…${publicKey.slice(-8)}`;
     byId("maker-pubkey").title = publicKey;
@@ -287,4 +391,7 @@ void Promise.all([
   .then(() => log(`Opened isolated wallet profile “${profile}”`))
   .catch((error: unknown) => report(messageOf(error), true));
 
-window.addEventListener("pagehide", () => relayClient.dispose(), { once: true });
+window.addEventListener("pagehide", () => {
+  void tradeControllerPromise?.then((controller) => controller.stop()).catch(() => undefined);
+  relayClient.dispose();
+}, { once: true });

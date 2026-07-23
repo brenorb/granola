@@ -39,6 +39,7 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.65rem,3vw,2.6rem); line-height: 1; l
 .ledger { padding: 3rem 0; border-bottom: 1px solid var(--ink); }
 .exchange { padding: 3rem 0; border-bottom: 1px solid var(--ink); }
 .section-heading { display: flex; justify-content: space-between; align-items: start; }
+.section-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; }
 .balance-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 1px; background: var(--ink); border: 1px solid var(--ink); }
 .balance-card { min-height: 160px; display: flex; flex-direction: column; background: var(--paper); padding: 1.2rem; }
 .balance-card span, .balance-card small { font: .7rem/1.3 "Courier New", monospace; text-transform: uppercase; }
@@ -58,6 +59,9 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-summary dt { background: var(--ink); color: var(--paper); text-transform: uppercase; }
 .orderbook-summary dd { background: var(--paper); }
 .orderbook-table { font-variant-numeric: tabular-nums; }
+.orderbook-table td:last-child { display: grid; grid-template-columns: minmax(7rem,1fr) auto; gap: .45rem; }
+.orderbook-table td:last-child input { min-width: 7rem; padding: .55rem; }
+.orderbook-table td:last-child button { white-space: nowrap; }
 .orderbook-asks tr { background: rgba(233,99,44,.09); }
 .orderbook-bids tr { background: rgba(200,241,53,.13); }
 .orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
@@ -72,6 +76,19 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .pending-publications ul { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
 .pending-publications li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font: .7rem/1.4 "Courier New", monospace; }
 .pending-publications button { flex: none; }
+
+.settlement { padding: 3rem 0; border-bottom: 1px solid var(--ink); }
+.section-intro { max-width: 48rem; font: .76rem/1.5 "Courier New", monospace; }
+#trades { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 1px; margin-top: 1.5rem; background: var(--ink); border: 1px solid var(--ink); }
+#trades > .empty-state { grid-column: 1 / -1; background: var(--paper); }
+.trade-card { display: grid; gap: 1rem; padding: 1.2rem; background: var(--paper); }
+.trade-card__heading p { margin: 0 0 .3rem; color: #696c62; font: .65rem/1.2 "Courier New", monospace; text-transform: uppercase; }
+.trade-card__heading h3 { margin: 0; font-size: 1.55rem; font-weight: 500; }
+.trade-liabilities { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 0; padding: 1px; list-style: none; background: var(--ink); }
+.trade-liabilities li { display: grid; gap: .25rem; padding: .7rem; background: var(--paper); }
+.trade-liabilities span, .trade-liabilities small { overflow: hidden; text-overflow: ellipsis; color: #696c62; font: .6rem/1.3 "Courier New", monospace; text-transform: uppercase; }
+.trade-liabilities strong { font-size: 1.25rem; font-weight: 500; }
+.trade-card__state { margin: 0; font: .67rem/1.5 "Courier New", monospace; }
 
 .work-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
 .panel { padding: clamp(1.5rem,4vw,3rem); border-bottom: 1px solid var(--ink); }
@@ -115,6 +132,8 @@ code { font-family: "Courier New", monospace; }
   .field-pair { grid-template-columns: 1fr; }
   .market-tape { grid-template-columns: 1fr 1fr; }
   .orderbook-summary { grid-template-columns: auto 1fr; }
+  .section-heading { gap: 1rem; }
+  .section-actions { flex-direction: column; align-items: stretch; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
