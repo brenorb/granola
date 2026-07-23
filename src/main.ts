@@ -147,7 +147,7 @@ function tradeTrace(trade: PublicTradeView): void {
   const checkpointKey = `${trade.sessionId}:${trade.revision}:${trade.phase}`;
   if (!tracedTradeCheckpoints.has(checkpointKey)) {
     tracedTradeCheckpoints.add(checkpointKey);
-    trace("Protocol", "Trade checkpoint accepted", [
+    trace("Protocol", "Trade state accepted", [
       { label: "role", value: trade.role },
       { label: "phase", value: trade.phase },
       shortIdentifier(trade.sessionId),
@@ -167,7 +167,7 @@ function tradeTrace(trade: PublicTradeView): void {
   const inboxKey = `${trade.sessionId}:${trade.protocol.inbox.registrationEventId}:${trade.protocol.inbox.status}`;
   if (!tracedTradeCheckpoints.has(inboxKey) && trade.protocol.inbox.status !== "unregistered") {
     tracedTradeCheckpoints.add(inboxKey);
-    trace("Inbox", "Private inbox checkpoint", [
+    trace("Inbox", "Private inbox updated", [
       { label: "status", value: trade.protocol.inbox.status },
       ...(trade.protocol.inbox.registrationEventId === null
         ? []
@@ -297,7 +297,7 @@ function takeOrderFromBook(
     report("Order taken; settling automatically");
     const result = await granola.runUntilSettled(trade.sessionId);
     await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
-    report(`Swap filled after ${result.checkpoints.length} verified checkpoints`);
+    report(`Swap filled after ${result.checkpoints.length} verified actions`);
   };
   const request = button
     ? withButtonFeedback(button, "Settling…", task)
@@ -450,7 +450,7 @@ async function requestAndClaimMint(input: {
   const task = async (): Promise<void> => {
     const quote = await granola.requestMint(input);
     log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
-    report("Quote created; waiting for the fake mint to mark it paid");
+    report("Quote created; waiting for the Testnut mint to mark it paid");
 
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -458,8 +458,8 @@ async function requestAndClaimMint(input: {
       await refresh(state);
       const current = state.quotes.find((item) => item.ref === quote.ref);
       if (current?.state === "ISSUED") {
-        log(`Received ${formatUnitAmount(current.amount, current.unit)} of fake test ecash`);
-        report("Fake test tokens added to this browser wallet");
+        log(`Received ${formatUnitAmount(current.amount, current.unit)} of Testnut ecash`);
+        report("Testnut tokens added to this browser wallet");
         return;
       }
     }
@@ -526,7 +526,7 @@ refreshOrderbookButton.addEventListener("click", () => {
 const refreshTradesButton = byId<HTMLButtonElement>("refresh-trades");
 refreshTradesButton.addEventListener("click", () => {
   void withButtonFeedback(refreshTradesButton, "Checking…", () => refreshTrades())
-    .then(() => report("Swap sessions refreshed from durable checkpoints"))
+    .then(() => report("Swap sessions refreshed from local state"))
     .catch((error: unknown) => report(messageOf(error), true));
 });
 const orderForm = byId<HTMLFormElement>("order-form");
