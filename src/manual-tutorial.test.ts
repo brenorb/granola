@@ -9,7 +9,8 @@ describe("manual testnet swap tutorial", () => {
     expect(tutorial).toContain("?wallet=taker-tutorial");
     expect(tutorial).toContain("100 SAT");
     expect(tutorial).toContain("USD 0.10");
-    expect(tutorial).toContain("Sync maker listener");
+    expect(tutorial).toContain("automatically registers and listens");
+    expect(tutorial).not.toContain("Sync maker listener");
     expect(tutorial).toContain("20 SAT");
     expect(tutorial).toContain("50,000.00");
     expect(tutorial).toContain("Retry same signed projection");

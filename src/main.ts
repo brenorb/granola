@@ -183,10 +183,7 @@ function tradeController(): Promise<BrowserTradeController> {
     makerIdentity,
     onChange: () => { void refreshTrades(); },
     onError: (message) => report(message, true),
-    onMakerError: (message) => {
-      byId("maker-inbox-state").textContent = "error";
-      report(message, true);
-    }
+    onMakerError: (message) => report(message, true)
   }));
   return tradeControllerPromise;
 }
@@ -313,7 +310,6 @@ let makerInboxResyncQueued = false;
 async function syncMakerInboxes(): Promise<void> {
   const publicKeys = await granola.getMakerPublicKeys();
   if (publicKeys.length === 0) {
-    byId("maker-inbox-state").textContent = "idle";
     return;
   }
   await startMakerInbox();
@@ -329,19 +325,15 @@ function startMakerInbox(): Promise<void> {
       return startMakerInbox();
     });
   }
-  byId("maker-inbox-state").textContent = "starting";
   makerInboxStartPromise = granola.enableMaker()
     .then(({ makerPubkey, inboxRelay }) => {
       if (!makerPubkey) {
-        byId("maker-inbox-state").textContent = "idle";
         return;
       }
-      byId("maker-inbox-state").textContent = "listening";
       log(`Maker listener ready for ${makerPubkey.slice(0, 8)}… on ${new URL(inboxRelay).host}`);
       report("Maker listener is authenticated and listening");
     })
     .catch((error: unknown) => {
-      byId("maker-inbox-state").textContent = "error";
       report(messageOf(error), true);
     })
     .finally(() => {
@@ -442,10 +434,6 @@ byId("refresh-trades").addEventListener("click", () => {
     .then(() => report("Swap sessions refreshed from durable checkpoints"))
     .catch((error: unknown) => report(messageOf(error), true));
 });
-byId("enable-maker").addEventListener("click", () => {
-  void syncMakerInboxes();
-});
-
 const orderForm = byId<HTMLFormElement>("order-form");
 const mintInput = byId<HTMLSelectElement>("mint-url");
 const mintUnitInput = byId<HTMLSelectElement>("mint-unit");

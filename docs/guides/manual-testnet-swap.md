@@ -86,12 +86,12 @@ Press **Refresh book** and find the row with all of these values:
 It will normally be at the top ask price, although other public test orders can
 tie it.
 
-## 4. Confirm the maker listener
+## 4. Let the maker listener start automatically
 
 After the order is published, the same page automatically registers and listens
-with the order's ephemeral Nostr key. Wait until the button reads
-**Sync maker listener · listening**. If startup fails, the button shows an
-error; press it to retry. No page reload or role switch is required.
+with the order's ephemeral Nostr key. The listener starts automatically; no
+manual sync action, page reload, or role switch is required. If startup fails,
+the page reports the error; reloading the same workspace starts it again.
 
 ## 5. Take the ask
 
@@ -199,8 +199,7 @@ discovery. These do not require a replacement trade.
 1. Do not create another order or session.
 2. Do not erase either wallet.
 3. Keep or reopen the same `?wallet=` workspace.
-4. If the maker tab reloaded, wait for the automatic maker listener startup or
-   press **Sync maker listener** to retry it.
+4. If the maker tab reloaded, wait for the automatic maker listener startup.
 5. Press **Check sessions** and resume the same cards.
 6. For the fast demo, run the same `runUntilSettled` command again only on the
    side whose promise rejected.
