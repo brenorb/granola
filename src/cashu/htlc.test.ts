@@ -1,6 +1,7 @@
 import {
   Amount,
   CheckStateEnum,
+  OutputData,
   createHTLCsecret,
   hashToCurve,
   type P2PKOptions,
@@ -22,6 +23,8 @@ import {
   prepareHtlcClaim,
   prepareHtlcLock,
   prepareHtlcRefund,
+  deserializeSwapPreview,
+  serializeSwapPreview,
   validateHtlcLock,
   type HtlcBinding,
   type HtlcLockEnvelope,
@@ -163,6 +166,33 @@ function walletMock() {
 }
 
 describe("Cashu HTLC material and lock creation", () => {
+  it("round-trips a prepared swap through JSON-safe durable recovery data", () => {
+    const material = createHtlcMaterial();
+    const lockedOutput = OutputData.createSingleRandomData(2, keysetId);
+    const changeOutput = OutputData.createSingleRandomData(1, keysetId);
+    const preview: SwapPreview = {
+      amount: Amount.from(2),
+      fees: Amount.from(1),
+      keysetId,
+      inputs: [proof(material.hash, 4, 10)],
+      sendOutputs: [lockedOutput],
+      keepOutputs: [changeOutput],
+      unselectedProofs: [proof(material.hash, 8, 11)]
+    };
+
+    const stored = serializeSwapPreview(preview);
+    expect(() => JSON.stringify(stored)).not.toThrow();
+    const restored = deserializeSwapPreview(JSON.parse(JSON.stringify(stored)));
+
+    expect(restored.amount.toString()).toBe("2");
+    expect(restored.fees.toString()).toBe("1");
+    expect(restored.inputs[0]?.secret).toBe(preview.inputs[0]?.secret);
+    expect(OutputData.serialize(restored.sendOutputs![0]!))
+      .toEqual(OutputData.serialize(lockedOutput));
+    expect(OutputData.serialize(restored.keepOutputs![0]!))
+      .toEqual(OutputData.serialize(changeOutput));
+  });
+
   it("creates fresh 32-byte material and builds a receiver-bound refundable lock", async () => {
     const material = createHtlcMaterial();
     expect(material.hash).toMatch(/^[0-9a-f]{64}$/);

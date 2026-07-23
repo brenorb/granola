@@ -1,8 +1,10 @@
 import {
   Amount,
   CheckStateEnum,
+  OutputData,
   P2PKBuilder,
   createHTLCHash,
+  deserializeProofs,
   getDataField,
   getHTLCWitnessPreimage,
   getP2PKSigFlag,
@@ -14,14 +16,68 @@ import {
   parseHTLCSecret,
   parseP2PKSecret,
   sumProofs,
+  serializeProofs,
   verifyHTLCHash,
   type Keys,
   type Proof,
   type ProofState,
   type SendResponse,
+  type SerializedOutputData,
   type SwapPreview,
   type Wallet
 } from "@cashu/cashu-ts";
+
+export interface SerializedSwapPreview {
+  amount: string;
+  fees: string;
+  keysetId: string;
+  inputs: string[];
+  sendOutputs?: SerializedOutputData[];
+  keepOutputs?: SerializedOutputData[];
+  unselectedProofs?: string[];
+}
+
+export function serializeSwapPreview(preview: SwapPreview): SerializedSwapPreview {
+  assertInvariant(preview.keysetId.length > 0, "keyset-id");
+  return {
+    amount: preview.amount.toString(),
+    fees: preview.fees.toString(),
+    keysetId: preview.keysetId,
+    inputs: serializeProofs(preview.inputs),
+    ...(preview.sendOutputs
+      ? { sendOutputs: preview.sendOutputs.map((output) => OutputData.serialize(output)) }
+      : {}),
+    ...(preview.keepOutputs
+      ? { keepOutputs: preview.keepOutputs.map((output) => OutputData.serialize(output)) }
+      : {}),
+    ...(preview.unselectedProofs
+      ? { unselectedProofs: serializeProofs(preview.unselectedProofs) }
+      : {})
+  };
+}
+
+export function deserializeSwapPreview(stored: SerializedSwapPreview): SwapPreview {
+  assertInvariant(stored && typeof stored === "object", "prepared-swap");
+  assertInvariant(/^(0|[1-9]\d*)$/.test(stored.amount), "prepared-amount");
+  assertInvariant(/^(0|[1-9]\d*)$/.test(stored.fees), "prepared-fees");
+  assertInvariant(typeof stored.keysetId === "string" && stored.keysetId.length > 0, "keyset-id");
+  assertInvariant(Array.isArray(stored.inputs), "prepared-inputs");
+  return {
+    amount: Amount.from(stored.amount),
+    fees: Amount.from(stored.fees),
+    keysetId: stored.keysetId,
+    inputs: deserializeProofs(stored.inputs),
+    ...(stored.sendOutputs
+      ? { sendOutputs: stored.sendOutputs.map((output) => OutputData.deserialize(output)) }
+      : {}),
+    ...(stored.keepOutputs
+      ? { keepOutputs: stored.keepOutputs.map((output) => OutputData.deserialize(output)) }
+      : {}),
+    ...(stored.unselectedProofs
+      ? { unselectedProofs: deserializeProofs(stored.unselectedProofs) }
+      : {})
+  };
+}
 
 export type HtlcLeg = "base" | "quote";
 
