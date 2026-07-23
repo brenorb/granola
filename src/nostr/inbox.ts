@@ -38,7 +38,12 @@ export interface InboxReceipt {
 export interface InboxPublicationResult {
   event: NostrEvent;
   receipts: InboxReceipt[];
-  readback: Array<{ relay: string; found: boolean }>;
+  readback: Array<{
+    relay: string;
+    found: boolean;
+    event: NostrEvent | null;
+    observedAt: number;
+  }>;
   confirmed: string[];
 }
 
@@ -48,6 +53,22 @@ export interface InboxLiveProbeResult {
   listReadback: boolean;
   recipientReadback: boolean;
   otherKeyExcluded: boolean;
+}
+
+declare const VERIFIED_INBOX_LIVE_PROBE: unique symbol;
+
+export type VerifiedInboxLiveProbeResult = Readonly<InboxLiveProbeResult> & {
+  readonly [VERIFIED_INBOX_LIVE_PROBE]: true;
+};
+
+const verifiedInboxLiveProbes = new WeakSet<object>();
+
+export function assertVerifiedInboxLiveProbe(
+  value: unknown
+): asserts value is VerifiedInboxLiveProbeResult {
+  if (!value || typeof value !== "object" || !verifiedInboxLiveProbes.has(value)) {
+    throw new Error("Inbox relay requires verified live probe evidence");
+  }
 }
 
 const HEX_32 = /^[0-9a-f]{64}$/;
@@ -96,6 +117,30 @@ function normalizeRelays(
   return relays.sort();
 }
 
+export function normalizeInboxListRelays(values: readonly string[]): string[] {
+  return normalizeRelays(values, "Inbox list", 1, 3);
+}
+
+export function normalizeDiscoveryRelays(values: readonly string[]): string[] {
+  return normalizeRelays(values, "Discovery", 3, 3);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function immutableSnapshot<T>(value: T): T {
+  return deepFreeze(structuredClone(value));
+}
+
+export function snapshotNostrEvent(event: NostrEvent): NostrEvent {
+  return immutableSnapshot(event);
+}
+
 function verifyFresh(event: NostrEvent): boolean {
   return verifyEvent({
     id: event.id,
@@ -125,7 +170,7 @@ export function createInboxList(
   createdAt: number
 ): NostrEvent {
   timestamp(createdAt, "Inbox-list created_at");
-  const relays = normalizeRelays(relayValues, "Inbox list", 1, 3);
+  const relays = normalizeInboxListRelays(relayValues);
   return finalizeEvent({
     kind: 10050,
     created_at: createdAt,
@@ -161,7 +206,7 @@ export function validateInboxList(
   if (raw.some((relay, index) => relay !== sorted[index])) {
     throw new Error("Inbox-list relay tags must be sorted");
   }
-  return { event, relays: raw };
+  return immutableSnapshot({ event, relays: raw });
 }
 
 export function selectInboxList(
@@ -239,39 +284,63 @@ export async function publishInboxList(
   now: number,
   quorum = 2
 ): Promise<InboxPublicationResult> {
-  const relays = normalizeRelays(discoveryRelayValues, "Discovery publication", 3, 3);
-  const author = getPublicKey(protocolSecretKey);
-  validateInboxList(event, author, now);
-  if (!Number.isSafeInteger(quorum) || quorum < 1 || quorum > relays.length) {
-    throw new Error("Inbox publication quorum is invalid");
+  const eventSnapshot = snapshotNostrEvent(event);
+  const keySnapshot = Uint8Array.from(protocolSecretKey);
+  try {
+    const relays = normalizeDiscoveryRelays(discoveryRelayValues);
+    const author = getPublicKey(keySnapshot);
+    validateInboxList(eventSnapshot, author, now);
+    if (!Number.isSafeInteger(quorum) || quorum < 1 || quorum > relays.length) {
+      throw new Error("Inbox publication quorum is invalid");
+    }
+    const receipts = await Promise.all(relays.map(async (relay): Promise<InboxReceipt> => {
+      try {
+        return {
+          relay,
+          ok: true,
+          message: await port.publish(
+            relay,
+            eventSnapshot,
+            authHandler(relay, keySnapshot, now)
+          )
+        };
+      } catch (error) {
+        return { relay, ok: false, message: relayError(error) };
+      }
+    }));
+    const readback = await Promise.all(relays.map(async (relay) => {
+      try {
+        const events = await port.query(relay, {
+          ids: [eventSnapshot.id],
+          authors: [eventSnapshot.pubkey],
+          kinds: [10050],
+          limit: 1
+        }, authHandler(relay, keySnapshot, now));
+        const exactCandidate = events.find((candidate) => {
+          try {
+            validateInboxList(candidate, eventSnapshot.pubkey, now);
+            return candidate.id === eventSnapshot.id;
+          } catch {
+            return false;
+          }
+        }) ?? null;
+        const exact = exactCandidate === null ? null : snapshotNostrEvent(exactCandidate);
+        return { relay, found: exact !== null, event: exact, observedAt: now };
+      } catch {
+        return { relay, found: false, event: null, observedAt: now };
+      }
+    }));
+    const confirmed = relays.filter((relay) =>
+      receipts.some((receipt) => receipt.relay === relay && receipt.ok) &&
+      readback.some((result) => result.relay === relay && result.found)
+    );
+    if (confirmed.length < quorum) {
+      throw new Error("Inbox-list ACK and readback quorum was not reached");
+    }
+    return immutableSnapshot({ event: eventSnapshot, receipts, readback, confirmed });
+  } finally {
+    keySnapshot.fill(0);
   }
-  const receipts = await Promise.all(relays.map(async (relay): Promise<InboxReceipt> => {
-    try {
-      return {
-        relay,
-        ok: true,
-        message: await port.publish(relay, event, authHandler(relay, protocolSecretKey, now))
-      };
-    } catch (error) {
-      return { relay, ok: false, message: relayError(error) };
-    }
-  }));
-  const readback = await Promise.all(relays.map(async (relay) => {
-    try {
-      const events = await port.query(relay, {
-        ids: [event.id], authors: [event.pubkey], kinds: [10050], limit: 1
-      }, authHandler(relay, protocolSecretKey, now));
-      return { relay, found: events.some((candidate) => candidate.id === event.id) };
-    } catch {
-      return { relay, found: false };
-    }
-  }));
-  const confirmed = relays.filter((relay) =>
-    receipts.some((receipt) => receipt.relay === relay && receipt.ok) &&
-    readback.some((result) => result.relay === relay && result.found)
-  );
-  if (confirmed.length < quorum) throw new Error("Inbox-list ACK and readback quorum was not reached");
-  return { event, receipts, readback, confirmed };
 }
 
 function validateGiftWrap(event: NostrEvent, expectedRecipient: string, now: number): void {
@@ -301,24 +370,31 @@ export async function publishGiftWrap(
   port: InboxRelayPort,
   now: number
 ): Promise<InboxReceipt[]> {
-  timestamp(now, "Current time");
-  const relays = normalizeRelays(inboxRelayValues, "Gift-wrap publication", 1, 3);
-  const recipient = wrapper.tags[0]?.[1] ?? "";
-  if (!HEX_32.test(recipient)) throw new Error("Gift-wrap recipient is malformed");
-  validateGiftWrap(wrapper, recipient, now);
-  return Promise.all(relays.map(async (relay): Promise<InboxReceipt> => {
-    try {
-      await requireInboxRelay(relay, port);
-      const message = await port.publish(
-        relay,
-        wrapper,
-        authHandler(relay, senderProtocolSecretKey, now)
-      );
-      return { relay, ok: true, message };
-    } catch (error) {
-      return { relay, ok: false, message: relayError(error) };
-    }
-  }));
+  const wrapperSnapshot = snapshotNostrEvent(wrapper);
+  const keySnapshot = Uint8Array.from(senderProtocolSecretKey);
+  try {
+    timestamp(now, "Current time");
+    const relays = normalizeRelays(inboxRelayValues, "Gift-wrap publication", 1, 3);
+    const recipient = wrapperSnapshot.tags[0]?.[1] ?? "";
+    if (!HEX_32.test(recipient)) throw new Error("Gift-wrap recipient is malformed");
+    validateGiftWrap(wrapperSnapshot, recipient, now);
+    const receipts = await Promise.all(relays.map(async (relay): Promise<InboxReceipt> => {
+      try {
+        await requireInboxRelay(relay, port);
+        const message = await port.publish(
+          relay,
+          wrapperSnapshot,
+          authHandler(relay, keySnapshot, now)
+        );
+        return { relay, ok: true, message };
+      } catch (error) {
+        return { relay, ok: false, message: relayError(error) };
+      }
+    }));
+    return immutableSnapshot(receipts);
+  } finally {
+    keySnapshot.fill(0);
+  }
 }
 
 export async function queryGiftWraps(
@@ -329,36 +405,41 @@ export async function queryGiftWraps(
   since: number,
   now: number
 ): Promise<NostrEvent[]> {
-  timestamp(since, "Gift-wrap query start");
-  timestamp(now, "Current time");
-  if (since > now) throw new Error("Gift-wrap query start is in the future");
-  if (getPublicKey(recipientProtocolSecretKey) !== recipientPubkey) {
-    throw new Error("Gift-wrap query requires the exact recipient protocol key");
-  }
-  const relays = normalizeRelays(inboxRelayValues, "Gift-wrap query", 1, 3);
-  const observations = await Promise.all(relays.map(async (relay): Promise<NostrEvent[] | null> => {
-    try {
-      await requireInboxRelay(relay, port);
-      return await port.query(relay, {
-        kinds: [1059], "#p": [recipientPubkey], since, limit: 500
-      }, authHandler(relay, recipientProtocolSecretKey, now));
-    } catch {
-      return null;
+  const keySnapshot = Uint8Array.from(recipientProtocolSecretKey);
+  try {
+    timestamp(since, "Gift-wrap query start");
+    timestamp(now, "Current time");
+    if (since > now) throw new Error("Gift-wrap query start is in the future");
+    if (getPublicKey(keySnapshot) !== recipientPubkey) {
+      throw new Error("Gift-wrap query requires the exact recipient protocol key");
     }
-  }));
-  const successful = observations.filter((events): events is NostrEvent[] => events !== null);
-  if (successful.length === 0) throw new Error("All inbox relays were unavailable");
-  const events = successful.flat();
-  const unique = new Map<string, NostrEvent>();
-  for (const event of events) {
-    try {
-      validateGiftWrap(event, recipientPubkey, now);
-      unique.set(event.id, event);
-    } catch {
-      // Invalid relay data is never surfaced to the decryption pipeline.
+    const relays = normalizeRelays(inboxRelayValues, "Gift-wrap query", 1, 3);
+    const observations = await Promise.all(relays.map(async (relay): Promise<NostrEvent[] | null> => {
+      try {
+        await requireInboxRelay(relay, port);
+        return await port.query(relay, {
+          kinds: [1059], "#p": [recipientPubkey], since, limit: 500
+        }, authHandler(relay, keySnapshot, now));
+      } catch {
+        return null;
+      }
+    }));
+    const successful = observations.filter((events): events is NostrEvent[] => events !== null);
+    if (successful.length === 0) throw new Error("All inbox relays were unavailable");
+    const events = successful.flat();
+    const unique = new Map<string, NostrEvent>();
+    for (const event of events) {
+      try {
+        validateGiftWrap(event, recipientPubkey, now);
+        unique.set(event.id, snapshotNostrEvent(event));
+      } catch {
+        // Invalid relay data is never surfaced to the decryption pipeline.
+      }
     }
+    return immutableSnapshot([...unique.values()]);
+  } finally {
+    keySnapshot.fill(0);
   }
-  return [...unique.values()];
 }
 
 export async function probeInboxRelayLive(input: {
@@ -370,46 +451,81 @@ export async function probeInboxRelayLive(input: {
   otherProtocolSecretKey: Uint8Array;
   port: InboxRelayPort;
   now: number;
-}): Promise<InboxLiveProbeResult> {
+}): Promise<VerifiedInboxLiveProbeResult> {
   const relay = normalizeInboxRelay(input.relay);
-  await requireInboxRelay(relay, input.port);
-  const recipient = getPublicKey(input.recipientProtocolSecretKey);
-  validateInboxList(input.inboxList, recipient, input.now);
-  validateGiftWrap(input.wrapper, recipient, input.now);
+  const inboxList = snapshotNostrEvent(input.inboxList);
+  const wrapper = snapshotNostrEvent(input.wrapper);
+  const recipientKey = Uint8Array.from(input.recipientProtocolSecretKey);
+  const senderKey = Uint8Array.from(input.senderProtocolSecretKey);
+  const otherKey = Uint8Array.from(input.otherProtocolSecretKey);
+  const port = input.port;
+  try {
+    const now = timestamp(input.now, "Current time");
+    await requireInboxRelay(relay, port);
+    const recipient = getPublicKey(recipientKey);
+    validateInboxList(inboxList, recipient, now);
+    validateGiftWrap(wrapper, recipient, now);
 
-  await input.port.publish(
-    relay,
-    input.inboxList,
-    authHandler(relay, input.recipientProtocolSecretKey, input.now)
-  );
-  const lists = await input.port.query(relay, {
-    ids: [input.inboxList.id], authors: [recipient], kinds: [10050], limit: 1
-  }, authHandler(relay, input.recipientProtocolSecretKey, input.now));
-  await input.port.publish(
-    relay,
-    input.wrapper,
-    authHandler(relay, input.senderProtocolSecretKey, input.now)
-  );
-  const filter = { ids: [input.wrapper.id], kinds: [1059], "#p": [recipient], limit: 1 };
-  const recipientEvents = await input.port.query(
-    relay,
-    filter,
-    authHandler(relay, input.recipientProtocolSecretKey, input.now)
-  );
-  const otherEvents = await input.port.query(
-    relay,
-    filter,
-    authHandler(relay, input.otherProtocolSecretKey, input.now)
-  );
-  const result = {
-    relay,
-    checkedAt: input.now,
-    listReadback: lists.some((event) => event.id === input.inboxList.id),
-    recipientReadback: recipientEvents.some((event) => event.id === input.wrapper.id),
-    otherKeyExcluded: !otherEvents.some((event) => event.id === input.wrapper.id)
-  };
-  if (!result.listReadback || !result.recipientReadback || !result.otherKeyExcluded) {
-    throw new Error("Inbox relay failed the Granola recipient-only live probe");
+    await port.publish(
+      relay,
+      inboxList,
+      authHandler(relay, recipientKey, now)
+    );
+    const lists = await port.query(relay, {
+      ids: [inboxList.id], authors: [recipient], kinds: [10050], limit: 1
+    }, authHandler(relay, recipientKey, now));
+    await port.publish(
+      relay,
+      wrapper,
+      authHandler(relay, senderKey, now)
+    );
+    const filter = immutableSnapshot({
+      ids: [wrapper.id],
+      kinds: [1059],
+      "#p": [recipient],
+      limit: 1
+    });
+    const recipientEvents = await port.query(
+      relay,
+      filter,
+      authHandler(relay, recipientKey, now)
+    );
+    const otherEvents = await port.query(
+      relay,
+      filter,
+      authHandler(relay, otherKey, now)
+    );
+    const listReadback = lists.some((event) => {
+      try {
+        return validateInboxList(event, recipient, now).event.id === inboxList.id;
+      } catch {
+        return false;
+      }
+    });
+    const recipientReadback = recipientEvents.some((event) => {
+      try {
+        validateGiftWrap(event, recipient, now);
+        return event.id === wrapper.id;
+      } catch {
+        return false;
+      }
+    });
+    const result = {
+      relay,
+      checkedAt: now,
+      listReadback,
+      recipientReadback,
+      otherKeyExcluded: !otherEvents.some((event) => event.id === wrapper.id)
+    };
+    if (!result.listReadback || !result.recipientReadback || !result.otherKeyExcluded) {
+      throw new Error("Inbox relay failed the Granola recipient-only live probe");
+    }
+    const verified = immutableSnapshot(result);
+    verifiedInboxLiveProbes.add(verified);
+    return verified as VerifiedInboxLiveProbeResult;
+  } finally {
+    recipientKey.fill(0);
+    senderKey.fill(0);
+    otherKey.fill(0);
   }
-  return result;
 }
