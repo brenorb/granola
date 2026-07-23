@@ -93,10 +93,51 @@ describe("order-book presentation", () => {
 
     renderOrderBook(root, { status: "ready", book }, { onTake: take });
     const button = root.querySelector<HTMLButtonElement>(`[data-order-id="${askLow}"] [data-take-order]`);
+    const amount = root.querySelector<HTMLInputElement>(
+      `[data-order-id="${askLow}"] [data-take-amount]`
+    );
     button?.click();
 
     expect(button?.textContent).toBe("Take ask");
-    expect(take).toHaveBeenCalledWith(best);
+    expect(amount?.value).toBe("20");
+    expect(take).toHaveBeenCalledWith(best, "20");
+  });
+
+  it("validates exact all-or-none and partial-fill amounts before taking an order", async () => {
+    const allOrNone = record(askLow, "sell", "1", "20", "20");
+    const partial = record(
+      "77777777-7777-4777-8777-777777777777",
+      "sell",
+      "1",
+      "20",
+      "100"
+    );
+    partial.state.execution = "partial";
+    partial.state.minimum_fill_amount = "10";
+    const book = await buildOrderBook([allOrNone, partial], market, 1_700_000_100);
+    const root = document.createElement("section");
+    const take = vi.fn();
+    renderOrderBook(root, { status: "ready", book }, { onTake: take });
+
+    const aonRow = root.querySelector<HTMLElement>(`[data-order-id="${askLow}"]`)!;
+    const aonAmount = aonRow.querySelector<HTMLInputElement>("[data-take-amount]")!;
+    aonAmount.value = "19";
+    aonRow.querySelector<HTMLButtonElement>("[data-take-order]")!.click();
+    expect(take).not.toHaveBeenCalled();
+    expect(aonAmount.validationMessage).toMatch(/all-or-none/i);
+
+    const partialRow = root.querySelector<HTMLElement>(
+      '[data-order-id="77777777-7777-4777-8777-777777777777"]'
+    )!;
+    const partialAmount = partialRow.querySelector<HTMLInputElement>("[data-take-amount]")!;
+    partialAmount.value = "9";
+    partialRow.querySelector<HTMLButtonElement>("[data-take-order]")!.click();
+    expect(take).not.toHaveBeenCalled();
+    expect(partialAmount.validationMessage).toMatch(/minimum/i);
+
+    partialAmount.value = "25";
+    partialRow.querySelector<HTMLButtonElement>("[data-take-order]")!.click();
+    expect(take).toHaveBeenCalledWith(partial, "25");
   });
 
   it("preserves a sub-safe-integer spread as an exact rational", async () => {
