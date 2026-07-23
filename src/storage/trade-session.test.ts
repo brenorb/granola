@@ -117,6 +117,12 @@ const session: TradeSession = {
     cashuPrivateKey: "02".repeat(32),
     refundPrivateKey: "03".repeat(32),
     preimage: "04".repeat(32),
+    settlementTranscriptHash: null,
+    inbox: {
+      listEventId: null,
+      registeredAt: null,
+      relays: []
+    },
     transcript: {
       choreography: {
         phase: "awaiting_base_lock_ack",
@@ -247,6 +253,28 @@ describe("trade session v2 repository", () => {
     expect(restored).not.toBe(session);
   });
 
+  it("round-trips SPENT evidence only when it is bound to a matching private observation", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    const spent = structuredClone(session);
+    spent.evidence.legs.base = {
+      ...spent.evidence.legs.base,
+      mintState: "SPENT",
+      observedAt: 1_700_000_011,
+      proofCount: 2,
+      spendCommitment: "12".repeat(32)
+    };
+    spent.privateState.legs.base.observations.push({
+      observedAt: 1_700_000_011,
+      state: "SPENT",
+      proofCount: 2,
+      witnessCommitment: "12".repeat(32)
+    });
+
+    await repository.save(spent, null);
+
+    expect(await repository.get(spent.sessionId)).toEqual(spent);
+  });
+
   it("uses compare-and-swap revisions and rejects stale or skipped writes", async () => {
     const repository = new TradeSessionRepository(new MemoryStorageDriver());
     await repository.save(session, null);
@@ -325,6 +353,96 @@ describe("trade session v2 repository", () => {
     const corruptions = [
       { ...session, schema: "granola/trade-session/v1" },
       { ...session, revision: -1 },
+      {
+        ...session,
+        privateState: {
+          ...session.privateState,
+          settlementTranscriptHash: "not-a-transcript-hash"
+        }
+      },
+      {
+        ...session,
+        privateState: {
+          ...session.privateState,
+          inbox: {
+            listEventId: "12".repeat(32),
+            registeredAt: null,
+            relays: ["wss://relay.example"]
+          }
+        }
+      },
+      {
+        ...session,
+        evidence: {
+          ...session.evidence,
+          legs: {
+            ...session.evidence.legs,
+            base: {
+              ...session.evidence.legs.base,
+              mintState: "SPENT",
+              spendCommitment: null
+            }
+          }
+        }
+      },
+      {
+        ...session,
+        evidence: {
+          ...session.evidence,
+          legs: {
+            ...session.evidence.legs,
+            base: {
+              ...session.evidence.legs.base,
+              mintState: "SPENT",
+              observedAt: 1_700_000_011,
+              proofCount: 2,
+              spendCommitment: "12".repeat(32)
+            }
+          }
+        }
+      },
+      {
+        ...session,
+        evidence: {
+          ...session.evidence,
+          legs: {
+            ...session.evidence.legs,
+            base: {
+              ...session.evidence.legs.base,
+              mintState: "SPENT",
+              observedAt: 1_700_000_011,
+              proofCount: 2,
+              spendCommitment: "12".repeat(32)
+            }
+          }
+        },
+        privateState: {
+          ...session.privateState,
+          legs: {
+            ...session.privateState.legs,
+            base: {
+              ...session.privateState.legs.base,
+              observations: [{
+                observedAt: 1_700_000_011,
+                state: "SPENT",
+                proofCount: 2,
+                witnessCommitment: "13".repeat(32)
+              }]
+            }
+          }
+        }
+      },
+      {
+        ...session,
+        privateState: {
+          ...session.privateState,
+          inbox: {
+            listEventId: null,
+            registeredAt: null,
+            relays: ["wss://relay.example"]
+          }
+        }
+      },
       {
         ...session,
         privateState: {

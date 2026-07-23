@@ -112,6 +112,12 @@ export interface TradePrivateState {
   cashuPrivateKey: string;
   refundPrivateKey: string;
   preimage: string | null;
+  settlementTranscriptHash: string | null;
+  inbox: {
+    listEventId: string | null;
+    registeredAt: number | null;
+    relays: string[];
+  };
   transcript: TradeTranscriptJournal;
   outbox: TradeOutboxJournal | null;
   cashuOperation: CashuOperationJournal | null;

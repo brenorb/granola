@@ -322,6 +322,29 @@ function validateLegEvidence(value: unknown): asserts value is TradeLegEvidence 
   ) throw new Error("Trade leg evidence is invalid");
 }
 
+function validateSpentEvidence(
+  evidence: TradeLegEvidence,
+  privateLeg: PrivateLegJournal
+): void {
+  if (evidence.mintState !== "SPENT") return;
+  if (
+    evidence.observedAt === null ||
+    evidence.proofCount === null ||
+    evidence.spendCommitment === null
+  ) {
+    throw new Error("SPENT trade evidence is incomplete");
+  }
+  const matchesPrivateObservation = privateLeg.observations.some((observation) =>
+    observation.state === "SPENT" &&
+    observation.observedAt === evidence.observedAt &&
+    observation.proofCount === evidence.proofCount &&
+    observation.witnessCommitment === evidence.spendCommitment
+  );
+  if (!matchesPrivateObservation) {
+    throw new Error("SPENT trade evidence lacks its matching private observation");
+  }
+}
+
 function assertSession(value: unknown): asserts value is TradeSession {
   const session = object(value, "Trade session storage");
   if (session.schema !== "granola/trade-session/v2") {
@@ -414,12 +437,33 @@ function assertSession(value: unknown): asserts value is TradeSession {
     }
   }
   optionalHex(privateState.preimage, "Trade preimage");
+  optionalHex(privateState.settlementTranscriptHash, "Settlement transcript hash");
+  const inbox = object(privateState.inbox, "Trade inbox checkpoint");
+  optionalHex(inbox.listEventId, "Trade inbox list event ID");
+  if (
+    !(inbox.registeredAt === null ||
+      (Number.isSafeInteger(inbox.registeredAt) && (inbox.registeredAt as number) >= 0)) ||
+    !Array.isArray(inbox.relays) ||
+    inbox.relays.some((relay) => typeof relay !== "string" || !/^wss:\/\/[^?#]+$/.test(relay)) ||
+    new Set(inbox.relays).size !== inbox.relays.length ||
+    inbox.relays.length > 3
+  ) throw new Error("Trade inbox checkpoint is invalid");
+  const unregistered = inbox.listEventId === null && inbox.registeredAt === null;
+  const registered = inbox.listEventId !== null && inbox.registeredAt !== null &&
+    inbox.relays.length > 0;
+  if ((!unregistered && !registered) || (unregistered && inbox.relays.length !== 0)) {
+    throw new Error("Trade inbox checkpoint is incomplete");
+  }
   validateTranscript(privateState.transcript);
   if (privateState.outbox !== null) validateOutbox(privateState.outbox);
   if (privateState.cashuOperation !== null) validateCashuOperation(privateState.cashuOperation);
   const privateLegs = object(privateState.legs, "Private trade legs");
-  validatePrivateLeg(privateLegs.base);
-  validatePrivateLeg(privateLegs.quote);
+  const privateBase = privateLegs.base;
+  const privateQuote = privateLegs.quote;
+  validatePrivateLeg(privateBase);
+  validatePrivateLeg(privateQuote);
+  validateSpentEvidence(evidenceLegs.base, privateBase);
+  validateSpentEvidence(evidenceLegs.quote, privateQuote);
 }
 
 function assertSessions(value: unknown): asserts value is TradeSession[] {
