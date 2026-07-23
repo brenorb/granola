@@ -1,0 +1,96 @@
+import { OrderApi } from "../src/api/order-api.js";
+import { MakerIdentity } from "../src/nostr/identity.js";
+import { PUBLIC_RELAYS, RelayClient, type RelayReadback } from "../src/nostr/relay.js";
+import { NostrOrderService } from "../src/order/service.js";
+import { MemoryStorageDriver } from "../src/storage/wallet-repository.js";
+
+interface SeedOrder {
+  label: string;
+  side: "buy" | "sell";
+  amount: string;
+  numerator: string;
+  denominator: string;
+  usdPerBtc: string;
+}
+
+const seeds: SeedOrder[] = [
+  { label: "ask-50500", side: "sell", amount: "2000", numerator: "101", denominator: "2000", usdPerBtc: "50500.00" },
+  { label: "ask-51000", side: "sell", amount: "1000", numerator: "51", denominator: "1000", usdPerBtc: "51000.00" },
+  { label: "ask-52000", side: "sell", amount: "1000", numerator: "13", denominator: "250", usdPerBtc: "52000.00" },
+  { label: "bid-49500", side: "buy", amount: "2000", numerator: "99", denominator: "2000", usdPerBtc: "49500.00" },
+  { label: "bid-49000", side: "buy", amount: "1000", numerator: "49", denominator: "1000", usdPerBtc: "49000.00" },
+  { label: "bid-48000", side: "buy", amount: "1000", numerator: "12", denominator: "250", usdPerBtc: "48000.00" }
+];
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function confirmedReadback(
+  client: RelayClient,
+  event: Parameters<RelayClient["readback"]>[0]
+): Promise<RelayReadback[]> {
+  let result: RelayReadback[] = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await sleep(750 * (attempt + 1));
+    result = await client.readback(event);
+    if (result.filter((receipt) => receipt.found).length >= 2) return result;
+  }
+  throw new Error(`Event ${event.id} did not read back from two relays`);
+}
+
+const relayClient = new RelayClient({ maxWait: 8_000 });
+const startedAt = new Date().toISOString();
+const publications = [];
+
+try {
+  for (const seed of seeds) {
+    const identity = new MakerIdentity(new MemoryStorageDriver());
+    const service = new NostrOrderService(identity, relayClient);
+    const api = new OrderApi(identity, service, undefined, () =>
+      `seed-20260723-${seed.label}-${crypto.randomUUID()}`
+    );
+    const result = await api.publishOrder({
+      side: seed.side,
+      amount: seed.amount,
+      price: { numerator: seed.numerator, denominator: seed.denominator },
+      execution: "all_or_none"
+    });
+    const transitionReadback = await confirmedReadback(relayClient, servicePublicationEvent(
+      result.transitionId,
+      result.makerPubkey,
+      78
+    ));
+    const projectionReadback = await confirmedReadback(relayClient, servicePublicationEvent(
+      result.projectionId,
+      result.makerPubkey,
+      30078
+    ));
+    publications.push({
+      ...seed,
+      orderId: result.orderId,
+      makerPubkey: result.makerPubkey,
+      transitionId: result.transitionId,
+      projectionId: result.projectionId,
+      transitionReceipts: result.transitionReceipts,
+      projectionReceipts: result.projectionReceipts,
+      transitionReadback,
+      projectionReadback
+    });
+  }
+} finally {
+  relayClient.dispose();
+}
+
+console.log(JSON.stringify({
+  schema: "granola/order-publication-trace/v1",
+  startedAt,
+  completedAt: new Date().toISOString(),
+  relays: PUBLIC_RELAYS,
+  quorum: 2,
+  publications
+}, null, 2));
+
+function servicePublicationEvent(id: string, pubkey: string, kind: number) {
+  return { id, pubkey, kind };
+}

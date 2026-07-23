@@ -106,7 +106,7 @@ export class RelayClient {
     return uniqueEvents(events);
   }
 
-  async readback(event: NostrEvent): Promise<RelayReadback[]> {
+  async readback(event: Pick<NostrEvent, "id" | "pubkey" | "kind">): Promise<RelayReadback[]> {
     const filter: Filter = {
       ids: [event.id],
       authors: [event.pubkey],

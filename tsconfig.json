@@ -16,5 +16,5 @@
     "exactOptionalPropertyTypes": true,
     "types": ["vitest/globals", "vite/client"]
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "scripts", "tests", "vite.config.ts"]
 }
