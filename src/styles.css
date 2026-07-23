@@ -65,7 +65,7 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(10rem,13rem) minmax(0,1fr); gap: 1px; margin-top: 1.5rem; border: 1px solid var(--ink); background: var(--ink); }
 .orderbook-side { min-width: 0; padding: 0 .7rem .7rem; background: var(--paper); }
 .orderbook-side .table-scroll { margin-top: 0; }
-.orderbook-side .orderbook-table { min-width: 34rem; }
+.orderbook-side .orderbook-table { min-width: 0; table-layout: fixed; }
 .orderbook-side caption { padding: 1rem .2rem .7rem; border-bottom: 2px solid var(--ink); font-size: .9rem; }
 .orderbook-side--asks caption { color: var(--orange); }
 .orderbook-side--bids caption { color: #688900; }
@@ -76,9 +76,19 @@ th { background: rgba(23,25,20,.07); text-transform: uppercase; }
 .orderbook-summary dt { background: var(--ink); color: var(--paper); text-transform: uppercase; }
 .orderbook-summary dd { overflow: hidden; background: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
 .orderbook-table { font-variant-numeric: tabular-nums; }
-.orderbook-table td:last-child { display: grid; grid-template-columns: minmax(7rem,1fr) auto; gap: .45rem; }
-.orderbook-table td:last-child input { min-width: 7rem; padding: .55rem; }
+.orderbook-table th:nth-child(1), .orderbook-table td:nth-child(1) { width: 42%; }
+.orderbook-table th:nth-child(2), .orderbook-table td:nth-child(2) { width: 22%; }
+.orderbook-table td:last-child { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }
+.orderbook-table td:last-child input { min-width: 0; width: 5rem; flex: 1 1 5rem; padding: .55rem; }
 .orderbook-table td:last-child button { white-space: nowrap; }
+.order-info { position: relative; flex: none; }
+.order-info summary { display: grid; width: 1.7rem; height: 1.7rem; place-items: center; border: 1px solid var(--ink); border-radius: 50%; cursor: pointer; font: 700 .8rem/1 Georgia, serif; list-style: none; }
+.order-info summary::-webkit-details-marker { display: none; }
+.order-info summary:hover, .order-info[open] summary { color: var(--paper); background: var(--ink); }
+.order-info__popup { position: absolute; z-index: 4; top: calc(100% + .45rem); right: 0; width: min(17rem, calc(100vw - 2rem)); padding: .7rem; border: 1px solid var(--ink); background: var(--paper); box-shadow: 3px 3px 0 var(--ink); white-space: normal; }
+.order-info__popup p { display: grid; grid-template-columns: max-content 1fr; gap: .5rem; margin: 0; padding: .25rem 0; font: .66rem/1.3 "Courier New", monospace; }
+.order-info__popup span { color: #696c62; text-transform: uppercase; }
+.order-info__popup strong { overflow: hidden; text-overflow: ellipsis; }
 .orderbook-asks tr { background: rgba(233,99,44,.09); }
 .orderbook-bids tr { background: rgba(200,241,53,.13); }
 .orderbook-asks tr[data-best="ask"] { background: rgba(233,99,44,.22); }
@@ -172,6 +182,9 @@ code { font-family: "Courier New", monospace; }
   .orderbook-columns { grid-template-columns: 1fr; }
   .orderbook-midpoint { order: 2; }
   .orderbook-side--bids { order: 3; }
+  .orderbook-table th, .orderbook-table td { padding: .55rem .4rem; }
+  .orderbook-table td:last-child input { flex-basis: 4rem; }
+  .orderbook-table td:last-child button { padding-inline: .55rem; font-size: .64rem; }
   .order-entry__heading { align-items: start; flex-direction: column; }
   .order-entry__heading .hint { text-align: left; }
   .section-heading { gap: 1rem; }

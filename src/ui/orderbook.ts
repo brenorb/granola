@@ -53,6 +53,32 @@ function priceCell(order: OrderRecord, market: ExactMarket): HTMLTableCellElemen
   return cell;
 }
 
+function infoLine(label: string, value: string, title?: string): HTMLElement {
+  const line = element("p");
+  line.append(element("span", label), element("strong", value));
+  if (title !== undefined) line.lastElementChild?.setAttribute("title", title);
+  return line;
+}
+
+function orderInfo(order: OrderRecord): HTMLDetailsElement {
+  const details = element("details");
+  details.className = "order-info";
+  details.dataset.orderInfo = "true";
+  const summary = element("summary", "i");
+  summary.setAttribute("aria-label", "Show order details");
+  summary.title = "Show order details";
+  const popup = element("div");
+  popup.className = "order-info__popup";
+  const expiry = new Date(order.state.expires_at * 1000).toISOString();
+  popup.append(
+    infoLine("Execution", order.state.execution === "all_or_none" ? "All or none" : "Partial fill"),
+    infoLine("Expires", expiry),
+    infoLine("Order", `${order.state.order_id.slice(0, 8)}…`, order.state.order_id)
+  );
+  details.append(summary, popup);
+  return details;
+}
+
 function validateTakeAmount(amount: HTMLInputElement, order: OrderRecord): void {
   amount.setCustomValidity("");
   if (!/^[1-9]\d*$/.test(amount.value)) {
@@ -102,18 +128,8 @@ function orderRow(
       `${groupedInteger(order.state.remaining_amount)} ${market.baseUnit.toUpperCase()}`
     )
   );
-  row.append(
-    element(
-      "td",
-      order.state.execution === "all_or_none" ? "All or none" : "Partial fill"
-    )
-  );
-  const expiry = element("td");
-  const time = element("time", new Date(order.state.expires_at * 1000).toISOString());
-  time.dateTime = new Date(order.state.expires_at * 1000).toISOString();
-  expiry.append(time);
-  row.append(expiry);
   const action = element("td");
+  action.className = "order-action";
   const amount = element("input");
   amount.type = "text";
   amount.inputMode = "numeric";
@@ -140,6 +156,7 @@ function orderRow(
     options.onTake?.(order, amount.value);
   });
   action.append(amount, take);
+  action.append(orderInfo(order));
   if (options.canCancel?.(order) && options.onCancel) {
     const cancel = element("button", "Cancel order");
     cancel.type = "button";
@@ -214,7 +231,7 @@ function renderSideTable(
   table.append(element("caption", label));
   const head = element("thead");
   const headers = element("tr");
-  for (const headerLabel of ["Limit price", "Remaining", "Execution", "Expires (UTC)", "Action"]) {
+  for (const headerLabel of ["Limit price", "Remaining", "Action"]) {
     const header = element("th", headerLabel);
     header.scope = "col";
     headers.append(header);
