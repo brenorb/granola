@@ -3,6 +3,7 @@ import { verifyEvent } from "nostr-tools/pure";
 import {
   createOrderState,
   fillOrder as fillOrderState,
+  releaseOrder as releaseOrderState,
   reserveOrder as reserveOrderState,
   type CreateOrderInput,
   type ExactMarket,
@@ -12,9 +13,12 @@ import {
   type ReserveOrderInput
 } from "../order/model.js";
 import {
+  parseProjectionEvent,
   parseTransitionEvent,
+  type FillTransitionEvidence,
   type NostrEvent,
-  type TransitionEvidence
+  type TransitionEvidence,
+  type TransitionRecord
 } from "../order/events.js";
 import type {
   LoadedOrderBook,
@@ -24,6 +28,12 @@ import type {
 } from "../order/service.js";
 import { PublicationQuorumError } from "../order/service.js";
 import type { OrderOutboxPort } from "../storage/order-outbox.js";
+import {
+  assertAuthenticatedOpenedTradeMessage,
+  assertVerifiedInitialReserveProposal,
+  type OpenedTradeMessage,
+  type VerifiedInitialReserveProposal
+} from "../trade/messages.js";
 
 export const TEST_MARKET: ExactMarket = {
   baseUnit: "sat",
@@ -76,8 +86,27 @@ export interface PublishReserveInput extends Omit<ReserveOrderInput, "acceptedAt
 export interface PublishFillInput extends FillOrderInput {
   address: string;
   expectedHeadId: string;
-  evidence: TransitionEvidence;
+  evidence: FillTransitionEvidence;
 }
+
+interface PublishReleaseHead {
+  address: string;
+  expectedHeadId: string;
+}
+
+export type PublishReleaseInput = PublishReleaseHead & (
+  | {
+      reservationId: string;
+      reason: "expired";
+      abortEventId?: never;
+    }
+  | {
+      reservationId: string;
+      reason: "abort";
+      proposalMessage: VerifiedInitialReserveProposal;
+      abortMessage: OpenedTradeMessage;
+    }
+);
 
 class VolatileOrderOutbox implements OrderOutboxPort {
   private readonly publications = new Map<string, StagedOrderPublication>();
@@ -150,7 +179,8 @@ export class OrderApi {
     private readonly orders: OrderServicePort,
     private readonly now: () => number = () => Math.floor(Date.now() / 1000),
     private readonly orderId: () => string = () => crypto.randomUUID(),
-    private readonly outbox: OrderOutboxPort = new VolatileOrderOutbox()
+    private readonly outbox: OrderOutboxPort = new VolatileOrderOutbox(),
+    private readonly verify: (event: NostrEvent) => boolean = (event) => verifyEvent(event)
   ) {}
 
   async getMakerIdentity(): Promise<{ publicKey: string }> {
@@ -190,12 +220,12 @@ export class OrderApi {
   private async loadMakerHead(
     address: string,
     expectedHeadId: string
-  ): Promise<{ previous: NostrEvent; state: OrderState }> {
+  ): Promise<{ previous: NostrEvent; state: OrderState; record: TransitionRecord }> {
     const previous = await this.orders.loadCurrentTransition(address, expectedHeadId);
     if (previous.id !== expectedHeadId) {
       throw new Error("Order service returned a different transition head");
     }
-    const record = parseTransitionEvent(previous, (event) => verifyEvent(event));
+    const record = parseTransitionEvent(previous, this.verify);
     if (record.address !== address) {
       throw new Error("Order service returned a transition for another address");
     }
@@ -205,7 +235,7 @@ export class OrderApi {
     if (await this.outbox.load(record.state.order_id)) {
       throw new Error("Order has a pending publication; retry it before publishing a successor");
     }
-    return { previous, state: record.state };
+    return { previous, state: record.state, record };
   }
 
   private async settle(staged: StagedOrderPublication): Promise<PublicOrderPublication> {
@@ -222,10 +252,60 @@ export class OrderApi {
     }
   }
 
+  private async validatePendingPublication(
+    staged: StagedOrderPublication
+  ): Promise<TransitionRecord> {
+    const transition = parseTransitionEvent(staged.transition, this.verify);
+    const projection = await parseProjectionEvent(staged.projection, this.verify);
+    if (
+      JSON.stringify(transition.state) !== JSON.stringify(staged.state) ||
+      JSON.stringify(projection.state) !== JSON.stringify(staged.state) ||
+      projection.address !== transition.address ||
+      projection.makerPubkey !== transition.makerPubkey ||
+      projection.headEventId !== staged.transition.id ||
+      staged.projection.created_at !== staged.transition.created_at
+    ) {
+      throw new Error("Pending publication transition and projection do not match");
+    }
+    return transition;
+  }
+
   async retryOrderPublication(orderId: string): Promise<PublicOrderPublication> {
-    const staged = await this.outbox.load(orderId);
-    if (!staged) throw new Error("No pending publication exists for this order ID");
-    return this.settle(staged);
+    const initial = await this.outbox.load(orderId);
+    if (!initial) throw new Error("No pending publication exists for this order ID");
+    const initialRecord = await this.validatePendingPublication(initial);
+    return this.serializeSuccessor(initialRecord.address, async () => {
+      const staged = await this.outbox.load(orderId);
+      if (!staged) throw new Error("No pending publication exists for this order ID");
+      if (
+        staged.transition.id !== initial.transition.id ||
+        staged.projection.id !== initial.projection.id
+      ) {
+        throw new Error("Pending publication changed while waiting to retry");
+      }
+      const record = await this.validatePendingPublication(staged);
+      if (record.revision !== "0") {
+        if (record.previous === null) {
+          throw new Error("Pending successor has no predecessor");
+        }
+        let currentMatches = false;
+        for (const expected of [record.previous, staged.transition.id]) {
+          try {
+            const current = await this.orders.loadCurrentTransition(record.address, expected);
+            if (current.id === expected) {
+              currentMatches = true;
+              break;
+            }
+          } catch {
+            // Try the other legitimate retry position before declaring it stale.
+          }
+        }
+        if (!currentMatches) {
+          throw new Error("Pending successor is stale: its predecessor is not the current head");
+        }
+      }
+      return this.settle(staged);
+    });
   }
 
   async publishOrder(input: PublishOrderInput): Promise<PublicOrderPublication> {
@@ -294,6 +374,70 @@ export class OrderApi {
         previous,
         input.evidence,
         createdAt
+      );
+      await this.outbox.save(staged);
+      return this.settle(staged);
+    });
+  }
+
+  async releaseOrder(input: PublishReleaseInput): Promise<PublicOrderPublication> {
+    return this.serializeSuccessor(input.address, async () => {
+      const { previous, state, record } = await this.loadMakerHead(
+        input.address,
+        input.expectedHeadId
+      );
+      const releasedAt = this.now();
+      let abortEventId: string | undefined;
+      if (input.reason === "abort") {
+        assertVerifiedInitialReserveProposal(input.proposalMessage);
+        assertAuthenticatedOpenedTradeMessage(input.abortMessage);
+        const reservation = state.reservation;
+        if (!reservation || record.operation !== "reserve" || record.previous === null) {
+          throw new Error("Abort release requires the authoritative reserve transition");
+        }
+        const proposal = input.proposalMessage.message;
+        const abort = input.abortMessage.message;
+        if (
+          input.proposalMessage.seal.id !== reservation.proposal_event_id ||
+          proposal.type !== "reserve_propose" ||
+          proposal.order_address !== input.address ||
+          proposal.order_head !== record.previous ||
+          proposal.reservation_id !== reservation.id ||
+          proposal.maker_order_pubkey !== record.makerPubkey
+        ) {
+          throw new Error("Reservation proposal does not match the authoritative reserve");
+        }
+        if (
+          abort.type !== "abort" ||
+          abort.order_address !== input.address ||
+          abort.order_head !== previous.id ||
+          abort.reservation_id !== reservation.id ||
+          abort.maker_order_pubkey !== record.makerPubkey ||
+          abort.author_pubkey !== proposal.author_pubkey ||
+          abort.session_id !== proposal.session_id ||
+          abort.terms_hash !== proposal.terms_hash ||
+          BigInt(abort.sequence) <= BigInt(proposal.sequence) ||
+          proposal.author_pubkey === record.makerPubkey
+        ) {
+          throw new Error("Abort message does not match the reserved taker session");
+        }
+        abortEventId = input.abortMessage.seal.id;
+      }
+      const next = releaseOrderState(state, {
+        reservationId: input.reservationId,
+        reason: input.reason,
+        releasedAt,
+        ...(abortEventId === undefined ? {} : { abortEventId })
+      });
+      const evidence: TransitionEvidence = input.reason === "expired"
+        ? { release_reason: "expired" }
+        : { release_reason: "abort", abort_event_id: abortEventId! };
+      const staged = await this.orders.stageSuccessor(
+        next,
+        "release",
+        previous,
+        evidence,
+        releasedAt
       );
       await this.outbox.save(staged);
       return this.settle(staged);

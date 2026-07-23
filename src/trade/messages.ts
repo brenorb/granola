@@ -143,6 +143,44 @@ export interface OpenedTradeMessage {
   transcriptHash: string;
 }
 
+declare const VERIFIED_INITIAL_PROPOSAL: unique symbol;
+
+export type VerifiedInitialReserveProposal = Readonly<OpenedTradeMessage> & {
+  readonly [VERIFIED_INITIAL_PROPOSAL]: true;
+};
+
+const authenticatedTradeMessages = new WeakMap<object, string>();
+const verifiedInitialProposals = new WeakSet<object>();
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export function assertAuthenticatedOpenedTradeMessage(
+  value: OpenedTradeMessage
+): void {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    authenticatedTradeMessages.get(value) !== canonicalJson(value)
+  ) {
+    throw new Error("Trade message is not an authenticated private-message artifact");
+  }
+}
+
+export function assertVerifiedInitialReserveProposal(
+  value: unknown
+): asserts value is VerifiedInitialReserveProposal {
+  if (!value || typeof value !== "object" || !verifiedInitialProposals.has(value)) {
+    throw new Error("Maker session requires a verified initial reserve proposal");
+  }
+  assertAuthenticatedOpenedTradeMessage(value as OpenedTradeMessage);
+}
+
 const HEX_32 = /^[0-9a-f]{64}$/;
 const UUID_V4_BODY = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const UUID_V4 = new RegExp(`^${UUID_V4_BODY}$`);
@@ -577,13 +615,15 @@ async function unwrapTradeMessageInternal(
     }
   }
 
-  return {
+  const opened: OpenedTradeMessage = {
     wrapper: outer,
     seal,
     rumor,
     message,
     transcriptHash: await transcriptHash(message.previous_transcript_hash, rumor.id)
   };
+  authenticatedTradeMessages.set(opened, canonicalJson(opened));
+  return opened;
 }
 
 export async function unwrapTradeMessage(
@@ -602,7 +642,7 @@ export async function unwrapInitialReserveProposal(
   outerValue: SignedNostrEvent,
   recipientSecretKey: Uint8Array,
   options: InitialReserveProposalOptions
-): Promise<OpenedTradeMessage> {
+): Promise<VerifiedInitialReserveProposal> {
   const opened = await unwrapTradeMessageInternal(outerValue, recipientSecretKey, {
     ...options,
     expectedType: "reserve_propose",
@@ -616,7 +656,9 @@ export async function unwrapInitialReserveProposal(
   ) {
     throw new Error("Message is not an initial reservation proposal");
   }
-  return opened;
+  deepFreeze(opened);
+  verifiedInitialProposals.add(opened);
+  return opened as VerifiedInitialReserveProposal;
 }
 
 /**

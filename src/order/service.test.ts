@@ -6,7 +6,13 @@ import {
   createStateTransitionTemplate,
   createTransitionTemplate
 } from "./events.js";
-import { createOrderState, fillOrder, reserveOrder, type ExactMarket } from "./model.js";
+import {
+  createOrderState,
+  fillOrder,
+  releaseOrder,
+  reserveOrder,
+  type ExactMarket
+} from "./model.js";
 import {
   NostrOrderService,
   PublicationQuorumError,
@@ -130,6 +136,59 @@ describe("Nostr order service", () => {
     ]));
     expect(JSON.parse(fillPublication.transition.content).evidence).toEqual(evidence);
     expect(JSON.parse(fillPublication.projection.content).head).toBe(fillPublication.transition.id);
+  });
+
+  it("publishes a release successor and rejects premature expiry evidence", async () => {
+    const signer = new FakeSigner();
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(
+      signer,
+      relay,
+      () => `operation-${signer.signed.length}`,
+      2,
+      () => true
+    );
+    const created = await service.publish(order());
+    const reservePublication = await service.publishStaged(
+      await service.stageSuccessor(reserved(), "reserve", created.transition)
+    );
+    const abortEventId = "9".repeat(64);
+    const released = releaseOrder(reserved(), {
+      reservationId: reserved().reservation!.id,
+      reason: "abort",
+      releasedAt: 1_700_000_200,
+      abortEventId
+    });
+    const publication = await service.publishStaged(
+      await service.stageSuccessor(
+        released,
+        "release",
+        reservePublication.transition,
+        { release_reason: "abort", abort_event_id: abortEventId },
+        1_700_000_200
+      )
+    );
+    relay.events = [publication.projection];
+
+    expect(JSON.parse(publication.transition.content).evidence).toEqual({
+      release_reason: "abort",
+      abort_event_id: abortEventId
+    });
+    expect((await service.loadBook(MARKET, 1_700_000_300)).book.asks[0]?.state)
+      .toMatchObject({ status: "open", reservation: null, reserved_amount: "0" });
+
+    const expired = releaseOrder(reserved(), {
+      reservationId: reserved().reservation!.id,
+      reason: "expired",
+      releasedAt: 1_700_001_900
+    });
+    await expect(service.stageSuccessor(
+      expired,
+      "release",
+      reservePublication.transition,
+      { release_reason: "expired" },
+      1_700_001_899
+    )).rejects.toThrow("not expired");
   });
 
   it("loads an exact current maker head and rejects it after a successor exists", async () => {

@@ -16,6 +16,7 @@ import {
   buildOrderBook,
   fillOrder,
   marketId,
+  releaseOrder,
   reserveOrder,
   type ExactMarket,
   type OrderBook,
@@ -23,7 +24,7 @@ import {
   type OrderState
 } from "./model.js";
 
-export type SuccessorOperation = "reserve" | "fill";
+export type SuccessorOperation = "reserve" | "release" | "fill";
 
 export interface OrderSigner {
   publicKey(): Promise<string>;
@@ -91,7 +92,9 @@ function sameState(left: OrderState, right: OrderState): boolean {
 function assertSuccessorState(
   previous: TransitionRecord,
   operation: SuccessorOperation,
-  state: OrderState
+  state: OrderState,
+  evidence?: TransitionEvidence,
+  createdAt?: number
 ): void {
   if (state.order_id !== previous.state.order_id) throw new Error("Successor order ID changed");
   if (BigInt(state.revision) !== BigInt(previous.revision) + 1n) {
@@ -109,12 +112,27 @@ function assertSuccessorState(
       proposalEventId: reservation.proposal_event_id,
       takerCommitment: reservation.taker_commitment
     });
-  } else {
+  } else if (operation === "fill") {
     const reservation = previous.state.reservation;
     if (!reservation) throw new Error("Fill predecessor has no reservation");
     expected = fillOrder(previous.state, {
       reservationId: reservation.id,
       amount: reservation.amount
+    });
+  } else {
+    const reservation = previous.state.reservation;
+    if (!reservation) throw new Error("Release predecessor has no reservation");
+    if (!evidence || !("release_reason" in evidence)) {
+      throw new Error("Release transition requires release evidence");
+    }
+    if (createdAt === undefined) throw new Error("Release transition requires a release timestamp");
+    expected = releaseOrder(previous.state, {
+      reservationId: reservation.id,
+      reason: evidence.release_reason,
+      releasedAt: createdAt,
+      ...(evidence.abort_event_id === undefined
+        ? {}
+        : { abortEventId: evidence.abort_event_id })
     });
   }
   if (!sameState(expected, state)) throw new Error(`Invalid ${operation} state transition`);
@@ -132,10 +150,20 @@ function assertLinearStep(
     throw new Error("Transition authority changed");
   }
   if (current.event.created_at < previous.event.created_at) throw new Error("Transition timestamp regressed");
-  if (current.record.operation !== "reserve" && current.record.operation !== "fill") {
+  if (
+    current.record.operation !== "reserve" &&
+    current.record.operation !== "release" &&
+    current.record.operation !== "fill"
+  ) {
     throw new Error("Unsupported successor transition operation");
   }
-  assertSuccessorState(previous.record, current.record.operation, current.record.state);
+  assertSuccessorState(
+    previous.record,
+    current.record.operation,
+    current.record.state,
+    current.record.evidence,
+    current.event.created_at
+  );
 }
 
 export class NostrOrderService {
@@ -181,7 +209,7 @@ export class NostrOrderService {
     const maker = await this.signer.publicKey();
     const previousRecord = parseTransitionEvent(previous, this.verify);
     if (previousRecord.makerPubkey !== maker) throw new Error("Previous transition belongs to another maker");
-    assertSuccessorState(previousRecord, operation, state);
+    assertSuccessorState(previousRecord, operation, state, evidence, createdAt);
     const transition = await this.signer.sign(
       createStateTransitionTemplate(
         state,

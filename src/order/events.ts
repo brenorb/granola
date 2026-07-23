@@ -33,11 +33,18 @@ interface CreateTransitionContent {
 
 export type OrderOperation = "create" | "reserve" | "release" | "fill" | "cancel" | "replace";
 
-export interface TransitionEvidence {
+export interface FillTransitionEvidence {
   settlement_hash: string;
   base_token_commitment: string;
   quote_token_commitment: string;
 }
+
+export interface ReleaseTransitionEvidence {
+  release_reason: "expired" | "abort";
+  abort_event_id?: string;
+}
+
+export type TransitionEvidence = FillTransitionEvidence | ReleaseTransitionEvidence;
 
 interface StateTransitionContent {
   schema: "granola/order-transition/v1";
@@ -73,6 +80,76 @@ function orderAddress(pubkey: string, orderId: string): string {
 
 function requireHex(value: string, pattern: RegExp, label: string): void {
   if (!pattern.test(value)) throw new Error(`${label} must be lowercase hex`);
+}
+
+function requireCanonicalKeys(
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[] = []
+): void {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  if (
+    required.some((key) => !(key in value)) ||
+    keys.some((key) => !allowed.has(key))
+  ) {
+    throw new Error("Transition evidence must be canonical");
+  }
+}
+
+function canonicalFillEvidence(value: unknown): FillTransitionEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Fill transition requires settlement commitments");
+  }
+  const input = value as Record<string, unknown>;
+  requireCanonicalKeys(input, [
+    "settlement_hash",
+    "base_token_commitment",
+    "quote_token_commitment"
+  ]);
+  const settlementHash = input.settlement_hash;
+  const baseCommitment = input.base_token_commitment;
+  const quoteCommitment = input.quote_token_commitment;
+  if (
+    typeof settlementHash !== "string" ||
+    typeof baseCommitment !== "string" ||
+    typeof quoteCommitment !== "string"
+  ) {
+    throw new Error("Fill transition requires settlement commitments");
+  }
+  requireHex(settlementHash, HEX_32, "Settlement hash");
+  requireHex(baseCommitment, HEX_32, "Base token commitment");
+  requireHex(quoteCommitment, HEX_32, "Quote token commitment");
+  return {
+    settlement_hash: settlementHash,
+    base_token_commitment: baseCommitment,
+    quote_token_commitment: quoteCommitment
+  };
+}
+
+function canonicalReleaseEvidence(value: unknown): ReleaseTransitionEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Release transition requires release evidence");
+  }
+  const input = value as Record<string, unknown>;
+  requireCanonicalKeys(input, ["release_reason"], ["abort_event_id"]);
+  if (input.release_reason === "expired") {
+    if (input.abort_event_id !== undefined) {
+      throw new Error("Expired release cannot reference an abort event");
+    }
+    return { release_reason: "expired" };
+  }
+  if (input.release_reason === "abort") {
+    if (typeof input.abort_event_id !== "string") {
+      throw new Error("Abort release requires a signed abort event ID");
+    }
+    requireHex(input.abort_event_id, HEX_32, "Abort event ID");
+    return {
+      release_reason: "abort",
+      abort_event_id: input.abort_event_id
+    };
+  }
+  throw new Error("Release reason is invalid");
 }
 
 function canonicalJson(value: unknown): string {
@@ -138,17 +215,25 @@ export function createStateTransitionTemplate(
   if (operation === "fill" && state.status !== "filled" && state.status !== "partially_filled") {
     throw new Error("Fill transition requires filled or partially-filled state");
   }
+  if (operation === "release" && state.status !== "open" && state.status !== "partially_filled") {
+    throw new Error("Release transition requires open or partially-filled state");
+  }
+  let normalizedEvidence: TransitionEvidence | undefined;
   if (operation === "fill") {
-    if (!evidence) throw new Error("Fill transition requires settlement commitments");
-    for (const value of Object.values(evidence)) requireHex(value, HEX_32, "Settlement commitment");
+    normalizedEvidence = canonicalFillEvidence(evidence);
+  } else if (operation === "release") {
+    normalizedEvidence = canonicalReleaseEvidence(evidence);
   } else if (evidence) {
-    throw new Error("Only fill transitions carry settlement commitments");
+    throw new Error("Transition operation cannot carry evidence");
   }
   const timestamp = createdAt ?? (
     operation === "reserve" && state.reservation
       ? state.reservation.accepted_at
       : previous.created_at + 1
   );
+  if (operation === "release" && createdAt === undefined) {
+    throw new Error("Release transition requires an explicit release timestamp");
+  }
   if (!Number.isSafeInteger(timestamp) || timestamp < previous.created_at) {
     throw new Error("Transition timestamp is invalid");
   }
@@ -159,7 +244,7 @@ export function createStateTransitionTemplate(
     revision: state.revision,
     previous: previous.id,
     state,
-    ...(evidence ? { evidence } : {})
+    ...(normalizedEvidence ? { evidence: normalizedEvidence } : {})
   };
   return {
     kind: 78,
@@ -376,11 +461,11 @@ export function parseTransitionEvent(
   if (!isCreate && state.revision === "0") throw new Error("Successor transition requires positive revision");
   let evidence: TransitionEvidence | undefined;
   if (input.operation === "fill") {
-    if (!input.evidence) throw new Error("Fill transition requires settlement commitments");
-    evidence = input.evidence;
-    for (const value of Object.values(evidence)) requireHex(value, HEX_32, "Settlement commitment");
+    evidence = canonicalFillEvidence(input.evidence);
+  } else if (input.operation === "release") {
+    evidence = canonicalReleaseEvidence(input.evidence);
   } else if (input.evidence !== undefined) {
-    throw new Error("Only fill transitions carry settlement commitments");
+    throw new Error("Transition operation cannot carry evidence");
   }
   const expectedContent: StateTransitionContent = {
     schema: "granola/order-transition/v1",

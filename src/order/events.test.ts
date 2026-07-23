@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createOrderState, fillOrder, reserveOrder } from "./model.js";
+import { createOrderState, fillOrder, releaseOrder, reserveOrder } from "./model.js";
 import {
   createProjectionTemplate,
   createStateTransitionTemplate,
@@ -224,5 +224,76 @@ describe("Granola Nostr order events", () => {
         quote_token_commitment: "5".repeat(64)
       }
     });
+  });
+
+  it("requires canonical expiry or signed-abort evidence on release transitions", () => {
+    const initial = askState();
+    const create: NostrEvent = {
+      ...createTransitionTemplate(initial, maker, "create-op"),
+      id: transitionId,
+      pubkey: maker,
+      sig: signature
+    };
+    const reserved = reserveOrder(initial, {
+      reservationId: "99999999-9999-4999-8999-999999999999",
+      amount: "2000",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_900,
+      proposalEventId: "1".repeat(64),
+      takerCommitment: "2".repeat(64)
+    });
+    const reserve: NostrEvent = {
+      ...createStateTransitionTemplate(reserved, maker, "reserve-op", "reserve", create),
+      id: "e".repeat(64),
+      pubkey: maker,
+      sig: signature
+    };
+    const released = releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "abort",
+      releasedAt: 1_700_000_200,
+      abortEventId: "7".repeat(64)
+    });
+    const template = createStateTransitionTemplate(
+      released,
+      maker,
+      "release-op",
+      "release",
+      reserve,
+      { release_reason: "abort", abort_event_id: "7".repeat(64) },
+      1_700_000_200
+    );
+    const event = {
+      ...template,
+      id: "8".repeat(64),
+      pubkey: maker,
+      sig: signature
+    };
+
+    expect(parseTransitionEvent(event, () => true)).toMatchObject({
+      operation: "release",
+      state: { status: "open", reservation: null, reserved_amount: "0" },
+      evidence: { release_reason: "abort", abort_event_id: "7".repeat(64) }
+    });
+    expect(() => createStateTransitionTemplate(
+      released,
+      maker,
+      "release-op",
+      "release",
+      reserve,
+      { release_reason: "expired" }
+    )).toThrow("explicit release timestamp");
+    const missingAbort = JSON.parse(event.content);
+    delete missingAbort.evidence.abort_event_id;
+    expect(() => parseTransitionEvent({
+      ...event,
+      content: JSON.stringify(missingAbort)
+    }, () => true)).toThrow("signed abort");
+    const extraEvidence = JSON.parse(event.content);
+    extraEvidence.evidence.unrecognized = "f".repeat(64);
+    expect(() => parseTransitionEvent({
+      ...event,
+      content: JSON.stringify(extraEvidence)
+    }, () => true)).toThrow("canonical");
   });
 });
