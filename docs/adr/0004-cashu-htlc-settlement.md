@@ -48,11 +48,10 @@ For the testnet demonstration, after confirming each participating mint clock is
 
 Receiver spending remains possible after a NUT-14 locktime, so expiry creates a receiver/refunder race rather than revoking receiver authority. Implementations stop initiating claims at the cutoffs and enter recovery mode. They do not treat equality with a locktime as safe.
 
-New sessions use this 4/7-day profile. Persisted prototype sessions using the
-earlier 10/20-minute profile remain readable and resumable; peers cannot mix the
-two profiles within a session because every accepted deadline is signed,
-validated as a complete profile, and persisted before either Cashu leg is
-created.
+New sessions use this 4/7-day profile. Persisted sessions using the earlier
+10/20-minute profile remain readable and resumable; peers cannot mix the two
+profiles within a session because every accepted deadline is signed, validated
+as a complete profile, and persisted before either Cashu leg is created.
 
 ## Exact validation before acknowledging a lock
 

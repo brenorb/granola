@@ -1,7 +1,5 @@
 # Granola agent notes
 
-- Historical event kind `8338` is context, not a standard. Protocol choices
-  require an ADR and executable vectors.
 - Settlements may use one mint or two. A cross-mint test requires distinct mint
   URLs and keysets. Every participating mint must advertise and correctly
   implement NUT-07 and NUT-14, including retrieval of the spent proof's

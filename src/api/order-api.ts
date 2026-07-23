@@ -7,7 +7,6 @@ import {
   fillOrder as fillOrderState,
   releaseOrder as releaseOrderState,
   reserveOrder as reserveOrderState,
-  type CreateOrderInput,
   type ExactMarket,
   type FillOrderInput,
   type OrderState,
@@ -137,26 +136,6 @@ function publicProgress(entry: OrderOutboxEntry): OrderPublicationProgress {
   return { ...publicPublication(entry.publication), status: entry.status };
 }
 
-function orderAssets(
-  side: PublishOrderInput["side"]
-): Pick<CreateOrderInput, "offered" | "requested"> {
-  return side === "sell"
-    ? {
-        offered: { unit: TEST_MARKET.baseUnit, mint: TEST_MARKET.baseMint },
-        requested: {
-          unit: TEST_MARKET.quoteUnit,
-          acceptableMints: [TEST_MARKET.quoteMint]
-        }
-      }
-    : {
-        offered: { unit: TEST_MARKET.quoteUnit, mint: TEST_MARKET.quoteMint },
-        requested: {
-          unit: TEST_MARKET.baseUnit,
-          acceptableMints: [TEST_MARKET.baseMint]
-        }
-      };
-}
-
 function bindingCompatibility(
   operation: OrderPublicationIntent["operation"],
   input: CurrentProjectionBinding,
@@ -180,7 +159,8 @@ export class OrderApi {
     private readonly orderId: () => string = () => crypto.randomUUID(),
     private readonly outbox: OrderOutboxPort,
     private readonly verify: (event: NostrEvent) => boolean =
-      (event) => verifyEvent(event)
+      (event) => verifyEvent(event),
+    private readonly market: ExactMarket = TEST_MARKET
   ) {
     if (!outbox) throw new Error("Order API requires a durable projection outbox");
   }
@@ -190,7 +170,7 @@ export class OrderApi {
   }
 
   async getOrderBook(): Promise<LoadedOrderBook> {
-    return this.orders.loadBook(TEST_MARKET, this.now());
+    return this.orders.loadBook(this.market, this.now());
   }
 
   async getPendingOrderPublications(): Promise<PublicOrderPublication[]> {
@@ -339,9 +319,23 @@ export class OrderApi {
       createdAt,
       ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
       side: input.side,
-      baseUnit: TEST_MARKET.baseUnit,
-      quoteUnit: TEST_MARKET.quoteUnit,
-      ...orderAssets(input.side),
+      baseUnit: this.market.baseUnit,
+      quoteUnit: this.market.quoteUnit,
+      ...(input.side === "sell"
+        ? {
+            offered: { unit: this.market.baseUnit, mint: this.market.baseMint },
+            requested: {
+              unit: this.market.quoteUnit,
+              acceptableMints: [this.market.quoteMint]
+            }
+          }
+        : {
+            offered: { unit: this.market.quoteUnit, mint: this.market.quoteMint },
+            requested: {
+              unit: this.market.baseUnit,
+              acceptableMints: [this.market.baseMint]
+            }
+          }),
       amount: input.amount,
       priceCentsPerBtc: input.priceCentsPerBtc,
       ...(input.execution === undefined ? {} : { execution: input.execution }),

@@ -53,7 +53,8 @@ New settlement plans use a 4-day quote-leg lock, a 7-day base-leg lock, and an
 8-day reservation recovery horizon. On `reserve_accept`, the taker persists the
 maker's exact signed plan before preparing any Cashu effect, so small
 independent clock-sampling differences cannot produce mismatched HTLC terms.
-Legacy prototype sessions retain their originally signed shorter profile.
+Persisted sessions using the earlier signed shorter profile retain their
+original deadlines and remain resumable.
 
 ## Happy-path choreography
 

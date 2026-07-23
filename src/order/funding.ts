@@ -1,14 +1,26 @@
 import type { WalletView } from "../core/wallet.js";
 import { formatUnitAmount } from "../ui/format.js";
-import { quoteAmountForSettlement, type OrderSide } from "./model.js";
+import {
+  quoteAmountForSettlement,
+  type ExactMarket,
+  type OrderSide
+} from "./model.js";
 
-const OFFERED_ASSETS = {
-  sell: { mintUrl: "https://testnut.cashu.space", unit: "sat" },
-  buy: { mintUrl: "https://nofee.testnut.cashu.space", unit: "usd" }
-} as const;
+function offeredAsset(market: ExactMarket, side: OrderSide): {
+  mintUrl: string;
+  unit: string;
+} {
+  return side === "sell"
+    ? { mintUrl: market.baseMint, unit: market.baseUnit }
+    : { mintUrl: market.quoteMint, unit: market.quoteUnit };
+}
 
-export function availableOrderBalance(wallet: WalletView, side: OrderSide): string {
-  const asset = OFFERED_ASSETS[side];
+export function availableOrderBalance(
+  wallet: WalletView,
+  side: OrderSide,
+  market: ExactMarket
+): string {
+  const asset = offeredAsset(market, side);
   return wallet.pockets
     .filter((candidate) =>
       candidate.mintUrl === asset.mintUrl && candidate.unit === asset.unit
@@ -26,15 +38,16 @@ export function assertOrderFunding(
   wallet: WalletView,
   side: OrderSide,
   amount: string,
-  priceCentsPerBtc: string
+  priceCentsPerBtc: string,
+  market: ExactMarket
 ): void {
   if (!/^[1-9]\d*$/.test(amount)) return;
-  const asset = OFFERED_ASSETS[side];
+  const asset = offeredAsset(market, side);
   const baseAmount = BigInt(amount);
   const requested = side === "sell"
     ? baseAmount
     : BigInt(quoteAmountForSettlement(amount, priceCentsPerBtc));
-  const available = BigInt(availableOrderBalance(wallet, side));
+  const available = BigInt(availableOrderBalance(wallet, side, market));
   if (requested > available) {
     const otherMintBalance = wallet.pockets
       .filter((pocket) => pocket.unit === asset.unit && pocket.mintUrl !== asset.mintUrl)
