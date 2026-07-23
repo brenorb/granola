@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cashu/cashu-ts": "4.7.1"
+    "@cashu/cashu-ts": "4.7.1",
+    "nostr-tools": "2.23.3"
   },
   "devDependencies": {
     "jsdom": "29.1.1",
