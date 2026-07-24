@@ -45,12 +45,12 @@ const MESSAGE_COPY: Record<TradeMessageType, {
   meaning: string;
 }> = {
   reserve_propose: {
-    title: "Reserve proposal",
-    meaning: "The taker asks to reserve this exact order and trade amount."
+    title: "Order taken",
+    meaning: "The taker commits to this exact order, amount, and settlement identity."
   },
   reserve_accept: {
-    title: "Reservation accepted",
-    meaning: "The maker accepts the reservation and opens the private settlement session."
+    title: "Accepted · offer locked",
+    meaning: "The maker accepts and sends the verifiable HTLC containing the offered ecash."
   },
   reserve_reject: {
     title: "Reservation rejected",
@@ -69,8 +69,8 @@ const MESSAGE_COPY: Record<TradeMessageType, {
     meaning: "The counterparty verifies the base-side lock."
   },
   quote_lock: {
-    title: "Quote locked",
-    meaning: "The quote-side ecash is locked and its verifiable commitment is shared."
+    title: "Payment locked",
+    meaning: "The taker sends the matching payment HTLC; mint state now drives settlement."
   },
   quote_lock_ack: {
     title: "Quote lock verified",

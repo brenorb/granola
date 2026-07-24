@@ -35,7 +35,7 @@ const CHOREOGRAPHY_PHASES = new Set([
   "awaiting_reserve_propose", "awaiting_reserve_accept", "awaiting_session_ack",
   "awaiting_base_lock", "awaiting_base_lock_ack", "awaiting_quote_lock",
   "awaiting_quote_lock_ack", "awaiting_claim_notice", "awaiting_fill_request",
-  "awaiting_settlement_ack", "settled", "refunding", "failed"
+  "awaiting_settlement_ack", "settling", "settled", "refunding", "failed"
 ]);
 const MINT_STATES = new Set(["UNKNOWN", "UNSPENT", "PENDING", "SPENT"]);
 
@@ -1641,11 +1641,13 @@ const ORDER_STATUS_RANK: Record<
 
 const HAPPY_PATH_PHASES = new Set([
   "negotiating:reserved",
+  "negotiating:base_locked",
   "reserved:base_locked",
   "base_locked:quote_locked",
   "quote_locked:quote_claimed",
   "quote_claimed:base_claimed",
   "base_claimed:filled",
+  "quote_locked:filled",
   "reserved:released",
   "base_locked:waiting_base_refund",
   "quote_locked:waiting_quote_refund",

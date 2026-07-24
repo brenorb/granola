@@ -252,7 +252,10 @@ function tradeController(): Promise<BrowserTradeController> {
     inboxPort: runtime.inboxPort,
     inboxRelay: runtime.inboxRelay,
     makerIdentity,
-    onChange: () => { void refreshTrades(); },
+    onChange: (trade) => {
+      void refreshTrades();
+      if (trade.phase === "filled") void refresh();
+    },
     onMakerAccepted: (trade) => {
       tradeTrace(trade);
       report("Incoming order accepted automatically");
@@ -296,8 +299,11 @@ function takeOrderFromBook(
     tradeTrace(trade);
     report("Order taken; settling automatically");
     const result = await granola.runUntilSettled(trade.sessionId);
-    await Promise.all([refreshTrades(), refreshOrderBook(), refresh()]);
+    await Promise.all([refreshTrades(), refresh()]);
     report(`Swap filled after ${result.checkpoints.length} verified actions`);
+    void refreshOrderBook().catch(() => {
+      report("Swap filled; order book refresh will retry automatically");
+    });
   };
   const request = button
     ? withButtonFeedback(button, "Settling…", task)

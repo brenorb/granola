@@ -397,6 +397,7 @@ interface Harness {
   };
   orderReader: {
     loadPublishedProjection: ReturnType<typeof vi.fn>;
+    loadLatestPublishedProjection: ReturnType<typeof vi.fn>;
   };
   nostr: {
     send: ReturnType<typeof vi.fn>;
@@ -433,7 +434,8 @@ function harness(): Harness {
     pruneCommitted: vi.fn()
   };
   const orderReader = {
-    loadPublishedProjection: vi.fn()
+    loadPublishedProjection: vi.fn(),
+    loadLatestPublishedProjection: vi.fn()
   };
   const nostr = {
     createRegistration: vi.fn(),
@@ -522,15 +524,15 @@ async function takerAwaitingFillVerification(): Promise<{
   const publication = await publishedFill();
   const current = baseSession();
   current.role = "taker";
-  current.phase = "filled";
+  current.phase = "quote_locked";
   current.orderAddress =
     `30078:${publication.projection.pubkey}:granola:order:v1:${ORDER_ID}`;
   current.offeredProjectionId = "31".repeat(32);
   current.offeredProjectionRevision = "0";
   current.reserveProjectionId = "32".repeat(32);
   current.reserveProjectionRevision = "1";
-  current.fillProjectionId = publication.projection.id;
-  current.fillProjectionRevision = publication.revision;
+  current.fillProjectionId = null;
+  current.fillProjectionRevision = null;
   current.pendingOrderPublication = null;
   current.evidence.makerPubkey = publication.projection.pubkey;
   current.evidence.reserveProjectionId = current.reserveProjectionId;
@@ -542,7 +544,7 @@ async function takerAwaitingFillVerification(): Promise<{
   current.privateState.outbox = null;
   current.privateState.cashuOperation = null;
   current.privateState.htlcHash = "44".repeat(32);
-  current.privateState.transcript.choreography.phase = "settled";
+  current.privateState.transcript.choreography.phase = "settling";
   return { session: current, publication };
 }
 
@@ -911,14 +913,14 @@ describe("GranolaCoordinatorEffects", () => {
     const { effects, orderReader } = harness();
     const { session, publication } = await takerAwaitingFillVerification();
 
-    orderReader.loadPublishedProjection.mockRejectedValueOnce(
+    orderReader.loadLatestPublishedProjection.mockRejectedValueOnce(
       new Error("fill is absent from relays")
     );
     await expect(effects.performExternal(
       externalInput({ kind: "verify_order_fill" }, session)
     )).rejects.toThrow(/absent/i);
 
-    orderReader.loadPublishedProjection.mockResolvedValueOnce({
+    orderReader.loadLatestPublishedProjection.mockResolvedValueOnce({
       ...publication,
       eventId: "ff".repeat(32)
     });
@@ -926,7 +928,7 @@ describe("GranolaCoordinatorEffects", () => {
       externalInput({ kind: "verify_order_fill" }, session)
     )).rejects.toThrow(/projection|fill/i);
 
-    orderReader.loadPublishedProjection.mockResolvedValueOnce({
+    orderReader.loadLatestPublishedProjection.mockResolvedValueOnce({
       ...publication,
       projection: {
         ...publication.projection,
@@ -940,17 +942,17 @@ describe("GranolaCoordinatorEffects", () => {
       externalInput({ kind: "verify_order_fill" }, session)
     )).rejects.toThrow();
 
-    orderReader.loadPublishedProjection.mockResolvedValueOnce(publication);
+    orderReader.loadLatestPublishedProjection.mockResolvedValueOnce(publication);
     const verified = await effects.performExternal(
       externalInput({ kind: "verify_order_fill" }, session)
     );
 
-    expect(orderReader.loadPublishedProjection).toHaveBeenLastCalledWith(
-      session.orderAddress,
-      session.fillProjectionId,
-      session.fillProjectionRevision
+    expect(orderReader.loadLatestPublishedProjection).toHaveBeenLastCalledWith(
+      session.orderAddress
     );
-    expect(verified.evidence.fillProjectionId).toBe(session.fillProjectionId);
+    expect(verified.evidence.fillProjectionId).toBe(publication.eventId);
+    expect(verified.fillProjectionId).toBe(publication.eventId);
+    expect(verified.privateState.transcript.choreography.phase).toBe("settled");
     expect(verified.revision).toBe(session.revision + 1);
     });
   });

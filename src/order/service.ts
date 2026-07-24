@@ -339,6 +339,19 @@ export class NostrOrderService {
     };
   }
 
+  async loadLatestPublishedProjection(
+    address: string
+  ): Promise<PublishedOrderProjection> {
+    const current = await this.currentProjection(address);
+    if (!current) throw new Error("Published order projection is unavailable");
+    return {
+      eventId: current.event.id,
+      revision: current.record.state.revision,
+      projection: structuredClone(current.event),
+      record: structuredClone(current.record)
+    };
+  }
+
   async loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook> {
     const selectedMarket = await marketId(market);
     const events = await this.relays.queryProjections(selectedMarket, 0);

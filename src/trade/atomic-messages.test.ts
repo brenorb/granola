@@ -86,7 +86,21 @@ function body<T extends AtomicSwapMessageType>(
       maker_claim_cutoff: 1_800_000_480,
       long_locktime: 1_800_001_200,
       taker_claim_cutoff: 1_800_001_080,
-      reservation_expires_at: 1_800_001_800
+      reservation_expires_at: 1_800_001_800,
+      base_lock: {
+        schema: "granola/atomic-swap-body/v1",
+        cashu_token: baseToken,
+        token_commitment: baseTokenCommitment,
+        validation_commitment: baseValidationCommitment,
+        settlement_hash: settlementHash,
+        mint: terms.base_mint,
+        unit: terms.base_unit,
+        keyset: terms.base_keyset,
+        amount: terms.base_amount,
+        receiver_cashu_pubkey: takerCashu,
+        refund_cashu_pubkey: makerRefund,
+        locktime: 1_800_001_200
+      }
     },
     session_ack: {
       schema: "granola/atomic-swap-body/v1",
@@ -249,26 +263,19 @@ async function message<T extends AtomicSwapMessageType>(
 }
 
 describe("atomic swap message bodies", () => {
-  it("accepts the exact ten-message happy-path choreography", async () => {
+  it("accepts the exact three-message happy-path choreography", async () => {
     let state = initialAtomicSwapChoreography(makerOrder);
     for (const [index, type] of [
       "reserve_propose",
       "reserve_accept",
-      "session_ack",
-      "base_lock",
-      "base_lock_ack",
-      "quote_lock",
-      "quote_lock_ack",
-      "claim_notice",
-      "fill_request",
-      "settlement_ack"
+      "quote_lock"
     ].entries()) {
       state = await advanceAtomicSwapChoreography(
         state,
         await message(type as AtomicSwapMessageType, index)
       );
     }
-    expect(state.phase).toBe("settled");
+    expect(state.phase).toBe("settling");
     expect(state.participants).toEqual({
       makerOrderPubkey: makerOrder,
       makerSessionPubkey: makerSession,
@@ -336,24 +343,37 @@ describe("atomic swap message bodies", () => {
   it("binds lock data to the accepted participants, terms, and deadlines", async () => {
     let state = initialAtomicSwapChoreography(makerOrder);
     state = await advanceAtomicSwapChoreography(state, await message("reserve_propose", 0));
-    state = await advanceAtomicSwapChoreography(state, await message("reserve_accept", 1));
-    state = await advanceAtomicSwapChoreography(state, await message("session_ack", 2));
 
     await expect(advanceAtomicSwapChoreography(
       state,
-      await message("base_lock", 3, {}, { receiver_cashu_pubkey: makerCashu })
+      await message("reserve_accept", 1, {}, {
+        base_lock: {
+          ...body("base_lock"),
+          receiver_cashu_pubkey: makerCashu
+        }
+      })
     )).rejects.toThrow(/receiver/i);
     await expect(advanceAtomicSwapChoreography(
       state,
-      await message("base_lock", 3, {}, { mint: terms.quote_mint })
+      await message("reserve_accept", 1, {}, {
+        base_lock: {
+          ...body("base_lock"),
+          mint: terms.quote_mint
+        }
+      })
     )).rejects.toThrow(/base mint/i);
     await expect(advanceAtomicSwapChoreography(
       state,
-      await message("base_lock", 3, {}, { locktime: 1_800_000_600 })
+      await message("reserve_accept", 1, {}, {
+        base_lock: {
+          ...body("base_lock"),
+          locktime: 1_800_000_600
+        }
+      })
     )).rejects.toThrow(/base locktime/i);
   });
 
-  it("rejects role confusion, reordered phases, changed commitments, and false acknowledgements", async () => {
+  it("rejects role confusion, reordered phases, and changed payment commitments", async () => {
     let state = initialAtomicSwapChoreography(makerOrder);
     await expect(advanceAtomicSwapChoreography(
       state,
@@ -369,19 +389,10 @@ describe("atomic swap message bodies", () => {
     state = await advanceAtomicSwapChoreography(state, await message("reserve_accept", 1));
     await expect(advanceAtomicSwapChoreography(
       state,
-      await message("session_ack", 2, {}, {
-        reserve_accept_message_id: ids[0]
+      await message("quote_lock", 2, {}, {
+        receiver_cashu_pubkey: takerCashu
       })
-    )).rejects.toThrow(/acceptance message/i);
-
-    state = await advanceAtomicSwapChoreography(state, await message("session_ack", 2));
-    state = await advanceAtomicSwapChoreography(state, await message("base_lock", 3));
-    await expect(advanceAtomicSwapChoreography(
-      state,
-      await message("base_lock_ack", 4, {}, {
-        token_commitment: quoteTokenCommitment
-      })
-    )).rejects.toThrow(/base token commitment/i);
+    )).rejects.toThrow(/receiver/i);
   });
 
   it("permits a bound refund only after a leg is locked and makes error terminal", async () => {
@@ -393,9 +404,7 @@ describe("atomic swap message bodies", () => {
 
     let state = await advanceAtomicSwapChoreography(start, await message("reserve_propose", 0));
     state = await advanceAtomicSwapChoreography(state, await message("reserve_accept", 1));
-    state = await advanceAtomicSwapChoreography(state, await message("session_ack", 2));
-    state = await advanceAtomicSwapChoreography(state, await message("base_lock", 3));
-    const refund = await message("refund", 4, {
+    const refund = await message("refund", 2, {
       author_pubkey: makerSession,
       recipient_pubkey: takerSession,
       sent_at: 1_800_001_262
@@ -404,15 +413,15 @@ describe("atomic swap message bodies", () => {
 
     const failed = await advanceAtomicSwapChoreography(
       state,
-      await message("error", 4, {
+      await message("error", 2, {
         author_pubkey: takerSession,
         recipient_pubkey: makerSession
-      }, { at_phase: "base_locked" })
+      }, { at_phase: "base_locked", failed_message_id: ids[1] })
     );
     expect(failed.phase).toBe("failed");
     await expect(advanceAtomicSwapChoreography(
       failed,
-      await message("base_lock_ack", 5)
+      await message("quote_lock", 3)
     )).rejects.toThrow(/terminal/i);
   });
 
@@ -420,15 +429,13 @@ describe("atomic swap message bodies", () => {
     let state = initialAtomicSwapChoreography(makerOrder);
     state = await advanceAtomicSwapChoreography(state, await message("reserve_propose", 0));
     state = await advanceAtomicSwapChoreography(state, await message("reserve_accept", 1));
-    state = await advanceAtomicSwapChoreography(state, await message("session_ack", 2));
-    state = await advanceAtomicSwapChoreography(state, await message("base_lock", 3));
 
     await expect(advanceAtomicSwapChoreography(
       state,
-      await message("error", 4, {
+      await message("error", 2, {
         author_pubkey: makerSession,
         recipient_pubkey: makerSession
-      }, { at_phase: "base_locked" })
+      }, { at_phase: "base_locked", failed_message_id: ids[1] })
     )).rejects.toThrow(/counterparties/i);
     await expect(validateAtomicSwapMessage(
       await message("claim_notice", 7, {}, { claimed_at: 1_800_000_008 })
@@ -443,20 +450,16 @@ describe("atomic swap message bodies", () => {
     const buyTerms: GranolaTradeTerms = { ...terms, maker_side: "buy" };
     const buyHash = await termsHash(buyTerms);
     const buyBody: Partial<Record<AtomicSwapMessageType, Record<string, unknown>>> = {
-      base_lock: {
-        cashu_token: quoteToken,
-        token_commitment: quoteTokenCommitment,
-        mint: terms.quote_mint,
-        unit: terms.quote_unit,
-        keyset: terms.quote_keyset,
-        amount: terms.quote_amount,
-        receiver_cashu_pubkey: takerCashu,
-        refund_cashu_pubkey: makerRefund,
-        locktime: 1_800_001_200
-      },
-      base_lock_ack: {
-        token_commitment: quoteTokenCommitment,
-        validation_commitment: baseValidationCommitment
+      reserve_accept: {
+        base_lock: {
+          ...body("base_lock"),
+          cashu_token: quoteToken,
+          token_commitment: quoteTokenCommitment,
+          mint: terms.quote_mint,
+          unit: terms.quote_unit,
+          keyset: terms.quote_keyset,
+          amount: terms.quote_amount
+        }
       },
       quote_lock: {
         cashu_token: baseToken,
@@ -468,26 +471,11 @@ describe("atomic swap message bodies", () => {
         receiver_cashu_pubkey: makerCashu,
         refund_cashu_pubkey: takerRefund,
         locktime: 1_800_000_600
-      },
-      quote_lock_ack: {
-        token_commitment: baseTokenCommitment,
-        validation_commitment: quoteValidationCommitment
-      },
-      claim_notice: { quote_token_commitment: baseTokenCommitment },
-      fill_request: {
-        base_token_commitment: quoteTokenCommitment,
-        quote_token_commitment: baseTokenCommitment
-      },
-      settlement_ack: {
-        base_token_commitment: quoteTokenCommitment,
-        quote_token_commitment: baseTokenCommitment
       }
     };
     let state = initialAtomicSwapChoreography(makerOrder);
     for (const [index, type] of [
-      "reserve_propose", "reserve_accept", "session_ack", "base_lock",
-      "base_lock_ack", "quote_lock", "quote_lock_ack", "claim_notice",
-      "fill_request", "settlement_ack"
+      "reserve_propose", "reserve_accept", "quote_lock"
     ].entries()) {
       const messageOverrides: Partial<GranolaTradeMessage> = {
         terms_hash: buyHash,
@@ -505,5 +493,5 @@ describe("atomic swap message bodies", () => {
         )
       );
     }
-    expect(state.phase).toBe("settled");
+    expect(state.phase).toBe("settling");
   });

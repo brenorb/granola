@@ -164,9 +164,9 @@ describe("trade session presentation", () => {
     trigger?.click();
 
     expect(dialog?.hasAttribute("open")).toBe(true);
-    expect(dialog?.textContent).toContain("Reserve proposal");
+    expect(dialog?.textContent).toContain("Order taken");
     expect(dialog?.textContent).toContain("Received by you");
-    expect(dialog?.textContent).toContain("Reservation accepted");
+    expect(dialog?.textContent).toContain("Accepted · offer locked");
     expect(dialog?.textContent).toContain("Sent by you");
     expect(dialog?.textContent).toContain(nip19.npubEncode(local));
     expect(dialog?.textContent).toContain("Spendable tokens");

@@ -436,8 +436,12 @@ describe("atomic swap coordinator action planning", () => {
     reserve.reserveProjectionId = "44".repeat(32);
     reserve.evidence.reserveProjectionId = reserve.reserveProjectionId;
     expect(nextCoordinatorAction(reserve, 1_800_000_100).kind)
-      .toBe("enter_recovery");
+      .toBe("prepare_base_lock");
     setCommittedPublication(reserve, "reserve", reserve.reserveProjectionId);
+    expect(nextCoordinatorAction(reserve, 1_800_000_100).kind)
+      .toBe("clear_order_publication");
+    reserve.pendingOrderPublication = null;
+    markLockReady(reserve, "base");
     expect(nextCoordinatorAction(reserve, 1_800_000_100).kind)
       .toBe("stage_reserve_accept");
 
@@ -459,7 +463,8 @@ describe("atomic swap coordinator action planning", () => {
   });
 
   it("plans claim, observation, fill, and settlement only from mint evidence", () => {
-    const makerClaim = session("maker", "awaiting_claim_notice");
+    const makerClaim = session("maker", "settling");
+    makerClaim.privateState.legs.base.token = "cashuBbase";
     markLockReady(makerClaim, "quote");
     expect(nextCoordinatorAction(makerClaim, 1_800_000_100).kind)
       .toBe("prepare_quote_claim");
@@ -468,9 +473,9 @@ describe("atomic swap coordinator action planning", () => {
       .toBe("observe_quote");
     markSpent(makerClaim, "quote");
     expect(nextCoordinatorAction(makerClaim, 1_800_000_100).kind)
-      .toBe("stage_claim_notice");
+      .toBe("observe_base");
 
-    const takerClaim = session("taker", "awaiting_fill_request");
+    const takerClaim = session("taker", "settling");
     takerClaim.privateState.legs.base.token = "cashuBbase";
     takerClaim.privateState.legs.quote.token = "cashuBquote";
     expect(nextCoordinatorAction(takerClaim, 1_800_000_100).kind)
@@ -486,12 +491,13 @@ describe("atomic swap coordinator action planning", () => {
       .toBe("observe_base");
     markSpent(takerClaim, "base");
     expect(nextCoordinatorAction(takerClaim, 1_800_000_100).kind)
-      .toBe("stage_fill_request");
+      .toBe("verify_order_fill");
 
-    const makerFill = session("maker", "awaiting_settlement_ack");
+    const makerFill = session("maker", "settling");
     makerFill.reserveProjectionId = "88".repeat(32);
     makerFill.privateState.legs.base.token = "cashuBbase";
     makerFill.privateState.legs.quote.token = "cashuBquote";
+    makerFill.evidence.legs.quote.claimOperationCommitment = "44".repeat(32);
     expect(nextCoordinatorAction(makerFill, 1_800_000_100).kind).toBe("observe_quote");
     markSpent(makerFill, "quote");
     expect(nextCoordinatorAction(makerFill, 1_800_000_100).kind).toBe("observe_base");
@@ -499,8 +505,10 @@ describe("atomic swap coordinator action planning", () => {
     expect(nextCoordinatorAction(makerFill, 1_800_000_100).kind)
       .toBe("stage_order_fill");
     setCommittedPublication(makerFill, "fill", "99".repeat(32));
+    makerFill.privateState.transcript.choreography.phase = "settled";
+    makerFill.phase = "filled";
     expect(nextCoordinatorAction(makerFill, 1_800_000_100).kind)
-      .toBe("stage_settlement_ack");
+      .toBe("none");
   });
 
   it("fails closed at claim cutoffs and plans refunds only after locktime plus guard", () => {
@@ -546,18 +554,16 @@ describe("atomic swap coordinator action planning", () => {
       .toEqual({ kind: "none" });
   });
 
-  it("continues to the private settlement acknowledgement after public fill", () => {
-    const current = session("maker", "awaiting_settlement_ack");
+  it("needs no private acknowledgement after the public fill is committed", () => {
+    const current = session("maker", "settled");
     current.phase = "filled";
     current.fillProjectionId = "99".repeat(32);
     current.evidence.fillProjectionId = current.fillProjectionId;
     markSpent(current, "base");
     markSpent(current, "quote");
-    expect(nextCoordinatorAction(current, 1_800_000_100).kind)
-      .toBe("enter_recovery");
     setCommittedPublication(current, "fill", current.fillProjectionId);
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
-      .toBe("stage_settlement_ack");
+      .toBe("none");
   });
 
   it("does not initiate a prepared effect or private delivery after its cutoff", () => {
@@ -631,6 +637,7 @@ describe("atomic swap coordinator action planning", () => {
     const current = session("maker", "settled");
     markSpent(current, "base");
     markSpent(current, "quote", 1_800_000_101);
+    current.privateState.preimage = "66".repeat(32);
     setCommittedPublication(current, "fill", "cc".repeat(32));
 
     expect(nextCoordinatorAction(current, 1_800_000_102).kind).toBe("none");
@@ -641,15 +648,17 @@ describe("atomic swap coordinator action planning", () => {
   });
 
   it("requires a taker to verify the maker fill before settlement is terminal", () => {
-    const current = session("taker", "settled");
-    current.phase = "filled";
-    current.fillProjectionId = "cc".repeat(32);
+    const current = session("taker", "settling");
     markSpent(current, "base");
     markSpent(current, "quote", 1_800_000_101);
+    current.privateState.preimage = "66".repeat(32);
 
     expect(nextCoordinatorAction(current, 1_800_000_102).kind)
       .toBe("verify_order_fill");
 
+    current.privateState.transcript.choreography.phase = "settled";
+    current.phase = "filled";
+    current.fillProjectionId = "cc".repeat(32);
     current.evidence.fillProjectionId = current.fillProjectionId;
     expect(nextCoordinatorAction(current, 1_800_000_102).kind).toBe("none");
 
