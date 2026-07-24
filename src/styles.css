@@ -207,6 +207,21 @@ details form { margin-top: 1rem; }
 .agent-strip h2 { max-width: 10em; font-size: clamp(2.5rem,6vw,6rem); }
 .agent-strip p:not(.eyebrow) { max-width: 42rem; line-height: 1.5; }
 .agent-strip a { color: var(--acid); font: 700 .75rem "Courier New", monospace; text-transform: uppercase; }
+.protocol-section { padding: 3rem 0 0; }
+.protocol-section__intro { max-width: 48rem; font: .76rem/1.5 "Courier New", monospace; }
+.protocol-diagram { margin-top: 1.5rem; border: 1px solid var(--ink); background: var(--paper); }
+.protocol-diagram__frame { overflow-x: auto; padding: 1rem; }
+.protocol-diagram__svg { display: block; width: 100%; min-width: 900px; height: auto; }
+.protocol-diagram__participant rect { fill: var(--ink); stroke: var(--ink); stroke-width: 1.5; }
+.protocol-diagram__participant text { fill: var(--paper); font: 700 16px/1 "Courier New", monospace; text-anchor: middle; }
+.protocol-diagram__lifeline line { stroke: var(--line); stroke-dasharray: 5 7; stroke-width: 1.5; }
+.protocol-diagram__message line { stroke: var(--orange); stroke-width: 2; }
+.protocol-diagram__svg marker path { fill: var(--orange); }
+.protocol-diagram__message path { fill: var(--orange); }
+.protocol-diagram__message text { fill: var(--ink); font: 700 13px/1 "Courier New", monospace; text-anchor: middle; }
+.protocol-source { margin: 0; border: 0; border-top: 1px solid var(--line); padding: 1rem; }
+.protocol-source pre { margin: 1rem 0 0; padding: 1rem; overflow-x: auto; background: var(--ink); color: var(--paper); font: .72rem/1.5 "Courier New", monospace; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 code { font-family: "Courier New", monospace; }
 #status { position: fixed; right: 1rem; bottom: 1rem; max-width: min(28rem,calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--ink); background: var(--acid); box-shadow: 4px 4px 0 var(--ink); font: 700 .75rem/1.4 "Courier New", monospace; transform: translateY(150%); transition: transform .2s ease; z-index: 10; }
 #status.visible { transform: none; }

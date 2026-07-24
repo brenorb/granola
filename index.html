@@ -125,6 +125,99 @@
           <a href="https://github.com/brenorb/granola/blob/main/docs/guides/agent-api.md">Read the API contract ↗</a>
         </p>
       </section>
+
+      <section class="protocol-section" aria-labelledby="protocol-diagram-title">
+        <p class="eyebrow">Protocol flow</p>
+        <h2 id="protocol-diagram-title">How a Cashu swap crosses mints</h2>
+        <p class="protocol-section__intro">Nostr carries the order and the private coordination. The same hash links both Cashu legs: one party reveals the preimage on the first mint, and the other uses it to claim the second leg.</p>
+        <div class="protocol-diagram" role="img" aria-labelledby="protocol-diagram-title protocol-diagram-description">
+          <p id="protocol-diagram-description" class="sr-only">Sequence diagram showing Alice publishing an order through Nostr, Carol creating a matching atomic swap, and both parties settling linked HTLCs through a Cashu mint.</p>
+          <div class="protocol-diagram__frame">
+            <svg class="protocol-diagram__svg" viewBox="0 0 1200 860" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+              <defs>
+                <marker id="protocol-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L7,3.5 L0,7 Z" />
+                </marker>
+              </defs>
+              <g class="protocol-diagram__participant">
+                <rect x="55" y="36" width="130" height="48" />
+                <rect x="335" y="36" width="130" height="48" />
+                <rect x="615" y="36" width="130" height="48" />
+                <rect x="895" y="36" width="130" height="48" />
+                <text x="120" y="66">Alice</text>
+                <text x="400" y="66">Nostr</text>
+                <text x="680" y="66">Carol</text>
+                <text x="960" y="66">Mint</text>
+              </g>
+              <g class="protocol-diagram__lifeline">
+                <line x1="120" y1="84" x2="120" y2="820" />
+                <line x1="400" y1="84" x2="400" y2="820" />
+                <line x1="680" y1="84" x2="680" y2="820" />
+                <line x1="960" y1="84" x2="960" y2="820" />
+              </g>
+              <g class="protocol-diagram__message">
+                <line x1="120" y1="135" x2="400" y2="135" marker-end="url(#protocol-arrow)" />
+                <text x="260" y="121">Generate ephemeral pubkey</text>
+
+                <line x1="120" y1="195" x2="400" y2="195" marker-end="url(#protocol-arrow)" />
+                <text x="260" y="181">Publish order</text>
+
+                <line x1="400" y1="255" x2="680" y2="255" marker-end="url(#protocol-arrow)" />
+                <text x="540" y="226">Fetch events · see order</text>
+
+                <line x1="680" y1="315" x2="400" y2="315" marker-end="url(#protocol-arrow)" />
+                <text x="540" y="301">Generate ephemeral pubkey</text>
+
+                <line x1="680" y1="375" x2="120" y2="375" marker-end="url(#protocol-arrow)" />
+                <text x="400" y="347">Send DM with pay request</text>
+
+                <line x1="120" y1="435" x2="680" y2="435" marker-end="url(#protocol-arrow)" />
+                <text x="400" y="407">Generate H · send HTLC_c</text>
+
+                <line x1="680" y1="495" x2="960" y2="495" marker-end="url(#protocol-arrow)" />
+                <text x="820" y="481">Verify HTLC_c</text>
+
+                <line x1="680" y1="555" x2="120" y2="555" marker-end="url(#protocol-arrow)" />
+                <text x="400" y="527">Send HTLC_a with same H</text>
+
+                <line x1="680" y1="615" x2="960" y2="615" marker-end="url(#protocol-arrow)" />
+                <text x="820" y="601">Subscribe to HTLC_a</text>
+
+                <line x1="120" y1="675" x2="960" y2="675" marker-end="url(#protocol-arrow)" />
+                <text x="540" y="647">Swap HTLC_a · reveal preimage</text>
+
+                <line x1="960" y1="735" x2="680" y2="735" marker-end="url(#protocol-arrow)" />
+                <text x="820" y="721">State change with preimage</text>
+
+                <line x1="680" y1="795" x2="960" y2="795" marker-end="url(#protocol-arrow)" />
+                <text x="820" y="781">Swap HTLC_c</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+        <details class="protocol-source">
+          <summary>View Mermaid source</summary>
+          <pre><code>sequenceDiagram
+    actor Alice
+    participant Nostr
+    actor Carol
+    participant Mint
+
+    Alice--&gt;&gt;Nostr: Generate new \n ephemeral PubKey
+    Alice-&gt;&gt;Nostr: Publish Order
+
+    Nostr-&gt;&gt;Carol: Fetches 8338 events \n Sees order
+    Carol--&gt;&gt;Nostr: Generate new \n ephemeral PubKey
+    Carol-&gt;&gt;Alice: Sends DM \n with pay request \n via Nostr
+    Alice-&gt;&gt;Carol: Generates H\n sends HTLC_c to PubKey
+    Carol--&gt;&gt;Mint: Verify HTLC_c
+    Carol-&gt;&gt;Alice: Sends HTLC_a with the same H
+    Carol--&gt;&gt;Mint: Subscribe \n to HTLC_a
+    Alice-&gt;&gt;Mint: Swaps HTLC_a token revealing preimage
+    Mint--&gt;&gt;Carol: State change with preimage
+    Carol-&gt;&gt;Mint: Swaps HTLC_c token</code></pre>
+        </details>
+      </section>
     </main>
 
     <div id="status" role="status" aria-live="polite"></div>
