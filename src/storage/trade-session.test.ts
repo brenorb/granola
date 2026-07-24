@@ -581,6 +581,21 @@ describe("trade session v2 repository", () => {
     expect(await repository.get(spent.sessionId)).toEqual(spent);
   });
 
+  it("orders multiple mint observations made in the same wall-clock second", async () => {
+    const repository = new TradeSessionRepository(new MemoryStorageDriver());
+    const observedTwice = structuredClone(session);
+    observedTwice.privateState.legs.base.observations.push({
+      observedAt: 1_700_000_009,
+      state: "UNSPENT",
+      proofCount: 2,
+      witnessCommitment: null
+    });
+
+    await repository.save(observedTwice, null);
+
+    expect(await repository.get(observedTwice.sessionId)).toEqual(observedTwice);
+  });
+
   it("round-trips each monotonic inbox registration checkpoint with the exact signed event", async () => {
     const checkpoints: TradeSession["privateState"]["inbox"][] = [
       {
