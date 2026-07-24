@@ -145,6 +145,8 @@ export class BrowserTradeController {
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly subscriptions = new Map<string, TradeSubscription>();
   private readonly settlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
+  private readonly settlementSignals = new Map<string, number>();
+  private readonly settlementWaiters = new Map<string, Set<() => void>>();
   private readonly backgroundSettlementRuns = new Set<string>();
   private readonly makerSettlementOrders = new Map<string, string>();
   private readonly subscriptionReconnects = new Map<string, Promise<void>>();
@@ -262,6 +264,7 @@ export class BrowserTradeController {
       if (actions >= 200) {
         throw new Error("Trade did not settle within 200 coordinator actions");
       }
+      const observedSignal = this.settlementSignals.get(sessionId) ?? 0;
       try {
         current = await this.api.advanceTrade(sessionId);
         this.startSessionSubscriptionInBackground(sessionId, reportError);
@@ -277,7 +280,7 @@ export class BrowserTradeController {
         if (idlePolls >= 2_400) {
           throw new Error("Trade peer did not respond before the agent deadline");
         }
-        await this.wait(250);
+        await this.waitForSettlementSignal(sessionId, observedSignal);
         const observed = await this.api.getTrade(sessionId);
         if (observed === undefined) {
           throw new Error("Trade session disappeared while settling");
@@ -488,6 +491,7 @@ export class BrowserTradeController {
             try {
               const trade = await this.api.getTrade(sessionId);
               if (trade === undefined || !this.isActive(trade)) return;
+              this.signalSettlement(sessionId);
               if (trade.role === "maker") {
                 await this.startWinningMakerSettlement(trade.orderAddress);
               } else {
@@ -507,6 +511,41 @@ export class BrowserTradeController {
         secretKey.fill(0);
       }
     });
+  }
+
+  private signalSettlement(sessionId: string): void {
+    this.settlementSignals.set(
+      sessionId,
+      (this.settlementSignals.get(sessionId) ?? 0) + 1
+    );
+    const waiters = this.settlementWaiters.get(sessionId);
+    if (waiters === undefined) return;
+    this.settlementWaiters.delete(sessionId);
+    for (const resolve of waiters) resolve();
+  }
+
+  private async waitForSettlementSignal(
+    sessionId: string,
+    observedSignal: number
+  ): Promise<void> {
+    if ((this.settlementSignals.get(sessionId) ?? 0) !== observedSignal) return;
+    let resolveSignal!: () => void;
+    const signal = new Promise<void>((resolve) => {
+      resolveSignal = resolve;
+      const waiters = this.settlementWaiters.get(sessionId) ?? new Set();
+      waiters.add(resolve);
+      this.settlementWaiters.set(sessionId, waiters);
+      if ((this.settlementSignals.get(sessionId) ?? 0) !== observedSignal) {
+        resolve();
+      }
+    });
+    try {
+      await Promise.race([signal, this.wait(250)]);
+    } finally {
+      const waiters = this.settlementWaiters.get(sessionId);
+      waiters?.delete(resolveSignal);
+      if (waiters?.size === 0) this.settlementWaiters.delete(sessionId);
+    }
   }
 
   private startSubscriptionOnce(

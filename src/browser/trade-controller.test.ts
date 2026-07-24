@@ -559,6 +559,29 @@ describe("BrowserTradeController", () => {
     releaseSubscription();
   });
 
+  it("wakes an active settlement run immediately when a peer DM arrives", async () => {
+    const wait = vi.fn(() => new Promise<void>(() => undefined));
+    const { controller, api, subscriptions } = setup({ wait });
+    api.advanceTrade
+      .mockRejectedValueOnce(new Error("No private trade message is available"))
+      .mockResolvedValueOnce({ ...view(2), phase: "filled" });
+    await controller.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: view().orderAddress,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
+      fillBaseAmount: "1000"
+    });
+
+    const settlement = controller.runUntilSettled(sessionId);
+    await vi.waitFor(() => expect(api.advanceTrade).toHaveBeenCalledOnce());
+    await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
+
+    await expect(settlement).resolves.toMatchObject({ finalPhase: "filled" });
+    expect(api.advanceTrade).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(250);
+  });
+
   it("reopens a session inbox after its relay subscription closes", async () => {
     const { controller, api, subscriptions, stops } = setup();
     api.advanceTrade.mockResolvedValueOnce({
