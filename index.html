@@ -217,6 +217,43 @@
     Mint--&gt;&gt;Carol: State change with preimage
     Carol-&gt;&gt;Mint: Swaps HTLC_c token</code></pre>
         </details>
+        <details class="protocol-messages">
+          <summary>
+            <span>Three private messages</span>
+            <small>Open the settlement handshake</small>
+          </summary>
+          <p class="protocol-messages__intro">Granola’s current settlement flow uses three authenticated DMs. After the third message, both wallets advance from independently verified mint state — no private ACK or receipt messages are needed.</p>
+          <ol class="protocol-messages__list">
+            <li class="protocol-message">
+              <div class="protocol-message__index">01</div>
+              <div>
+                <p class="protocol-message__route">Taker → maker order key</p>
+                <h3><code>reserve_propose</code></h3>
+                <p>Requests this exact order and fill amount. It binds the current public projection, trade terms, and the taker’s fresh session, Cashu settlement, and refund keys.</p>
+              </div>
+            </li>
+            <li class="protocol-message">
+              <div class="protocol-message__index">02</div>
+              <div>
+                <p class="protocol-message__route">Maker order key → taker session</p>
+                <h3><code>reserve_accept</code></h3>
+                <p>Publishes the reserved projection and carries the maker’s offer-side HTLC. The lock, deadlines, mint/keyset, and settlement hash are signed together.</p>
+              </div>
+            </li>
+            <li class="protocol-message">
+              <div class="protocol-message__index">03</div>
+              <div>
+                <p class="protocol-message__route">Taker session → maker session</p>
+                <h3><code>quote_lock</code></h3>
+                <p>After validating the first leg, the taker creates the payment-side HTLC with the same hash. This is the final private message.</p>
+              </div>
+            </li>
+          </ol>
+          <div class="protocol-messages__after">
+            <p class="protocol-message__route">After <code>quote_lock</code></p>
+            <p>The maker claims the payment leg. The taker learns the preimage from the mint witness and claims the offer leg. The maker publishes the signed fill projection; the taker verifies it.</p>
+          </div>
+        </details>
       </section>
     </main>
 
