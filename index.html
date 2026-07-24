@@ -254,6 +254,34 @@
             <p>The maker claims the payment leg. The taker learns the preimage from the mint witness and claims the offer leg. The maker publishes the signed fill projection; the taker verifies it.</p>
           </div>
         </details>
+        <section class="protocol-notes" aria-labelledby="protocol-notes-title">
+          <div class="protocol-notes__heading">
+            <p class="eyebrow">What matters</p>
+            <h2 id="protocol-notes-title">Know the trust boundary.</h2>
+          </div>
+          <div class="protocol-notes__grid">
+            <article class="protocol-note">
+              <p class="protocol-note__number">01</p>
+              <h3>Trust the mint, not the user.</h3>
+              <p>A peer message is coordination, not proof. Verified mint state and the spend witness decide whether a leg actually settled.</p>
+            </article>
+            <article class="protocol-note">
+              <p class="protocol-note__number">02</p>
+              <h3>Ephemeral keys, no management.</h3>
+              <p>Every reservation gets fresh Nostr, Cashu settlement, and refund keys. Granola scopes and stores them for the swap; you never manage a key ceremony.</p>
+            </article>
+            <article class="protocol-note">
+              <p class="protocol-note__number">03</p>
+              <h3>Nostr coordinates. It does not custody.</h3>
+              <p>Relays carry orders and encrypted coordination. Proofs, preimages, balances, and private keys stay out of public events.</p>
+            </article>
+            <article class="protocol-note">
+              <p class="protocol-note__number">04</p>
+              <h3>Atomic under mint assumptions.</h3>
+              <p>One hash links both legs and bounded locktimes provide recovery. Safety still depends on participating mints enforcing the required Cashu capabilities.</p>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 
