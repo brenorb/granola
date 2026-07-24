@@ -51,25 +51,26 @@ mints, timestamps, and relay/mint outcomes only.
 
 New settlement plans use a 4-day quote-leg lock, a 7-day base-leg lock, and an
 8-day reservation recovery horizon. On `reserve_accept`, the taker persists the
-maker's exact signed plan before preparing any Cashu effect, so small
-independent clock-sampling differences cannot produce mismatched HTLC terms.
+maker's exact signed plan and validates the maker's offer-side HTLC before
+preparing any Cashu effect, so small independent clock-sampling differences
+cannot produce mismatched HTLC terms.
 ## Happy-path choreography
 
 1. Taker sends `reserve_propose` to the maker order key.
-2. Maker publishes the reserved projection at the same `d` tag and sends
-   `reserve_accept` bound to that event ID and revision.
-3. Taker sends `session_ack` to the maker session key.
-4. Maker creates and sends the base SAT HTLC.
-5. Taker validates it and sends `base_lock_ack`.
-6. Taker creates and sends the quote USD HTLC using the same hash.
-7. Maker validates it, claims the USD leg, and sends `claim_notice`.
-8. Taker independently observes that spend, recovers the preimage, claims the
-   SAT leg, and sends `fill_request`.
-9. Maker independently observes both spends, publishes the fill projection at
-   the same `d` tag, and sends `settlement_ack` bound to that event ID and revision.
-10. Taker accepts the exact settlement acknowledgement. Both public views become
-    filled only when the authoritative fill and the relevant participating-mint
-    observations agree.
+2. Maker publishes the reserved projection at the same `d` tag, creates the
+   offer-side HTLC, and sends `reserve_accept` containing the exact signed plan
+   and HTLC.
+3. Taker validates both, creates the payment-side HTLC with the same hash, and
+   sends `quote_lock`.
+4. Maker validates the payment-side HTLC and claims it at the mint.
+5. Taker independently observes that spend, recovers the preimage, and claims
+   the offer-side HTLC.
+6. Maker independently observes both spends and publishes the signed fill
+   projection; taker independently verifies that current projection.
+
+Mint state and the signed public projection replace private verification,
+claim, and receipt messages. The complete happy path therefore uses three
+authenticated DMs.
 
 ## Existing timeout and refund boundary
 
@@ -90,10 +91,10 @@ namespace. Before advertising the private inbox, the page performs a disposable
 recipient-only live probe against `wss://auth.nostr1.com`; all probe keys are
 zeroized afterward.
 
-The shared page automatically enables each active order-key inbox, with the
-button remaining available for retry. A valid `reserve_propose` opens a maker
-session through the same exact-order and exact-funding preflight used by the
-agent API. Once either role's per-session kind `10050` registration is
+The shared page automatically enables and reconnects each active order-key
+inbox. A valid `reserve_propose` opens a maker session through the same
+exact-order and exact-funding preflight used by the agent API. Once either
+role's per-session kind `10050` registration is
 committed, the page opens a persistent subscription using that session key.
 A live event is only a wakeup: the coordinator queries the stored wrapper,
 authenticates and decrypts it through the persisted state machine, and advances

@@ -98,6 +98,9 @@ export interface CoordinatorOrderReadPort {
     expectedProjectionId: string,
     expectedRevision: string
   ): Promise<PublishedOrderProjection>;
+  loadLatestPublishedProjection(
+    address: string
+  ): Promise<PublishedOrderProjection>;
 }
 
 export interface GranolaCoordinatorEffectsOptions {
@@ -354,6 +357,40 @@ function expectedLock(session: TradeSession, slot: ProtocolSlot): ExpectedHtlcLo
   };
 }
 
+function completedLockBody(
+  session: TradeSession,
+  slot: ProtocolSlot
+): AtomicSwapBody<"base_lock"> {
+  const leg = slotLeg(session, slot);
+  const evidence = session.evidence.legs[leg];
+  const privateLeg = session.privateState.legs[leg];
+  const expected = privateLeg.expected;
+  const htlcHash = session.privateState.htlcHash;
+  if (
+    !privateLeg.token ||
+    !expected ||
+    !evidence.tokenCommitment ||
+    !evidence.validationCommitment ||
+    !htlcHash
+  ) {
+    throw new Error(`${leg} lock lacks completed Cashu evidence`);
+  }
+  return {
+    schema: "granola/atomic-swap-body/v1",
+    cashu_token: privateLeg.token,
+    token_commitment: evidence.tokenCommitment,
+    validation_commitment: evidence.validationCommitment,
+    settlement_hash: htlcHash,
+    mint: expected.mintUrl,
+    unit: expected.unit,
+    keyset: evidence.keysetId,
+    amount: expected.amount,
+    receiver_cashu_pubkey: expected.receiverPubkey,
+    refund_cashu_pubkey: expected.refundPubkey,
+    locktime: expected.locktime
+  };
+}
+
 function rootPhase(
   choreography: TradeSession["privateState"]["transcript"]["choreography"]
 ): TradeSession["phase"] {
@@ -368,6 +405,7 @@ function rootPhase(
     awaiting_claim_notice: "quote_locked",
     awaiting_fill_request: "quote_claimed",
     awaiting_settlement_ack: "base_claimed",
+    settling: "quote_locked",
     settled: "filled",
     refunding: "waiting_base_refund",
     failed: "frozen"
@@ -661,36 +699,32 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
   ): Promise<TradeSession> {
     if (
       session.role !== "taker" ||
-      session.privateState.transcript.choreography.phase !== "settled" ||
-      session.fillProjectionId === null ||
-      session.fillProjectionRevision === null ||
+      session.privateState.transcript.choreography.phase !== "settling" ||
+      session.fillProjectionId !== null ||
       session.evidence.fillProjectionId !== null
     ) {
       throw new Error("Taker fill verification is not checkpoint-ready");
     }
-    const expectedFillId = session.fillProjectionId;
-    const expectedFillRevision = session.fillProjectionRevision;
-    const published = await this.orderReader.loadPublishedProjection(
-      session.orderAddress,
-      expectedFillId,
-      expectedFillRevision
+    const published = await this.orderReader.loadLatestPublishedProjection(
+      session.orderAddress
     );
-    if (
-      published.eventId !== expectedFillId ||
-      published.revision !== expectedFillRevision ||
-      published.projection.id !== expectedFillId
-    ) {
-      throw new Error("Published order projection does not match the announced fill");
-    }
     const projection = await parseProjectionEvent(
       published.projection,
       verifyEvent
     );
     if (
+      published.eventId !== published.projection.id ||
+      published.revision !== projection.state.revision ||
       projection.makerPubkey !== session.evidence.makerPubkey ||
       projection.address !== session.orderAddress
     ) {
       throw new Error("Published fill maker or address does not match the trade");
+    }
+    if (
+      published.eventId === session.reserveProjectionId &&
+      published.revision === session.reserveProjectionRevision
+    ) {
+      return bump(session, now);
     }
     if (
       session.reserveProjectionRevision === null ||
@@ -707,8 +741,12 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
 
     const next = bump(session, now);
-    next.evidence.fillProjectionId = expectedFillId;
-    next.evidence.fillProjectionRevision = expectedFillRevision;
+    next.fillProjectionId = published.eventId;
+    next.fillProjectionRevision = published.revision;
+    next.evidence.fillProjectionId = published.eventId;
+    next.evidence.fillProjectionRevision = published.revision;
+    next.privateState.transcript.choreography.phase = "settled";
+    next.phase = "filled";
     return next;
   }
 
@@ -850,6 +888,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       next.fillProjectionRevision = entry.publication.state.revision;
       next.evidence.fillProjectionId = entry.publication.projection.id;
       next.evidence.fillProjectionRevision = entry.publication.state.revision;
+      next.privateState.transcript.choreography.phase = "settled";
+      next.phase = "filled";
     } else {
       next.phase = "released";
     }
@@ -1088,7 +1128,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           maker_claim_cutoff: session.plan.makerClaimCutoff,
           long_locktime: session.plan.longLocktime,
           taker_claim_cutoff: session.plan.takerClaimCutoff,
-          reservation_expires_at: session.plan.reservationExpiresAt
+          reservation_expires_at: session.plan.reservationExpiresAt,
+          base_lock: completedLockBody(session, "base")
         };
       case "session_ack":
         if (!session.reserveProjectionId || !session.reserveProjectionRevision || !htlcHash ||
@@ -1106,28 +1147,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       case "base_lock":
       case "quote_lock": {
         const slot = type === "base_lock" ? "base" : "quote";
-        const leg = slotLeg(session, slot);
-        const evidence = session.evidence.legs[leg];
-        const privateLeg = session.privateState.legs[leg];
-        const expected = privateLeg.expected;
-        if (!privateLeg.token || !expected || !evidence.tokenCommitment ||
-          !evidence.validationCommitment || !htlcHash) {
-          throw new Error(`${leg} lock lacks completed Cashu evidence`);
-        }
-        return {
-          schema,
-          cashu_token: privateLeg.token,
-          token_commitment: evidence.tokenCommitment,
-          validation_commitment: evidence.validationCommitment,
-          settlement_hash: htlcHash,
-          mint: expected.mintUrl,
-          unit: expected.unit,
-          keyset: evidence.keysetId,
-          amount: expected.amount,
-          receiver_cashu_pubkey: expected.receiverPubkey,
-          refund_cashu_pubkey: expected.refundPubkey,
-          locktime: expected.locktime
-        };
+        return completedLockBody(session, slot);
       }
       case "base_lock_ack":
       case "quote_lock_ack": {
@@ -1348,7 +1368,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       opened.transcriptHash !== pending.transcriptHash
     ) throw new Error("Incoming retry opened a different exact message");
     const checked = await validateAtomicSwapMessage(opened.message);
-    await advanceAtomicSwapChoreography(
+    const nextChoreography = await advanceAtomicSwapChoreography(
       session.privateState.transcript.choreography,
       checked
     );
@@ -1357,15 +1377,42 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       ...clone(pending),
       validation: { status: "validated", checkedAt: now, error: null }
     };
-    if (checked.type === "base_lock" || checked.type === "quote_lock") {
-      const slot = checked.type === "base_lock" ? "base" : "quote";
+    if (
+      checked.type === "reserve_accept" ||
+      checked.type === "base_lock" ||
+      checked.type === "quote_lock"
+    ) {
+      const slot = checked.type === "quote_lock" ? "quote" : "base";
       const leg = slotLeg(session, slot);
-      const body = checked.body as AtomicSwapBody<"base_lock">;
+      const acceptance = checked.type === "reserve_accept"
+        ? checked.body as AtomicSwapBody<"reserve_accept">
+        : null;
+      const body = acceptance?.base_lock ??
+        checked.body as AtomicSwapBody<"base_lock">;
+      const acceptedPlan = acceptance === null
+        ? session.plan
+        : {
+            anchor: acceptance.short_locktime -
+              (acceptance.long_locktime - acceptance.short_locktime === 3 * 86_400
+                ? 4 * 86_400
+                : 600),
+            shortLocktime: acceptance.short_locktime,
+            makerClaimCutoff: acceptance.maker_claim_cutoff,
+            longLocktime: acceptance.long_locktime,
+            takerClaimCutoff: acceptance.taker_claim_cutoff,
+            reservationExpiresAt: acceptance.reservation_expires_at,
+            refundGuardSeconds: 60 as const
+          };
       const expected = expectedLock({
         ...session,
+        plan: acceptedPlan,
         privateState: {
           ...session.privateState,
-          htlcHash: session.privateState.htlcHash ?? body.settlement_hash
+          htlcHash: session.privateState.htlcHash ?? body.settlement_hash,
+          transcript: {
+            ...session.privateState.transcript,
+            choreography: nextChoreography
+          }
         }
       }, slot);
       const summary = await this.cashu.validateIncomingLock(body.cashu_token, expected);
@@ -1375,6 +1422,9 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         summary.amount !== body.amount
       ) throw new Error("Incoming Cashu validation differs from the signed lock body");
       next.privateState.htlcHash ??= body.settlement_hash;
+      if (!next.evidence.commitments.includes(body.settlement_hash)) {
+        next.evidence.commitments.push(body.settlement_hash);
+      }
       next.privateState.legs[leg] = {
         ...next.privateState.legs[leg],
         token: body.cashu_token,
@@ -1517,6 +1567,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     if (outbox.message.type === "reserve_propose") {
       next.evidence.reservation.proposalSealId = outbox.seal.id;
+      next.privateState.settlementTranscriptHash = hash;
     }
     return next;
   }

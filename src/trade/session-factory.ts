@@ -477,7 +477,7 @@ export async function createMakerSession(
   const evidence = emptyEvidence(input.order, market);
   evidence.commitments = [material.hash];
   evidence.reservation.proposalSealId = input.proposal.seal.id;
-  return baseSession({
+  const session = baseSession({
     role: "maker",
     order: input.order,
     sessionId: message.session_id,
@@ -506,4 +506,12 @@ export async function createMakerSession(
     htlcHash: material.hash,
     createdAt: input.clocks.localNow
   });
+  session.privateState.settlementTranscriptHash = input.proposal.transcriptHash;
+  session.privateState.transcript.choreography.participants = {
+    ...session.privateState.transcript.choreography.participants,
+    makerSessionPubkey: keys.nostrPubkey,
+    makerCashuPubkey: keys.cashuPubkey,
+    makerRefundPubkey: keys.refundPubkey
+  };
+  return session;
 }

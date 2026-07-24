@@ -50,6 +50,7 @@ export interface ReserveAcceptBody extends VersionedBody {
   long_locktime: number;
   taker_claim_cutoff: number;
   reservation_expires_at: number;
+  base_lock: LockBody;
 }
 
 export interface SessionAckBody extends VersionedBody {
@@ -313,7 +314,8 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
     "maker_claim_cutoff",
     "long_locktime",
     "taker_claim_cutoff",
-    "reservation_expires_at"
+    "reservation_expires_at",
+    "base_lock"
   ]);
   hex32(body.taker_session_pubkey, "Taker session public key");
   hex32(body.maker_session_pubkey, "Maker session public key");
@@ -341,6 +343,7 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
   if (body.maker_cashu_pubkey === body.maker_refund_pubkey) {
     throw new Error("Maker Cashu settlement and refund keys must differ");
   }
+  lock(body.base_lock);
   return body as unknown as ReserveAcceptBody;
 }
 
@@ -527,6 +530,10 @@ export async function validateAtomicSwapMessage(
     if (body.maker_claim_cutoff <= sentAt) {
       throw new Error("Settlement deadlines are already unsafe at acceptance");
     }
+    if (body.base_lock.token_commitment !== await sha256Text(body.base_lock.cashu_token)) {
+      throw new Error("Token commitment does not match the Cashu token");
+    }
+    if (body.base_lock.locktime <= sentAt) throw new Error("Locktime has already passed");
   }
   if (type === "base_lock" || type === "quote_lock") {
     const body = parsedBody as LockBody;
@@ -555,6 +562,7 @@ export type AtomicSwapChoreographyPhase =
   | "awaiting_claim_notice"
   | "awaiting_fill_request"
   | "awaiting_settlement_ack"
+  | "settling"
   | "settled"
   | "refunding"
   | "failed";
@@ -684,6 +692,7 @@ function semanticPhase(phase: AtomicSwapChoreographyPhase): AtomicSwapErrorPhase
     awaiting_claim_notice: "quote_locked",
     awaiting_fill_request: "quote_claimed",
     awaiting_settlement_ack: "base_claimed",
+    settling: "quote_locked",
     settled: "filled",
     refunding: "waiting_base_refund",
     failed: "frozen"
@@ -856,8 +865,27 @@ export async function advanceAtomicSwapChoreography(
     ) {
       throw new Error("Reservation acceptance terms differ from the proposal");
     }
+    const acceptedState = {
+      ...state,
+      settlementHash: body.settlement_hash,
+      shortLocktime: body.short_locktime,
+      longLocktime: body.long_locktime,
+      participants: {
+        ...state.participants,
+        makerSessionPubkey: body.maker_session_pubkey,
+        makerCashuPubkey: body.maker_cashu_pubkey,
+        makerRefundPubkey: body.maker_refund_pubkey
+      }
+    };
+    assertLockTerms(acceptedState, body.base_lock, "base");
+    if (
+      body.base_lock.receiver_cashu_pubkey !== state.participants.takerCashuPubkey ||
+      body.base_lock.refund_cashu_pubkey !== body.maker_refund_pubkey
+    ) {
+      throw new Error("Base lock receiver or refund key differs from the accepted participants");
+    }
     return nextState(state, message, {
-      phase: "awaiting_session_ack",
+      phase: "awaiting_quote_lock",
       orderProjectionId: body.reserve_projection_id,
       orderRevision: body.reserve_revision,
       settlementHash: body.settlement_hash,
@@ -865,6 +893,8 @@ export async function advanceAtomicSwapChoreography(
       reserveProjectionRevision: body.reserve_revision,
       shortLocktime: body.short_locktime,
       longLocktime: body.long_locktime,
+      baseTokenCommitment: body.base_lock.token_commitment,
+      baseValidationCommitment: body.base_lock.validation_commitment,
       participants: {
         ...state.participants,
         makerSessionPubkey: body.maker_session_pubkey,
@@ -940,7 +970,7 @@ export async function advanceAtomicSwapChoreography(
       throw new Error("Quote lock receiver or refund key differs from the accepted participants");
     }
     return nextState(state, message, {
-      phase: "awaiting_quote_lock_ack",
+      phase: "settling",
       quoteTokenCommitment: body.token_commitment,
       quoteValidationCommitment: body.validation_commitment
     });

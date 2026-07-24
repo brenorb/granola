@@ -27,21 +27,25 @@ For a maker selling base for quote:
 
 1. Maker creates fresh, independent Nostr session, Cashu settlement, and Cashu refund keys. Maker generates and durably stores the preimage and hash before accepting the reservation.
 2. Taker creates its own fresh Nostr session, Cashu settlement, and Cashu refund keys.
-3. Maker locks the base proofs first. The base leg uses the shared hash, the taker's Cashu settlement key as receiver, the maker refund key, and the later deadline `T_long`.
-4. Taker validates that leg and acknowledges an exact commitment to the validated terms.
+3. Maker locks the base proofs first and includes that lock in
+   `reserve_accept`. The base leg uses the shared hash, the taker's Cashu
+   settlement key as receiver, the maker refund key, and the later deadline
+   `T_long`.
+4. Taker validates that leg before funding the counter-leg.
 5. Taker locks the quote proofs second. The quote leg uses the same hash, the maker's Cashu settlement key as receiver, the taker refund key, and the earlier deadline `T_short`.
-6. Maker validates and acknowledges that leg, then claims it with the preimage and maker settlement key before the maker claim cutoff.
+6. Maker validates that leg, then claims it with the preimage and maker settlement key before the maker claim cutoff.
 7. Taker observes every quote proof as `SPENT` through NUT-07, extracts one identical witness preimage, verifies its hash, and claims the base leg with that preimage and the taker settlement key.
 8. Maker verifies both legs as `SPENT` before replacing the order with its
    public `filled` projection. The reservation remains public until fill or
    confirmed recovery.
 
 The wire choreography names these positions `base_lock` and `quote_lock`, but
-they are protocol slots: maker offer first with `T_long`, then taker payment
-with `T_short`. For a buy-side maker the market assets reverse—quote occupies
-the long-lock maker-offer slot and base occupies the short-lock taker-payment
-slot. Cashu validation binds the exact accepted deadline without inferring the
-protocol slot from the market asset name.
+they are protocol slots: `reserve_accept` embeds the maker offer with `T_long`,
+then `quote_lock` carries the taker payment with `T_short`. For a buy-side maker
+the market assets reverse—quote occupies the long-lock maker-offer slot and
+base occupies the short-lock taker-payment slot. Cashu validation binds the
+exact accepted deadline without inferring the protocol slot from the market
+asset name.
 
 For the testnet demonstration, after confirming each participating mint clock is within 30 seconds of local time, use:
 
@@ -59,7 +63,7 @@ New sessions use this 4/7-day profile. Every accepted deadline is signed,
 validated as a complete profile, and persisted before either Cashu leg is
 created.
 
-## Exact validation before acknowledging a lock
+## Exact validation before funding the counter-leg
 
 Fail closed unless all of the following hold:
 
@@ -78,20 +82,16 @@ A `SPENT` state only discloses the preimage when every quote proof has a non-emp
 
 ## Private message sequence
 
-Use ADR 0003's canonical NIP-17 envelope and acknowledgement rules for:
+Use ADR 0003's canonical NIP-17 envelope rules for:
 
 1. `reserve_propose`
-2. `reserve_accept`
-3. `session_ack`
-4. `base_lock`
-5. `base_lock_ack`
-6. `quote_lock`
-7. `quote_lock_ack`
-8. `claim_notice`
-9. `fill_request`
-10. `settlement_ack`
+2. `reserve_accept`, including the offer-side HTLC
+3. `quote_lock`, including the payment-side HTLC
 
-The lock messages carry the encrypted bearer token and exact validation data. Acknowledgements commit to their message and the validated transcript. `claim_notice` is only a liveness hint: NUT-07 is authoritative and no private message is trusted as evidence that a leg was spent.
+After the third message, both parties advance from independently verified mint
+state. The maker claims the payment leg, the taker learns the preimage from the
+mint and claims the offer leg, and the maker publishes the signed fill
+projection. No private verification, claim, or receipt messages are required.
 
 ## Recovery
 
@@ -101,7 +101,10 @@ The lock messages carry the encrypted bearer token and exact validation data. Ac
 - After maker claim: taker continues polling the quote witness and claims base before its cutoff. If the witness is unavailable or invalid, preserve the trace and enter terminal recovery rather than declaring success.
 - A public fill or reservation release is forbidden until the corresponding mint states are independently verified.
 
-Persist the exact signed message, lock token, keys, commitments, acknowledgements, mint observations, and state transition before performing the next irreversible action. Retries are idempotent and reuse the persisted artifact rather than creating a new proof or message.
+Persist the exact signed message, lock token, keys, commitments, relay receipts,
+mint observations, and state transition before performing the next
+irreversible action. Retries are idempotent and reuse the persisted artifact
+rather than creating a new proof or message.
 
 ## Why this design
 

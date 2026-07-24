@@ -275,15 +275,14 @@ function externalArtifact(
     case "verify_order_fill":
       if (
         session.role !== "taker" ||
-        session.fillProjectionId === null ||
+        session.fillProjectionId !== null ||
         session.evidence.fillProjectionId !== null ||
-        session.privateState.transcript.choreography.phase !== "settled"
+        session.privateState.transcript.choreography.phase !== "settling"
       ) checkpointError(action);
       return {
         orderAddress: session.orderAddress,
         reservationId: session.reservationId,
         reserveProjectionId: session.reserveProjectionId,
-        fillProjectionId: session.fillProjectionId,
         transcript: {
           lastMessageId: session.privateState.transcript.lastMessageId,
           lastTranscriptHash: session.privateState.transcript.lastTranscriptHash,

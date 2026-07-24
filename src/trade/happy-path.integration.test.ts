@@ -607,10 +607,13 @@ describe("two-party coordinator happy path", () => {
           coordinator: takerCoordinator
         }
       ].filter(({ action }) => action.kind !== "none");
-      candidates.sort((left, right) =>
-        Number(left.action.kind === "poll_inbox") -
-        Number(right.action.kind === "poll_inbox")
-      );
+      const priority = ({ action }: (typeof candidates)[number]): number =>
+        action.kind === "observe_base"
+          ? 2
+          : action.kind === "observe_quote" || action.kind === "poll_inbox"
+            ? 1
+            : 0;
+      candidates.sort((left, right) => priority(left) - priority(right));
 
       let advanced = false;
       for (const candidate of candidates) {
@@ -635,8 +638,10 @@ describe("two-party coordinator happy path", () => {
       }
       if (!advanced) throw new Error("Happy-path scheduler made no progress");
     }
-    expect(steps).toBeLessThan(200);
-    expect(actionTrace).toHaveLength(95);
+    if (steps >= 200) {
+      throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
+    }
+    expect(actionTrace).toHaveLength(53);
     expect(actionTrace.slice(0, 6)).toEqual([
       "taker:stage_inbox_registration",
       "taker:publish_inbox_registration",
@@ -658,6 +663,12 @@ describe("two-party coordinator happy path", () => {
       .toEqual({ kind: "none" });
     expect([makerSession, takerSession].map((session) => session.phase))
       .toEqual(["filled", "filled"]);
+    expect([makerSession, takerSession].map((session) =>
+      session.privateState.transcript.accepted.map(({ type }) => type)
+    )).toEqual([
+      ["reserve_propose", "reserve_accept", "quote_lock"],
+      ["reserve_propose", "reserve_accept", "quote_lock"]
+    ]);
     for (const session of [makerSession, takerSession]) {
       expect(session.evidence.legs.base.mintState).toBe("SPENT");
       expect(session.evidence.legs.quote.mintState).toBe("SPENT");

@@ -252,16 +252,13 @@ function recoveryAction(session: TradeSession, now: number): CoordinatorAction |
   const phase = session.privateState.transcript.choreography.phase;
   if (
     session.role === "maker" &&
-    ["awaiting_base_lock", "awaiting_quote_lock_ack", "awaiting_claim_notice"].includes(phase) &&
+    ["awaiting_reserve_accept", "settling"].includes(phase) &&
     now >= session.plan.makerClaimCutoff
   ) {
     return { kind: "enter_recovery" };
   }
-  if (
-    session.role === "taker" &&
-    phase === "awaiting_fill_request" &&
-    now >= session.plan.takerClaimCutoff
-  ) {
+  if (session.role === "taker" && phase === "settling" &&
+    now >= session.plan.takerClaimCutoff) {
     return { kind: "enter_recovery" };
   }
   return undefined;
@@ -345,12 +342,6 @@ export function nextCoordinatorAction(
     }
   }
 
-  if (
-    session.privateState.transcript.choreography.phase === "settled" &&
-    session.role === "taker" &&
-    session.fillProjectionId !== null &&
-    session.evidence.fillProjectionId === null
-  ) return { kind: "verify_order_fill" };
   if (terminal(session)) return { kind: "none" };
   if (session.privateState.transcript.choreography.phase === "settled") {
     return { kind: "enter_recovery" };
@@ -364,21 +355,9 @@ export function nextCoordinatorAction(
   }
   if (publication?.status === "committed") {
     if (publication.operation === "reserve") {
-      if (
-        phase === "awaiting_reserve_accept" &&
-        session.role === "maker" &&
-        session.reserveProjectionId !== null &&
-        session.evidence.reserveProjectionId === session.reserveProjectionId &&
-        publication.projection.id === session.reserveProjectionId
-      ) return { kind: "stage_reserve_accept" };
       return { kind: "clear_order_publication" };
     }
     if (publication.operation === "fill") {
-      if (
-        phase === "awaiting_settlement_ack" &&
-        session.role === "maker" &&
-        exactCommittedFill(session)
-      ) return { kind: "stage_settlement_ack" };
       return { kind: "enter_recovery" };
     }
     if (publication.operation === "release") return { kind: "none" };
@@ -394,7 +373,11 @@ export function nextCoordinatorAction(
       return session.role === "maker"
         ? session.reserveProjectionId === null
           ? { kind: "stage_order_reserve" }
-          : { kind: "enter_recovery" }
+          : session.privateState.legs[slotLeg(session, "base")].token === null
+            ? { kind: "prepare_base_lock" }
+            : lockReady(session, "base")
+              ? { kind: "stage_reserve_accept" }
+              : { kind: "enter_recovery" }
         : { kind: "poll_inbox" };
     case "awaiting_session_ack":
       if (now >= session.plan.makerClaimCutoff) return { kind: "enter_recovery" };
@@ -463,6 +446,32 @@ export function nextCoordinatorAction(
       return session.fillProjectionId === null
         ? { kind: "stage_order_fill" }
         : { kind: "enter_recovery" };
+    case "settling": {
+      const offerLeg = slotLeg(session, "base");
+      const paymentLeg = slotLeg(session, "quote");
+      if (!independentlySpent(session, paymentLeg)) {
+        if (
+          session.role === "maker" &&
+          session.evidence.legs[paymentLeg].claimOperationCommitment === null
+        ) return { kind: "prepare_quote_claim" };
+        return { kind: "observe_quote" };
+      }
+      if (session.role === "taker" && session.privateState.preimage === null) {
+        return { kind: "observe_quote" };
+      }
+      if (!independentlySpent(session, offerLeg)) {
+        if (
+          session.role === "taker" &&
+          session.evidence.legs[offerLeg].claimOperationCommitment === null
+        ) return { kind: "prepare_base_claim" };
+        return { kind: "observe_base" };
+      }
+      return session.role === "maker"
+        ? session.fillProjectionId === null
+          ? { kind: "stage_order_fill" }
+          : { kind: "enter_recovery" }
+        : { kind: "verify_order_fill" };
+    }
     case "refunding":
       return { kind: "enter_recovery" };
     case "failed":

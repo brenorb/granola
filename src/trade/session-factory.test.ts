@@ -259,7 +259,7 @@ describe("trade session factory", () => {
       privateState: {
         preimage: entropy(3).htlcMaterial().preimage,
         htlcHash: entropy(3).htlcMaterial().hash,
-        settlementTranscriptHash: null,
+        settlementTranscriptHash: opened.transcriptHash,
         inbox: {
           status: "unregistered",
           quorum: 1,
