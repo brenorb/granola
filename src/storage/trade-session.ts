@@ -669,7 +669,7 @@ function validatePrivateLeg(value: unknown): asserts value is PrivateLegJournal 
       return !Number.isSafeInteger(item.observedAt) ||
         (item.observedAt as number) < 0 ||
         (previous !== undefined &&
-          (item.observedAt as number) <= (previous.observedAt as number)) ||
+          (item.observedAt as number) < (previous.observedAt as number)) ||
         typeof item.state !== "string" || !MINT_STATES.has(item.state) ||
         !Number.isSafeInteger(item.proofCount) || (item.proofCount as number) < 1 ||
         !(item.witnessCommitment === null ||
