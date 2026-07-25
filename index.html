@@ -70,7 +70,7 @@
         <p class="eyebrow">A peer-to-peer Cashu exchange</p>
         <h1 id="hero-title">Public orders.<br /><em>Private settlement.</em></h1>
         <p class="lede">Granola is a decentralized exchange layer on top of Cashu. Nostr carries public orders and private coordination; Cashu settles atomic swaps between wallets and across mints.</p>
-        <aside class="warning"><strong>Testnet only.</strong> Testnut tokens are unbacked and may disappear. A bearer backup is spendable by whoever holds it.</aside>
+        <aside class="warning"><strong>Testnet only.</strong> Testnut tokens are unbacked and may disappear. <strong>No escrow.</strong> Granola never holds or custodies your funds; the participating Cashu mints enforce the locked legs.</aside>
       </section>
 
       <section class="ledger" aria-labelledby="balances-title">
@@ -284,6 +284,11 @@
               <p class="protocol-note__number">05</p>
               <h3>All local, no servers.</h3>
               <p>Your wallet and session state run in the browser. Granola has no account, matching, or custody server; Nostr relays and Cashu mints are the external protocol infrastructure.</p>
+            </article>
+            <article class="protocol-note">
+              <p class="protocol-note__number">06</p>
+              <h3>No escrow.</h3>
+              <p>Granola never takes custody of the trade. Each wallet locks and claims directly with the participating Cashu mints, with no intermediary holding the funds.</p>
             </article>
           </div>
         </section>
