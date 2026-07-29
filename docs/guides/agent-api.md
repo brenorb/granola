@@ -159,8 +159,9 @@ Policy: `https://testnut.cashu.space` and
 `https://nofee.testnut.cashu.space`. `inspectMint`, `requestMint`, and
 `receiveToken` reject every other issuer before making a network request.
 Nostr connections are limited to `wss://nos.lol`,
-`wss://relay.primal.net`, `wss://offchain.pub`, and the authenticated private
-inbox `wss://auth.nostr1.com`; matching HTTPS origins are allowed only for
+`wss://relay.primal.net`, `wss://offchain.pub`, the local mesh relay
+`ws://localhost:4870`, and the authenticated private inbox
+`wss://auth.nostr1.com`; matching HTTPS origins are allowed only for
 NIP-11 capability documents. Public order events and kind `10050` inbox
 registrations still require acknowledgement/readback evidence because relay
 capability metadata can be incomplete.

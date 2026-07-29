@@ -302,12 +302,14 @@ kind `13` tags must be empty, while NIP-17 only recommends putting expiration
 there, so the NIP-59 `MUST` wins. Clients enforce encrypted deadlines locally.
 Relay deletion is advisory and must never be treated as cryptographic erasure.
 
-The three relays used for the public order book (`nos.lol`,
+The remote relays used for the public order book (`nos.lol`,
 `relay.primal.net`, and `offchain.pub`) did not advertise NIP-17 or NIP-42 in
-their NIP-11 documents on 2026-07-23. They are not the default private inbox
-set merely because they accepted public order events. A candidate inbox relay
-must pass a two-key test for kind `10050`, gift-wrap publish/readback, NIP-42
-authentication, recipient-only retrieval, and offline delivery before use.
+their NIP-11 documents on 2026-07-23. The local mesh relay
+`ws://localhost:4870` is also a public discovery target, but is not a private
+inbox target merely because it accepts public order events. A candidate inbox
+relay must pass a two-key test for kind `10050`, gift-wrap publish/readback,
+NIP-42 authentication, recipient-only retrieval, and offline delivery before
+use.
 
 ### Inbox discovery and authentication
 
@@ -326,10 +328,10 @@ A Granola kind `10050` is accepted only when:
   recipient-only live probe within the last 24 hours.
 
 The receiving key republishes its list before the seven-day limit or whenever
-the list changes. It publishes the exact signed event to the three public
+the list changes. It publishes the exact signed event to the four public
 Granola discovery relays and requires ACK plus readback of that exact ID from at
 least one. Additional relay results are best-effort redundancy and do not affect
-the registration decision. A sender queries all three discovery relays, verifies every
+the registration decision. A sender queries all four discovery relays, verifies every
 candidate, applies the NIP-01 replaceable-event rule (greatest `created_at`,
 then lowest ID on a tie), and accepts the selected event when it is readable
 from at least one relay. A stale or unsupported inbox fails closed.

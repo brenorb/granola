@@ -3,10 +3,12 @@ import { SimplePool } from "nostr-tools/pool";
 
 import type { NostrEvent } from "../order/events.js";
 
+export const LOCAL_MESH_RELAY = "ws://localhost:4870";
 export const PUBLIC_RELAYS = [
   "wss://nos.lol",
   "wss://relay.primal.net",
-  "wss://offchain.pub"
+  "wss://offchain.pub",
+  LOCAL_MESH_RELAY
 ] as const;
 
 export interface RelayReceipt {
@@ -49,14 +51,36 @@ function uniqueEvents(events: NostrEvent[]): NostrEvent[] {
   return [...byId.values()];
 }
 
+export function normalizePublicRelay(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Nostr relay must be a valid URL");
+  }
+  const localMeshRelay =
+    url.protocol === "ws:" &&
+    url.hostname === "localhost" &&
+    url.port === "4870";
+  if (url.protocol !== "wss:" && !localMeshRelay) {
+    throw new Error("Nostr relays must use wss://, except ws://localhost:4870");
+  }
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (localMeshRelay && url.pathname !== "/")
+  ) {
+    throw new Error("Nostr relay must be credential-free and have no query or fragment");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
 function validateRelays(relays: readonly string[]): string[] {
   if (relays.length === 0) throw new Error("At least one Nostr relay is required");
-  const normalized = relays.map((relay) => {
-    const url = new URL(relay);
-    if (url.protocol !== "wss:") throw new Error("Nostr relays must use wss://");
-    url.pathname = url.pathname.replace(/\/$/, "");
-    return url.toString().replace(/\/$/, "");
-  });
+  const normalized = relays.map(normalizePublicRelay);
   if (new Set(normalized).size !== normalized.length) {
     throw new Error("Nostr relay URLs must be unique");
   }

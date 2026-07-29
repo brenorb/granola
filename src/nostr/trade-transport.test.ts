@@ -200,6 +200,16 @@ describe("Nostr trade transport", () => {
     )).toThrow(/query|fragment/i);
   });
 
+  it("accepts the local mesh relay as a discovery relay", () => {
+    const transport = new NostrTradeTransport(
+      new MemoryInboxPort(),
+      ["ws://localhost:4870", discovery[0]!, discovery[1]!, discovery[2]!],
+      inboxes
+    );
+
+    expect(transport).toBeDefined();
+  });
+
   it("creates an exact registration locally and publishes that persisted event later", async () => {
     const port = new MemoryInboxPort();
     let clock = now;

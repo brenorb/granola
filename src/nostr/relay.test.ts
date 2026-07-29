@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NostrEvent } from "../order/events.js";
-import { RelayClient, type RelayPoolPort } from "./relay.js";
+import { LOCAL_MESH_RELAY, PUBLIC_RELAYS, RelayClient, type RelayPoolPort } from "./relay.js";
 
 const EVENT: NostrEvent = {
   id: "a".repeat(64),
@@ -43,6 +43,17 @@ class FakePool implements RelayPoolPort {
 }
 
 describe("relay client", () => {
+  it("includes and accepts the local mesh relay", () => {
+    expect(PUBLIC_RELAYS).toContain(LOCAL_MESH_RELAY);
+
+    const client = new RelayClient({
+      relays: [`${LOCAL_MESH_RELAY}/`],
+      pool: new FakePool()
+    });
+
+    expect(client.relays).toEqual([LOCAL_MESH_RELAY]);
+  });
+
   it("records an unambiguous receipt for every allowlisted relay", async () => {
     const pool = new FakePool();
     const client = new RelayClient({

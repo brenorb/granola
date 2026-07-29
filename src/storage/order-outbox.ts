@@ -1,5 +1,6 @@
 import { verifyEvent } from "nostr-tools/pure";
 
+import { normalizePublicRelay } from "../nostr/relay.js";
 import type { OrderOperationEvidence } from "../order/events.js";
 import type { OrderState } from "../order/model.js";
 import type {
@@ -102,18 +103,12 @@ function validateReceipts(value: unknown): number {
     ) {
       throw new Error("Order outbox receipts are corrupt");
     }
-    const url = new URL(receipt.relay);
-    if (
-      url.protocol !== "wss:" ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
-    ) {
+    let normalized: string;
+    try {
+      normalized = normalizePublicRelay(receipt.relay);
+    } catch {
       throw new Error("Order outbox receipt relay is invalid");
     }
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    const normalized = url.toString().replace(/\/$/, "");
     if (normalized !== receipt.relay || relays.has(normalized)) {
       throw new Error("Order outbox receipt relays must be canonical and unique");
     }

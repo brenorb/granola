@@ -1,6 +1,7 @@
 import { verifyHTLCHash } from "@cashu/cashu-ts";
 import { getEventHash, getPublicKey, verifyEvent } from "nostr-tools";
 
+import { normalizePublicRelay } from "../nostr/relay.js";
 import type { NostrEvent } from "../order/events.js";
 import type {
   CashuOperationJournal,
@@ -192,31 +193,40 @@ function validateEvent(
   }
 }
 
-function validateRelayList(value: unknown, label: string, allowEmpty: boolean): string[] {
+function validateRelayList(
+  value: unknown,
+  label: string,
+  allowEmpty: boolean,
+  allowLocalPublic = false
+): string[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
     throw new Error(`${label} is invalid`);
   }
   const relays = value.map((value) => {
     if (typeof value !== "string") throw new Error(`${label} is invalid`);
-    let parsed: URL;
+    let normalized: string;
     try {
-      parsed = new URL(value);
+      if (allowLocalPublic) {
+        normalized = normalizePublicRelay(value);
+      } else {
+        const parsed = new URL(value);
+        if (
+          parsed.protocol !== "wss:" ||
+          parsed.username ||
+          parsed.password ||
+          parsed.search ||
+          parsed.hash
+        ) throw new Error("invalid relay");
+        parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+        normalized = parsed.toString().replace(/\/$/, "");
+      }
     } catch {
       throw new Error(`${label} is invalid`);
     }
-    if (
-      parsed.protocol !== "wss:" ||
-      parsed.username ||
-      parsed.password ||
-      parsed.search ||
-      parsed.hash
-    ) throw new Error(`${label} is invalid`);
-    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-    const normalized = parsed.toString().replace(/\/$/, "");
     if (normalized !== value) throw new Error(`${label} is invalid`);
     return normalized;
   });
-  if (new Set(relays).size !== relays.length || relays.length > 3) {
+  if (new Set(relays).size !== relays.length || relays.length > (allowLocalPublic ? 4 : 3)) {
     throw new Error(`${label} is invalid`);
   }
   return relays;
@@ -716,7 +726,8 @@ function validateInbox(value: unknown): asserts value is TradeInboxJournal {
   const discoveryRelays = validateRelayList(
     inbox.discoveryRelays,
     "Trade inbox discovery relays",
-    inbox.status === "unregistered"
+    inbox.status === "unregistered",
+    true
   );
   const inboxRelays = validateRelayList(
     inbox.inboxRelays,
@@ -965,7 +976,7 @@ function validatePendingOrderPublication(
       .map(({ relay }) => relay)
       .filter((relay): relay is string => typeof relay === "string")
   )];
-  validateRelayList(relays, "Pending order publication relays", true);
+  validateRelayList(relays, "Pending order publication relays", true, true);
   const receipts = validateReceipts(
     pending.receipts,
     relays,

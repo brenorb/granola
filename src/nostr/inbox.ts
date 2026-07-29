@@ -1,6 +1,7 @@
 import { finalizeEvent, getPublicKey, verifyEvent } from "nostr-tools";
 
 import type { NostrEvent } from "../order/events.js";
+import { normalizePublicRelay } from "./relay.js";
 
 export interface InboxRelayCapabilities {
   supportedNips: number[];
@@ -122,7 +123,18 @@ export function normalizeInboxListRelays(values: readonly string[]): string[] {
 }
 
 export function normalizeDiscoveryRelays(values: readonly string[]): string[] {
-  return normalizeRelays(values, "Discovery", 3, 3);
+  if (values.length < 3 || values.length > 4) {
+    throw new Error("Discovery requires 3-4 relays");
+  }
+  const relays = values.map((value) => {
+    try {
+      return normalizePublicRelay(value);
+    } catch (error) {
+      throw new Error(`Discovery relay is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  if (new Set(relays).size !== relays.length) throw new Error("Discovery contains a duplicate relay");
+  return relays.sort();
 }
 
 function deepFreeze<T>(value: T): T {
