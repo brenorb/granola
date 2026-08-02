@@ -12,4 +12,11 @@ describe("canonicalJson", () => {
     expect(() => canonicalJson({ missing: undefined })).toThrow();
     expect(() => canonicalJson(Number.NaN)).toThrow();
   });
+
+  it("can omit undefined object properties for optional order fields", () => {
+    expect(canonicalJson(
+      { keep: 1, omit: undefined, nested: { omit: undefined, keep: true } },
+      { omitUndefinedObjectProperties: true }
+    )).toBe('{"keep":1,"nested":{"keep":true}}');
+  });
 });
