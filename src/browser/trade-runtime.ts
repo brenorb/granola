@@ -107,7 +107,6 @@ export interface BrowserTradeRuntime {
   transport: NostrTradeTransport;
   inboxPort: BrowserInboxPort;
   inboxRelay: string;
-  market: typeof TEST_MARKET;
 }
 
 export interface BrowserInboxPort
@@ -178,7 +177,6 @@ export async function createBrowserTradeRuntime(
     sessions,
     transport,
     inboxPort,
-    inboxRelay,
-    market: TEST_MARKET
+    inboxRelay
   };
 }

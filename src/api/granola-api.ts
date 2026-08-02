@@ -1,5 +1,4 @@
 import type {
-  CashuClient,
   CashuQuote,
   MintCapabilities,
   TokenSummary
@@ -226,4 +225,3 @@ export class GranolaApi {
 }
 
 export type BrowserGranolaApi = GranolaApi;
-export const satisfiesCashuPort = (client: CashuClient): CashuPort => client;
