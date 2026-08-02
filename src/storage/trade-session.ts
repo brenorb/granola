@@ -3,6 +3,7 @@ import { getEventHash, getPublicKey, verifyEvent } from "nostr-tools";
 
 import { normalizePublicRelay } from "../nostr/relay.js";
 import { canonicalJson } from "../core/canonical-json.js";
+import { withSharedLock } from "../core/lock.js";
 import type { NostrEvent } from "../order/events.js";
 import type {
   CashuOperationJournal,
@@ -1773,42 +1774,6 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
 }
 
 export type TradeSessionExclusiveRunner = <T>(action: () => Promise<T>) => Promise<T>;
-
-const localLockTails = new Map<string, Promise<void>>();
-
-async function withLocalLock<T>(
-  name: string,
-  action: () => Promise<T>
-): Promise<T> {
-  const previous = localLockTails.get(name) ?? Promise.resolve();
-  let release = (): void => {};
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  localLockTails.set(name, current);
-  await previous;
-  try {
-    return await action();
-  } finally {
-    release();
-    if (localLockTails.get(name) === current) localLockTails.delete(name);
-  }
-}
-
-async function withSharedLock<T>(
-  name: string,
-  action: () => Promise<T>
-): Promise<T> {
-  const locks = globalThis.navigator?.locks;
-  if (locks !== undefined) {
-    return await locks.request(
-      name,
-      { mode: "exclusive" },
-      async () => action()
-    );
-  }
-  return withLocalLock(name, action);
-}
 
 const withDefaultTradeSessionLock: TradeSessionExclusiveRunner = async <T>(
   action: () => Promise<T>
