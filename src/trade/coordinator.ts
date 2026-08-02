@@ -66,10 +66,6 @@ type InitialStep =
   | { kind: "complete"; view: PublicTradeView }
   | { kind: "external"; snapshot: ExternalSnapshot };
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -420,11 +416,11 @@ export class TradeCoordinator {
         if (action.kind === "none") {
           return { kind: "complete", view: publicTradeView(current) };
         }
-        const execution = this.effects.classify(action, clone(current));
+        const execution = this.effects.classify(action, structuredClone(current));
         if (execution === "local") {
           const result = await this.effects.applyLocal({
             action,
-            session: clone(current),
+            session: structuredClone(current),
             now
           });
           assertCompleteResult(current, result);
@@ -438,7 +434,7 @@ export class TradeCoordinator {
           kind: "external",
           snapshot: {
             action,
-            session: clone(current),
+            session: structuredClone(current),
             revision: current.revision,
             now,
             fingerprint: await externalFingerprint(
@@ -446,7 +442,7 @@ export class TradeCoordinator {
               current,
               await this.effects.externalFingerprintMaterial?.(
                 action,
-                clone(current)
+                structuredClone(current)
               ) ?? null
             )
           }
@@ -458,7 +454,7 @@ export class TradeCoordinator {
     const { snapshot } = initial;
     const result = await this.effects.performExternal({
       action: snapshot.action,
-      session: clone(snapshot.session),
+      session: structuredClone(snapshot.session),
       now: snapshot.now,
       revision: snapshot.revision,
       fingerprint: snapshot.fingerprint
@@ -484,7 +480,7 @@ export class TradeCoordinator {
         current,
         await this.effects.externalFingerprintMaterial?.(
           currentAction,
-          clone(current)
+          structuredClone(current)
         ) ?? null
       );
       if (currentFingerprint !== snapshot.fingerprint) {

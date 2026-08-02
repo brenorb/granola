@@ -42,10 +42,6 @@ const CHOREOGRAPHY_PHASES = new Set([
 ]);
 const MINT_STATES = new Set(["UNKNOWN", "UNSPENT", "PENDING", "SPENT"]);
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function makerStartIdentity(session: TradeSession): string {
   return JSON.stringify({
     sessionId: session.sessionId,
@@ -1821,12 +1817,12 @@ export class TradeSessionRepository {
       assertSessions(stored);
       return {
         schema: "granola/trade-session-store/v1",
-        sessions: clone(stored),
+        sessions: structuredClone(stored),
         takerStarts: []
       };
     }
     assertTradeSessionStore(stored);
-    return clone(stored);
+    return structuredClone(stored);
   }
 
   async list(): Promise<TradeSession[]> {
@@ -1849,7 +1845,7 @@ export class TradeSessionRepository {
     if (!sameTakerStartIntent(binding, intent)) {
       throw new Error("Taker request ID conflicts with another start intent");
     }
-    return clone(store.sessions.find(
+    return structuredClone(store.sessions.find(
       (session) => session.sessionId === binding.sessionId
     )!);
   }
@@ -1875,7 +1871,7 @@ export class TradeSessionRepository {
         if (!sameTakerStartIntent(binding, intent)) {
           throw new Error("Taker request ID conflicts with another start intent");
         }
-        return clone(store.sessions.find(
+        return structuredClone(store.sessions.find(
           (item) => item.sessionId === binding.sessionId
         )!);
       }
@@ -1889,14 +1885,14 @@ export class TradeSessionRepository {
       if (store.sessions.some((item) => item.sessionId === session.sessionId)) {
         throw new Error("Taker start session identity already exists");
       }
-      store.sessions.push(clone(session));
+      store.sessions.push(structuredClone(session));
       store.takerStarts.push({
-        ...clone(intent),
+        ...structuredClone(intent),
         sessionId: session.sessionId
       });
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);
-      return clone(session);
+      return structuredClone(session);
     });
   }
 
@@ -1914,7 +1910,7 @@ export class TradeSessionRepository {
         if (makerStartIdentity(existing) !== makerStartIdentity(session)) {
           throw new Error("Maker proposal conflicts with an existing trade session");
         }
-        return clone(existing);
+        return structuredClone(existing);
       }
       const competing = store.sessions.find(
         (item) =>
@@ -1926,10 +1922,10 @@ export class TradeSessionRepository {
       if (competing !== undefined) {
         throw new Error("Order is already being taken by another trader");
       }
-      store.sessions.push(clone(session));
+      store.sessions.push(structuredClone(session));
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);
-      return clone(session);
+      return structuredClone(session);
     });
   }
 
@@ -1944,7 +1940,7 @@ export class TradeSessionRepository {
         if (expectedRevision !== null || session.revision !== 0) {
           throw new Error("Trade session creation requires revision zero");
         }
-        sessions.push(clone(session));
+        sessions.push(structuredClone(session));
       } else {
         if (expectedRevision === null) throw new Error("Trade session already exists");
         if (current.revision !== expectedRevision) {
@@ -1957,7 +1953,7 @@ export class TradeSessionRepository {
           throw new Error("Trade session update time regressed");
         }
         assertMonotonicUpdate(current, session);
-        sessions[index] = clone(session);
+        sessions[index] = structuredClone(session);
       }
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);

@@ -8,10 +8,6 @@ export interface StorageDriver {
   delete(key: string): Promise<void>;
 }
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function assertWalletState(value: unknown): asserts value is WalletState {
   if (!value || typeof value !== "object") {
     throw new Error("Wallet storage is corrupt");
@@ -57,12 +53,12 @@ export class WalletRepository {
     const stored = await this.driver.get(WALLET_KEY);
     if (stored === undefined || stored === null) return createEmptyWallet();
     assertWalletState(stored);
-    return clone(stored);
+    return structuredClone(stored);
   }
 
   async save(state: WalletState): Promise<void> {
     assertWalletState(state);
-    await this.driver.set(WALLET_KEY, clone(state));
+    await this.driver.set(WALLET_KEY, structuredClone(state));
   }
 
   async clear(): Promise<void> {
@@ -75,11 +71,11 @@ export class MemoryStorageDriver implements StorageDriver {
 
   async get(key: string): Promise<unknown> {
     const value = this.values.get(key);
-    return value === undefined ? undefined : clone(value);
+    return value === undefined ? undefined : structuredClone(value);
   }
 
   async set(key: string, value: unknown): Promise<void> {
-    this.values.set(key, clone(value));
+    this.values.set(key, structuredClone(value));
   }
 
   async delete(key: string): Promise<void> {

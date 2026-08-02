@@ -198,10 +198,6 @@ const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NIP17_TIMESTAMP_LOOKBACK_SECONDS = 172_800;
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function bytes(hex: string, label: string): Uint8Array {
   if (!HEX_32.test(hex)) throw new Error(`${label} is not a 32-byte key`);
   return Uint8Array.from(hex.match(/../g) ?? [], (part) => Number.parseInt(part, 16));
@@ -230,7 +226,7 @@ function bump(session: TradeSession, now: number): TradeSession {
   if (!Number.isSafeInteger(now) || now < session.updatedAt) {
     throw new Error("Coordinator effect time regressed");
   }
-  const next = clone(session);
+  const next = structuredClone(session);
   next.revision += 1;
   next.updatedAt = now;
   return next;
@@ -445,8 +441,8 @@ function exactPendingPublication(
   return {
     operation: entry.intent.operation,
     orderId: entry.intent.orderId,
-    projection: clone(entry.publication.projection),
-    receipts: clone(entry.publication.receipts),
+    projection: structuredClone(entry.publication.projection),
+    receipts: structuredClone(entry.publication.receipts),
     status: entry.status,
     ...publicationTimes(entry, previous, now)
   };
@@ -920,17 +916,17 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       const next = bump(session, now);
       next.privateState.inbox = verify
         ? {
-            ...clone(inbox),
+            ...structuredClone(inbox),
             status: "registered",
-            receipts: clone(result.receipts),
-            readbacks: clone(result.readback),
+            receipts: structuredClone(result.receipts),
+            readbacks: structuredClone(result.readback),
             acknowledgedAt: inbox.acknowledgedAt ?? now,
             registeredAt: now
           }
         : {
-            ...clone(inbox),
+            ...structuredClone(inbox),
             status: "acknowledged",
-            receipts: clone(result.receipts),
+            receipts: structuredClone(result.receipts),
             readbacks: [],
             acknowledgedAt: now,
             registeredAt: null
@@ -1223,8 +1219,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       : await this.withSessionKey(session, send);
     const next = bump(session, now);
     next.privateState.outbox = {
-      ...clone(outbox),
-      receipts: clone(receipts),
+      ...structuredClone(outbox),
+      receipts: structuredClone(receipts),
       status: "acknowledged"
     };
     return next;
@@ -1362,7 +1358,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     );
     const next = bump(session, now);
     next.privateState.pendingIncoming = {
-      ...clone(pending),
+      ...structuredClone(pending),
       validation: { status: "validated", checkedAt: now, error: null }
     };
     if (
@@ -1462,7 +1458,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       lastMessageId: pending.message.message_id,
       lastTranscriptHash: pending.transcriptHash,
       accepted: [
-        ...clone(session.privateState.transcript.accepted),
+        ...structuredClone(session.privateState.transcript.accepted),
         {
           sequence: pending.message.sequence,
           messageId: pending.message.message_id,
@@ -1529,14 +1525,14 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     );
     const next = bump(session, now);
     next.privateState.transcript = {
-      choreography: clone(outbox.nextChoreography),
+      choreography: structuredClone(outbox.nextChoreography),
       nextSequence: (BigInt(session.privateState.transcript.nextSequence) + 1n)
         .toString(),
         lastRumorId: outbox.rumor.id,
       lastMessageId: outbox.message.message_id,
       lastTranscriptHash: hash,
       accepted: [
-        ...clone(session.privateState.transcript.accepted),
+        ...structuredClone(session.privateState.transcript.accepted),
         {
           sequence: outbox.message.sequence,
           messageId: outbox.message.message_id,
@@ -1689,7 +1685,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     const next = bump(session, now);
     next.privateState.cashuOperation = {
-      ...clone(operation),
+      ...structuredClone(operation),
       status: "completed",
       result: cashuResult(operation.artifact, completed)
     };
@@ -1729,7 +1725,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       const output = {
         mintUrl: operation.result!.mintUrl,
         unit: operation.result!.unit,
-        proofs: clone(operation.result!.proofs)
+        proofs: structuredClone(operation.result!.proofs)
       };
       const reconciled = operation.result!.walletMutation === "replace"
         ? reconcileProofReplacement(wallet, {
