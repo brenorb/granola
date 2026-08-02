@@ -219,5 +219,3 @@ export class GranolaApi {
     await Promise.all([this.wallets.clear(), this.quotes.clear()]);
   }
 }
-
-export type BrowserGranolaApi = GranolaApi;

@@ -1,4 +1,4 @@
-import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
+import { GranolaApi, QuoteRepository, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, TEST_MARKET, type PublishOrderInput } from "./api/order-api.js";
 import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
 import { nip19 } from "nostr-tools";
@@ -38,14 +38,14 @@ import {
 import type { PublicTradeView } from "./trade/session.js";
 
 interface GranolaBrowserFacade {
-  getState: BrowserGranolaApi["getState"];
-  inspectMint: BrowserGranolaApi["inspectMint"];
-  inspectToken: BrowserGranolaApi["inspectToken"];
-  requestMint: BrowserGranolaApi["requestMint"];
-  claimMint: BrowserGranolaApi["claimMint"];
-  receiveToken: BrowserGranolaApi["receiveToken"];
-  createBackup: BrowserGranolaApi["createBackup"];
-  clearWallet: BrowserGranolaApi["clearWallet"];
+  getState: GranolaApi["getState"];
+  inspectMint: GranolaApi["inspectMint"];
+  inspectToken: GranolaApi["inspectToken"];
+  requestMint: GranolaApi["requestMint"];
+  claimMint: GranolaApi["claimMint"];
+  receiveToken: GranolaApi["receiveToken"];
+  createBackup: GranolaApi["createBackup"];
+  clearWallet: GranolaApi["clearWallet"];
   resetProfile: (confirmation: string) => Promise<void>;
   getMakerPublicKeys: OrderApi["getMakerPublicKeys"];
   getOrderBook: OrderApi["getOrderBook"];
