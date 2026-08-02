@@ -125,6 +125,25 @@ function takerFundingLeg(side: OrderSide): "base" | "quote" {
   return side === "sell" ? "quote" : "base";
 }
 
+function sessionLeg(
+  session: TradeSession,
+  leg: "base" | "quote"
+): { mintUrl: string; unit: string; keyset: string; amount: string } {
+  return leg === "base"
+    ? {
+        mintUrl: session.terms.baseMint,
+        unit: session.terms.baseUnit,
+        keyset: session.terms.baseKeyset,
+        amount: session.terms.baseAmount
+      }
+    : {
+        mintUrl: session.terms.quoteMint,
+        unit: session.terms.quoteUnit,
+        keyset: session.terms.quoteKeyset,
+        amount: session.terms.quoteAmount
+      };
+}
+
 function proofAmount(value: string): bigint {
   if (!/^[1-9]\d*$/.test(value)) {
     throw new Error("Wallet contains a malformed proof amount");
@@ -286,38 +305,10 @@ export class TradeApi {
         quoteMintNow: currentTime
       }
     });
-    const wallet = await this.wallets.load();
-    const fundingLeg = takerFundingLeg(order.state.side);
-    const fundingMint = fundingLeg === "base"
-      ? session.terms.baseMint
-      : session.terms.quoteMint;
-    const fundingUnit = fundingLeg === "base"
-      ? session.terms.baseUnit
-      : session.terms.quoteUnit;
-    const fundingKeyset = fundingLeg === "base"
-      ? session.terms.baseKeyset
-      : session.terms.quoteKeyset;
-    const targetAmount = fundingLeg === "base"
-      ? session.terms.baseAmount
-      : session.terms.quoteAmount;
-    if (fundingKeyset !== (fundingLeg === "base"
-      ? selectedMarket.baseKeyset
-      : selectedMarket.quoteKeyset)) {
-      throw new Error(`Session ${fundingLeg} keyset changed after exact mint preflight`);
-    }
-    const fundingPocket = exactPocket(
-      wallet,
-      fundingMint,
-      fundingUnit,
-      fundingLeg
-    );
-    const spendability =
-      await this.spendability.inspectTradeSpendability(fundingPocket);
-    assertFunding(
-      fundingPocket,
-      spendability,
-      targetAmount,
-      fundingLeg
+    await this.verifyFunding(
+      session,
+      takerFundingLeg(order.state.side),
+      selectedMarket
     );
     const persisted = await this.sessions.createTakerForRequest(intent, session);
     this.assertBoundTaker(persisted, intent);
@@ -351,38 +342,10 @@ export class TradeApi {
         quoteMintNow: currentTime
       }
     });
-    const wallet = await this.wallets.load();
-    const fundingLeg = makerOfferedLeg(order.state.side);
-    const fundingMint = fundingLeg === "base"
-      ? session.terms.baseMint
-      : session.terms.quoteMint;
-    const fundingUnit = fundingLeg === "base"
-      ? session.terms.baseUnit
-      : session.terms.quoteUnit;
-    const fundingKeyset = fundingLeg === "base"
-      ? session.terms.baseKeyset
-      : session.terms.quoteKeyset;
-    const targetAmount = fundingLeg === "base"
-      ? session.terms.baseAmount
-      : session.terms.quoteAmount;
-    if (fundingKeyset !== (fundingLeg === "base"
-      ? selectedMarket.baseKeyset
-      : selectedMarket.quoteKeyset)) {
-      throw new Error(`Session ${fundingLeg} keyset changed after exact mint preflight`);
-    }
-    const fundingPocket = exactPocket(
-      wallet,
-      fundingMint,
-      fundingUnit,
-      fundingLeg
-    );
-    const spendability =
-      await this.spendability.inspectTradeSpendability(fundingPocket);
-    assertFunding(
-      fundingPocket,
-      spendability,
-      targetAmount,
-      fundingLeg
+    await this.verifyFunding(
+      session,
+      makerOfferedLeg(order.state.side),
+      selectedMarket
     );
     const persisted = await this.sessions.createMakerForOrder(session);
     this.assertBoundMaker(persisted, proposal);
@@ -395,6 +358,26 @@ export class TradeApi {
       throw new Error("Trade API clock must be a non-negative Unix timestamp");
     }
     return value;
+  }
+
+  private async verifyFunding(
+    session: TradeSession,
+    fundingLeg: "base" | "quote",
+    market: SessionMarketSelection
+  ): Promise<void> {
+    const funding = sessionLeg(session, fundingLeg);
+    const marketKeyset = fundingLeg === "base" ? market.baseKeyset : market.quoteKeyset;
+    if (funding.keyset !== marketKeyset) {
+      throw new Error(`Session ${fundingLeg} keyset changed after exact mint preflight`);
+    }
+    const pocket = exactPocket(
+      await this.wallets.load(),
+      funding.mintUrl,
+      funding.unit,
+      fundingLeg
+    );
+    const spendability = await this.spendability.inspectTradeSpendability(pocket);
+    assertFunding(pocket, spendability, funding.amount, fundingLeg);
   }
 
   private assertBoundTaker(

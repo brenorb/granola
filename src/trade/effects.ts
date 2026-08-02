@@ -72,6 +72,7 @@ import {
 } from "./wallet-reconcile.js";
 import { verifyEvent } from "nostr-tools/pure";
 import { parseProjectionEvent } from "../order/events.js";
+import { canonicalJson } from "../core/canonical-json.js";
 
 type WithWalletLock = <T>(action: () => Promise<T>) => Promise<T>;
 
@@ -199,19 +200,6 @@ const NIP17_TIMESTAMP_LOOKBACK_SECONDS = 172_800;
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) throw new Error("Coordinator value is not canonical");
-    return encoded;
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-    .join(",")}}`;
 }
 
 function bytes(hex: string, label: string): Uint8Array {

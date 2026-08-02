@@ -2,6 +2,7 @@ import { verifyHTLCHash } from "@cashu/cashu-ts";
 import { getEventHash, getPublicKey, verifyEvent } from "nostr-tools";
 
 import { normalizePublicRelay } from "../nostr/relay.js";
+import { canonicalJson } from "../core/canonical-json.js";
 import type { NostrEvent } from "../order/events.js";
 import type {
   CashuOperationJournal,
@@ -687,17 +688,6 @@ function validatePrivateLeg(value: unknown): asserts value is PrivateLegJournal 
         (item.state === "SPENT") !== (item.witnessCommitment !== null);
     })
   ) throw new Error("Private trade observations are invalid");
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function validateInbox(value: unknown): asserts value is TradeInboxJournal {

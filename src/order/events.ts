@@ -5,6 +5,8 @@ import {
   type OrderState
 } from "./model.js";
 
+import { canonicalJson } from "../core/canonical-json.js";
+
 export interface UnsignedNostrEvent {
   kind: number;
   created_at: number;
@@ -50,20 +52,6 @@ export function orderAddress(pubkey: string, orderId: string): string {
 
 function requireHex(value: string, pattern: RegExp, label: string): void {
   if (!pattern.test(value)) throw new Error(`${label} must be lowercase hex`);
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right));
-    return `{${entries.map(([key, item]) =>
-      `${JSON.stringify(key)}:${canonicalJson(item)}`
-    ).join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new Error("Value cannot be canonically encoded");
-  return encoded;
 }
 
 function tagValues(event: NostrEvent, key: string): string[] {
