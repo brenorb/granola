@@ -417,9 +417,7 @@ export async function eligibleMarketIds(state: OrderState): Promise<string[]> {
 
 function effectiveAvailable(state: OrderState, now: number): bigint {
   const remaining = integer(state.remaining_amount, "Remaining amount", true);
-  if (state.reservation && now < state.reservation.expires_at) {
-    return remaining - integer(state.reserved_amount, "Reserved amount", true);
-  }
+  if (state.reservation) return 0n;
   return remaining;
 }
 
@@ -429,19 +427,40 @@ function comparePrice(left: OrderRecord, right: OrderRecord): number {
   return leftPrice < rightPrice ? -1 : leftPrice > rightPrice ? 1 : 0;
 }
 
+function matchesMarket(
+  state: OrderState,
+  market: ExactMarket
+): boolean {
+  if (
+    state.base_unit !== market.baseUnit ||
+    state.quote_unit !== market.quoteUnit
+  ) return false;
+  return state.side === "sell"
+    ? state.offered.mint === market.baseMint &&
+        state.requested.acceptable_mints.includes(market.quoteMint)
+    : state.offered.mint === market.quoteMint &&
+        state.requested.acceptable_mints.includes(market.baseMint);
+}
+
 export async function buildOrderBook(
   records: OrderRecord[],
   market: ExactMarket,
   now: number
 ): Promise<OrderBook> {
   const selectedMarketId = await marketId(market);
+  const normalizedMarket: ExactMarket = {
+    baseUnit: canonicalUnit(market.baseUnit),
+    baseMint: normalizeMintUrl(market.baseMint),
+    quoteUnit: canonicalUnit(market.quoteUnit),
+    quoteMint: normalizeMintUrl(market.quoteMint)
+  };
   const eligible: OrderRecord[] = [];
   for (const record of records) {
     if (!record.verified) continue;
     if (["filled", "canceled", "expired"].includes(record.state.status)) continue;
     if (now >= record.state.expires_at) continue;
     if (effectiveAvailable(record.state, now) <= 0n) continue;
-    if (!(await eligibleMarketIds(record.state)).includes(selectedMarketId)) continue;
+    if (!matchesMarket(record.state, normalizedMarket)) continue;
     eligible.push(record);
   }
 

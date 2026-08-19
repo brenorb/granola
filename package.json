@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "publish:test-orders": "tsx scripts/publish-test-orders.ts",
     "probe:inbox": "tsx scripts/probe-inbox.ts",
+    "benchmark:performance": "tsx scripts/performance-benchmark.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
