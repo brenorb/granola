@@ -267,6 +267,10 @@ function participant(
 }
 
 function localNostrPubkey(session: TradeSession): string {
+  const participant = session.role === "maker"
+    ? session.privateState.transcript.choreography.participants.makerSessionPubkey
+    : session.privateState.transcript.choreography.participants.takerSessionPubkey;
+  if (participant !== undefined) return participant;
   const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
   try {
     return getPublicKey(key);

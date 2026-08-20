@@ -1339,6 +1339,12 @@ function assertSession(value: unknown): asserts value is TradeSession {
   }
   validateTranscript(privateState.transcript);
   const transcript = privateState.transcript as TradeTranscriptJournal;
+  const localParticipant = session.role === "maker"
+    ? transcript.choreography.participants.makerSessionPubkey
+    : transcript.choreography.participants.takerSessionPubkey;
+  if (localParticipant !== undefined && localParticipant !== localNostrPubkey) {
+    throw new Error("Trade participant does not match the local session key");
+  }
   if (reservation.abortSeal !== null) {
     const participants = transcript.choreography.participants;
     const expectedAbortAuthor = session.role === "maker"
