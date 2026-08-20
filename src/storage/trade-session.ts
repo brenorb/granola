@@ -41,6 +41,9 @@ const CHOREOGRAPHY_PHASES = new Set([
   "awaiting_settlement_ack", "settling", "settled", "refunding", "failed"
 ]);
 const MINT_STATES = new Set(["UNKNOWN", "UNSPENT", "PENDING", "SPENT"]);
+const EVENT_VALIDATION_CACHE_LIMIT = 512;
+const EVENT_VALIDATION_CACHE_CONTENT_LIMIT = 8 * 1024;
+const eventValidationCache = new Map<string, true>();
 
 function makerStartIdentity(session: TradeSession): string {
   return JSON.stringify({
@@ -173,6 +176,24 @@ function validateEvent(
     !HEX_32.test(event.pubkey) ||
     (signed && (typeof event.sig !== "string" || !HEX_64.test(event.sig)))
   ) throw new Error(`${label} is invalid`);
+  const cacheKey =
+    event.content.length <= EVENT_VALIDATION_CACHE_CONTENT_LIMIT &&
+    (event.tags as string[][]).reduce(
+      (size, tag) => size + tag.reduce((tagSize, item) => tagSize + item.length, 0),
+      0
+    ) <= EVENT_VALIDATION_CACHE_CONTENT_LIMIT
+      ? JSON.stringify([
+          signed,
+          event.id,
+          event.pubkey,
+          event.created_at,
+          event.kind,
+          event.tags,
+          event.content,
+          signed ? event.sig : null
+        ])
+      : null;
+  if (cacheKey && eventValidationCache.has(cacheKey)) return;
   if (signed) {
     const snapshot: NostrEvent = {
       id: event.id as string,
@@ -183,11 +204,17 @@ function validateEvent(
       content: event.content as string,
       sig: event.sig as string
     };
-    if (!verifyEvent(snapshot)) {
+    if (getEventHash(snapshot) !== snapshot.id || !verifyEvent(snapshot)) {
       throw new Error(`${label} signature is invalid`);
     }
   } else if (getEventHash(event as never) !== event.id) {
     throw new Error(`${label} ID is invalid`);
+  }
+  if (cacheKey) {
+    if (eventValidationCache.size >= EVENT_VALIDATION_CACHE_LIMIT) {
+      eventValidationCache.delete(eventValidationCache.keys().next().value as string);
+    }
+    eventValidationCache.set(cacheKey, true);
   }
 }
 

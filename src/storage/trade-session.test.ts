@@ -652,6 +652,24 @@ describe("trade session v2 repository", () => {
     }
   });
 
+  it("revalidates a mutated event instead of trusting its cached signature", async () => {
+    const driver = new EncryptedStorageDriver(
+      new MemoryStorageDriver(),
+      "trade-session-cache-test"
+    );
+    await new TradeSessionRepository(driver).save(session, null);
+
+    const corrupt = structuredClone(session);
+    const readback = corrupt.privateState.inbox.readbacks[0];
+    expect(readback?.event).toBeTruthy();
+    readback!.event = { ...readback!.event!, content: "different-signed-event" };
+    expect(corrupt.privateState.inbox.readbacks[0]?.event?.content)
+      .toBe("different-signed-event");
+    await driver.set("granola.trade-sessions.v2", [corrupt]);
+
+    await expect(new TradeSessionRepository(driver).list()).rejects.toThrow();
+  });
+
   it("round-trips an exact pending incoming wrapper and its validation decision", async () => {
     const repository = new TradeSessionRepository(new MemoryStorageDriver());
     const candidate = structuredClone(session);
