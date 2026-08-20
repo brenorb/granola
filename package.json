@@ -9,6 +9,7 @@
     "publish:test-orders": "tsx scripts/publish-test-orders.ts",
     "probe:inbox": "tsx scripts/probe-inbox.ts",
     "benchmark:performance": "tsx scripts/performance-benchmark.ts",
+    "benchmark:e2e": "node scripts/e2e-performance-benchmark.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
