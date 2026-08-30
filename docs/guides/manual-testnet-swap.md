@@ -104,9 +104,9 @@ Negotiating → Reserved → Base locked → Quote locked
 The pages can briefly show adjacent phases. Stop only after both cards say
 **Filled**.
 
-Under the signed settlement plan, the quote HTLC uses a 4-day short lock, the
-base HTLC uses a 7-day long lock, and the reservation recovery horizon is
-8 days.
+Under the signed settlement plan, the quote HTLC uses a 10-minute short lock,
+the base HTLC uses a 20-minute long lock, and the reservation recovery horizon
+is 30 minutes.
 
 Press **Refresh** in both wallets and **Refresh book** on the taker.
 
@@ -159,7 +159,7 @@ A useful secret-free manual trace contains:
 - mint URLs and units;
 - 20 SAT, one USD minor unit, USD 50,000/BTC, all-or-none, and 30-day order
   lifetime;
-- the 4-day, 7-day, and 8-day timing profile;
+- the 10-minute, 20-minute, and 30-minute timing profile;
 - visible phase progression;
 - before and after aggregate balances; and
 - confirmation that the filled order left the book.

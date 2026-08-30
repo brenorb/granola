@@ -18,8 +18,9 @@ describe("manual testnet swap tutorial", () => {
     expect(tutorial).not.toContain("runUntilSettled");
     expect(tutorial).not.toContain("Advance safely");
     expect(tutorial).toContain("filled");
-    expect(tutorial).toContain("4-day");
-    expect(tutorial).toContain("7-day");
+    expect(tutorial).toContain("10-minute");
+    expect(tutorial).toContain("20-minute");
+    expect(tutorial).toContain("30 minutes");
   });
 
   it("links the human tutorial from the deployed static shell", () => {
