@@ -9,6 +9,7 @@
 - [Manual shared-page testnet swap](guides/manual-testnet-swap.md)
 - [Browser agent API](guides/agent-api.md)
 - [Testnet wallet notes](guides/testnet-wallet.md)
+- [NIP-17 coordination latency](performance/nip17-latency.md)
 
 ## Architecture decisions
 

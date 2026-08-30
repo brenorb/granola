@@ -100,4 +100,5 @@ assumptions and failure boundaries.
 - [Manual shared-page testnet swap](docs/guides/manual-testnet-swap.md)
 - [Browser agent API](docs/guides/agent-api.md)
 - [Testnet wallet notes](docs/guides/testnet-wallet.md)
+- [NIP-17 coordination latency report](docs/performance/nip17-latency.md)
 - [Full documentation index](docs/README.md)
