@@ -57,6 +57,11 @@ npm test
 npm run dev
 ```
 
+Run `npm run benchmark:nip17-profile` to print the happy path's click-to-wallet
+time, Cashu time, non-mint coordination time, action totals, and private relay
+operation counts. The profiler uses deterministic in-memory test keys and never
+prints messages, proofs, preimages, or private keys.
+
 Open `http://localhost:5173/`. One page supports both sides of the exchange:
 publishing an order creates an ephemeral maker role for that order, while
 taking an order creates an ephemeral taker session. The same browser wallet can

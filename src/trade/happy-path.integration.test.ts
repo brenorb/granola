@@ -138,6 +138,7 @@ class MemoryOrderRelay implements OrderRelayPort {
 class MemoryTradeTransport {
   private readonly registrations = new Map<string, NostrEvent>();
   private readonly wrappers = new Map<string, NostrEvent[]>();
+  readonly calls = { registrations: 0, discoveries: 0, sends: 0, reads: 0 };
 
   createRegistration(protocolSecretKey: Uint8Array): NostrEvent {
     return createInboxList([INBOX_RELAY], protocolSecretKey, NOW);
@@ -147,6 +148,7 @@ class MemoryTradeTransport {
     event: NostrEvent,
     _protocolSecretKey: Uint8Array
   ) {
+    this.calls.registrations += 1;
     this.registrations.set(event.pubkey, structuredClone(event));
     return {
       event: structuredClone(event),
@@ -166,6 +168,7 @@ class MemoryTradeTransport {
   }
 
   async discoverInbox(authorPubkey: string): Promise<DiscoveredTradeInbox> {
+    this.calls.discoveries += 1;
     const event = this.registrations.get(authorPubkey);
     if (!event) throw new Error("Recipient inbox is not registered");
     return {
@@ -176,6 +179,7 @@ class MemoryTradeTransport {
   }
 
   async send(wrapper: NostrEvent) {
+    this.calls.sends += 1;
     const recipient = wrapper.tags.find((tag) => tag[0] === "p")?.[1];
     if (!recipient) throw new Error("Gift wrap has no recipient");
     const current = this.wrappers.get(recipient) ?? [];
@@ -187,6 +191,7 @@ class MemoryTradeTransport {
   }
 
   async read(recipientPubkey: string): Promise<NostrEvent[]> {
+    this.calls.reads += 1;
     return structuredClone(this.wrappers.get(recipientPubkey) ?? []);
   }
 
@@ -534,6 +539,7 @@ describe("two-party coordinator happy path", () => {
       quoteUnit: selectedMarket.quoteUnit,
       quoteKeyset: QUOTE_KEYSET
     };
+    const clickStartedAt = performance.now();
     await takerSessions.save(await createTakerSession({
       order,
       expectedOrderProjectionId: order.eventId,
@@ -544,17 +550,19 @@ describe("two-party coordinator happy path", () => {
     }, sessionEntropy("taker")), null);
 
     const actionTrace: string[] = [];
+    const actionSpans: Array<{ action: string; durationMs: number }> = [];
     while (
       (await takerSessions.get(SESSION_ID))!.privateState.transcript
         .choreography.phase !== "awaiting_reserve_accept"
     ) {
-      actionTrace.push(
-        `taker:${nextCoordinatorAction(
+      const action = `taker:${nextCoordinatorAction(
           (await takerSessions.get(SESSION_ID))!,
           coordinatorTime
-        ).kind}`
-      );
+        ).kind}`;
+      actionTrace.push(action);
+      const startedAt = performance.now();
       await takerCoordinator.advance(SESSION_ID);
+      actionSpans.push({ action, durationMs: performance.now() - startedAt });
     }
 
     const initialWrapper = transport.wrappersFor(makerPubkey)[0]!;
@@ -618,8 +626,11 @@ describe("two-party coordinator happy path", () => {
       let advanced = false;
       for (const candidate of candidates) {
         try {
+          const action = `${candidate.role}:${candidate.action.kind}`;
+          const startedAt = performance.now();
           await candidate.coordinator.advance(SESSION_ID);
-          actionTrace.push(`${candidate.role}:${candidate.action.kind}`);
+          actionTrace.push(action);
+          actionSpans.push({ action, durationMs: performance.now() - startedAt });
           advanced = true;
           break;
         } catch (error) {
@@ -657,6 +668,7 @@ describe("two-party coordinator happy path", () => {
 
     const makerSession = (await makerSessions.get(SESSION_ID))!;
     const takerSession = (await takerSessions.get(SESSION_ID))!;
+    const walletVisibleAt = performance.now();
     expect(nextCoordinatorAction(makerSession, coordinatorTime))
       .toEqual({ kind: "none" });
     expect(nextCoordinatorAction(takerSession, coordinatorTime))
@@ -672,6 +684,43 @@ describe("two-party coordinator happy path", () => {
     for (const session of [makerSession, takerSession]) {
       expect(session.evidence.legs.base.mintState).toBe("SPENT");
       expect(session.evidence.legs.quote.mintState).toBe("SPENT");
+    }
+
+    if ((globalThis as { process?: { env?: Record<string, string> } })
+      .process?.env?.GRANOLA_E2E_PROFILE === "1") {
+      const cashuActions = new Set([
+        "reserve_cashu_inputs",
+        "execute_cashu_operation",
+        "reconcile_wallet",
+        "clear_cashu_operation",
+        "prepare_base_lock",
+        "prepare_quote_lock",
+        "prepare_base_claim",
+        "prepare_quote_claim",
+        "prepare_base_refund",
+        "prepare_quote_refund",
+        "observe_base",
+        "observe_quote"
+      ]);
+      const byAction = actionSpans.reduce<Record<string, number>>((totals, span) => {
+        const action = span.action.split(":")[1]!;
+        totals[action] = (totals[action] ?? 0) + span.durationMs;
+        return totals;
+      }, {});
+      const mintMs = actionSpans.reduce((total, span) =>
+        total + (cashuActions.has(span.action.split(":")[1]!) ? span.durationMs : 0), 0);
+      const totalMs = walletVisibleAt - clickStartedAt;
+      console.log("GRANOLA_E2E_PROFILE", JSON.stringify({
+        scenario: side === "sell" ? "sell" : "buy",
+        totalMs: Number(totalMs.toFixed(2)),
+        mintMs: Number(mintMs.toFixed(2)),
+        coordinationMs: Number((totalMs - mintMs).toFixed(2)),
+        actionCount: actionSpans.length,
+        transportCalls: transport.calls,
+        byActionMs: Object.fromEntries(Object.entries(byAction)
+          .sort((left, right) => right[1] - left[1])
+          .map(([action, duration]) => [action, Number(duration.toFixed(2))]))
+      }));
     }
 
     expect(makerSession.pendingOrderPublication).toMatchObject({
