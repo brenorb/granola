@@ -37,19 +37,6 @@ export interface PersistentInboxCallbacks {
   onclose(reason: string): void;
 }
 
-interface PooledConnection {
-  key: string;
-  connection: InboxRelayConnection;
-  refs: number;
-  idleTimer: ReturnType<typeof setTimeout> | undefined;
-}
-
-interface OpenedConnection {
-  connection: InboxRelayConnection;
-  release(): void;
-  invalidate(): void;
-}
-
 function nip11Url(relay: string): string {
   const url = new URL(relay);
   if (url.protocol !== "wss:") throw new Error("Inbox relay must use wss://");
@@ -74,22 +61,15 @@ const defaultFactory: InboxRelayFactory = async (relay) =>
 
 export class NostrToolsInboxRelayPort implements InboxRelayPort {
   private readonly infoCache = new Map<string, InboxRelayCapabilities>();
-  private readonly pooled = new Map<string, PooledConnection>();
-  private readonly opening = new Map<string, Promise<PooledConnection>>();
-  private closed = false;
 
   constructor(
     private readonly connect: InboxRelayFactory = defaultFactory,
     private readonly fetchInfo: InboxInfoFetcher = (input, init) =>
       globalThis.fetch(input, init),
-    private readonly queryTimeoutMs = 8_000,
-    private readonly idleTimeoutMs = 30_000
+    private readonly queryTimeoutMs = 8_000
   ) {
     if (!Number.isSafeInteger(queryTimeoutMs) || queryTimeoutMs < 1) {
       throw new Error("Inbox relay query timeout is invalid");
-    }
-    if (!Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs < 1) {
-      throw new Error("Inbox relay idle timeout is invalid");
     }
   }
 
@@ -120,7 +100,7 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     return structuredClone(capabilities);
   }
 
-  private async connectAndAuthenticate(relay: string, auth: AuthHandler): Promise<InboxRelayConnection> {
+  private async open(relay: string, auth: AuthHandler): Promise<InboxRelayConnection> {
     const connection = await this.connect(relay);
     let challengeSeen: (() => void) | undefined;
     const challengeReady = new Promise<void>((resolve) => {
@@ -154,110 +134,12 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     }
   }
 
-  private async open(relay: string, auth: AuthHandler): Promise<OpenedConnection> {
-    if (this.closed) throw new Error("Inbox relay port is closed");
-    const identity = auth.identity;
-    if (!identity) {
-      const connection = await this.connectAndAuthenticate(relay, auth);
-      let released = false;
-      let invalidated = false;
-      return {
-        connection,
-        release: () => {
-          if (released) return;
-          released = true;
-          if (!invalidated) connection.close();
-        },
-        invalidate: () => {
-          if (released || invalidated) return;
-          invalidated = true;
-          connection.close();
-        }
-      };
-    }
-    const key = `${relay}\u0000${identity}`;
-    let entry = this.pooled.get(key);
-    if (!entry) {
-      let opening = this.opening.get(key);
-      if (!opening) {
-        opening = this.connectAndAuthenticate(relay, auth).then((connection) => {
-          if (this.closed) {
-            connection.close();
-            throw new Error("Inbox relay port is closed");
-          }
-          const created = { key, connection, refs: 0, idleTimer: undefined };
-          this.pooled.set(key, created);
-          return created;
-        });
-        this.opening.set(key, opening);
-        void opening.then(
-          () => { if (this.opening.get(key) === opening) this.opening.delete(key); },
-          () => { if (this.opening.get(key) === opening) this.opening.delete(key); }
-        );
-      }
-      entry = await opening;
-    }
-    if (this.pooled.get(key) !== entry || this.closed) {
-      entry.connection.close();
-      throw new Error("Inbox relay port is closed");
-    }
-    entry.refs += 1;
-    if (entry.idleTimer) {
-      clearTimeout(entry.idleTimer);
-      entry.idleTimer = undefined;
-    }
-    let released = false;
-    return {
-      connection: entry.connection,
-      release: () => {
-        if (released) return;
-        released = true;
-        this.release(entry!);
-      },
-      invalidate: () => this.invalidate(entry!)
-    };
-  }
-
-  private release(entry: PooledConnection): void {
-    if (entry.refs === 0) return;
-    entry.refs -= 1;
-    if (entry.refs !== 0) return;
-    entry.idleTimer = setTimeout(() => {
-      if (entry.refs === 0 && this.pooled.get(entry.key) === entry) {
-        this.pooled.delete(entry.key);
-        entry.connection.close();
-      }
-    }, this.idleTimeoutMs);
-    const timer = entry.idleTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
-    timer.unref?.();
-  }
-
-  private invalidate(entry: PooledConnection): void {
-    if (this.pooled.get(entry.key) !== entry) return;
-    this.pooled.delete(entry.key);
-    if (entry.idleTimer) clearTimeout(entry.idleTimer);
-    entry.connection.close();
-  }
-
-  close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    for (const entry of this.pooled.values()) {
-      if (entry.idleTimer) clearTimeout(entry.idleTimer);
-      entry.connection.close();
-    }
-    this.pooled.clear();
-  }
-
   async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
-    const opened = await this.open(relay, auth);
+    const connection = await this.open(relay, auth);
     try {
-      return await opened.connection.publish(event);
-    } catch (error) {
-      opened.invalidate();
-      throw error;
+      return await connection.publish(event);
     } finally {
-      opened.release();
+      connection.close();
     }
   }
 
@@ -266,7 +148,7 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     filter: Record<string, unknown>,
     auth: AuthHandler
   ): Promise<NostrEvent[]> {
-    const opened = await this.open(relay, auth);
+    const connection = await this.open(relay, auth);
     return await new Promise<NostrEvent[]>((resolve, reject) => {
       const events: NostrEvent[] = [];
       let settled = false;
@@ -276,27 +158,15 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
         settled = true;
         clearTimeout(timeout);
         subscription?.close("granola query complete");
-        opened.release();
+        connection.close();
         result();
       };
-      const timeout = setTimeout(() => {
-        opened.invalidate();
-        finish(() => reject(new Error("Inbox relay query timed out")));
-      }, this.queryTimeoutMs);
-      try {
-        subscription = opened.connection.subscribe([filter], {
+      const timeout = setTimeout(() => finish(() => reject(new Error("Inbox relay query timed out"))), this.queryTimeoutMs);
+      subscription = connection.subscribe([filter], {
         onevent: (event) => events.push(event),
         oneose: () => finish(() => resolve(events)),
-        onclose: (reason) => {
-          if (!settled) opened.invalidate();
-          finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)));
-        }
-        });
-      } catch (error) {
-        opened.invalidate();
-        opened.release();
-        reject(error);
-      }
+        onclose: (reason) => finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)))
+      });
     });
   }
 
@@ -306,31 +176,27 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     auth: AuthHandler,
     callbacks: PersistentInboxCallbacks
   ): Promise<PersistentInboxSubscription> {
-    const opened = await this.open(relay, auth);
+    const connection = await this.open(relay, auth);
     let closed = false;
     let subscription: { close(reason?: string): void } | undefined;
     const closeConnection = (reason: string, report: boolean): void => {
       if (closed) return;
       closed = true;
       subscription?.close(reason);
-      opened.release();
+      connection.close();
       if (report) callbacks.onclose(reason);
     };
     try {
-      subscription = opened.connection.subscribe([structuredClone(filter)], {
+      subscription = connection.subscribe([structuredClone(filter)], {
         onevent: (event) => {
           if (!closed) callbacks.onevent(structuredClone(event));
         },
         // EOSE ends the stored backlog, not the live subscription.
         oneose: () => undefined,
-        onclose: (reason) => {
-          if (!closed) opened.invalidate();
-          closeConnection(reason, true);
-        }
+        onclose: (reason) => closeConnection(reason, true)
       });
     } catch (error) {
-      opened.invalidate();
-      opened.release();
+      connection.close();
       throw error;
     }
     return {

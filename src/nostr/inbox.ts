@@ -8,9 +8,7 @@ export interface InboxRelayCapabilities {
   authRequired: boolean;
 }
 
-export type AuthHandler = ((challenge: string) => Promise<NostrEvent>) & {
-  readonly identity?: string;
-};
+export type AuthHandler = (challenge: string) => Promise<NostrEvent>;
 
 export interface InboxRelayPort {
   info(relay: string): Promise<InboxRelayCapabilities>;
@@ -274,13 +272,7 @@ export function createNip42AuthEvent(
 }
 
 function authHandler(relay: string, protocolSecretKey: Uint8Array, now: number): AuthHandler {
-  const handler: AuthHandler = async (challenge) =>
-    createNip42AuthEvent(relay, challenge, protocolSecretKey, now);
-  Object.defineProperty(handler, "identity", {
-    value: getPublicKey(protocolSecretKey),
-    enumerable: false
-  });
-  return handler;
+  return async (challenge) => createNip42AuthEvent(relay, challenge, protocolSecretKey, now);
 }
 
 export function assertInboxCapabilities(capabilities: InboxRelayCapabilities): void {
