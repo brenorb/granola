@@ -93,11 +93,16 @@ npm run build
 npm run benchmark:e2e
 npm run benchmark:nip17-profile
 GRANOLA_FAKE_RELAY_MS=25 npm run benchmark:nip17-profile
+npm run benchmark:nip17-live
 ```
 
 Run the last command three times on each commit and take the median for each
 scenario. The profiler logs action names, durations, and operation counts only;
 it never prints private keys, messages, proofs, preimages, or wallet backups.
+The live command is a dry run unless `--publish` is passed explicitly. After
+approval, run `npm run benchmark:nip17-live -- --publish`; it uses fresh test
+keys and records only relay URLs, public keys, event IDs, acknowledgements, and
+timings.
 
 ## Remaining ceiling
 
