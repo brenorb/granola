@@ -25,9 +25,71 @@ All controlled non-mint medians are below the one-second target. The standard
 in-process E2E benchmark, which has no relay delay, reported medians of 793.69
 ms for sell, 729.02 ms for buy, and 685.63 ms for one-mint settlement.
 
-These numbers are reproducible local evidence, not a claim about current public
-relay performance. A live run would publish disposable kind `10050` and `1059`
-events and therefore requires explicit approval.
+These controlled numbers are not representative of current public relay and
+mint performance. The live benchmark below completed correctly but missed the
+one-second non-mint target by a wide margin.
+
+## Live Testnut E2E
+
+With explicit approval, a headless Chromium run on 2026-08-30 UTC created two
+fresh IndexedDB wallet profiles, funded them independently, published a one-day
+20 SAT sell order, clicked it from the USD wallet, and waited until both public
+wallet views reached `filled`. The signed settlement profile used 10-minute and
+20-minute HTLC locks with a 30-minute recovery horizon.
+
+| Measure | Result |
+| --- | ---: |
+| Click to both wallet views filled | 12,143 ms |
+| Mint critical-path union | 4,645 ms |
+| Non-mint remainder | 7,498 ms |
+| Relay critical-path union | 11,428 ms |
+| Cumulative mint HTTP spans | 11,351 ms |
+| Cumulative relay request/ack/delivery spans | 42,409 ms |
+| Coordinator actions observed | 64 |
+
+Critical-path union merges overlapping network intervals; cumulative spans add
+concurrent work and therefore are diagnostic totals, not components that sum to
+click latency. Non-mint remainder is click latency minus the union of Testnut
+HTTP intervals.
+
+The action timeline shows why the controlled result did not survive the public
+network. Three private deliveries took 871 ms, 776 ms, and 761 ms. Five empty
+inbox polls took 734–780 ms each before later polls received the peer messages.
+The four Cashu executions took 686 ms, 777 ms, 450 ms, and 417 ms, while repeated
+NUT-07 observations added further mint calls. Public reserve and fill projections
+took 348 ms and 340 ms. These steps are sequential protocol checkpoints, so a
+complete atomic two-mint swap cannot currently approach one second even when
+mint time is subtracted.
+
+The aggregate balances prove settlement rather than message delivery alone:
+
+| Wallet | Before | After |
+| --- | --- | --- |
+| Maker | 10,000 SAT | 9,978 SAT + USD 0.01 |
+| Taker | USD 100.00 | 20 SAT + USD 99.99 |
+
+All captured signatures verified. No keys, tokens, proofs, preimages, witnesses,
+invoices, raw messages, or bearer backups were logged.
+
+### Relay evidence
+
+The public order publication was acknowledged by `wss://nos.lol`,
+`wss://relay.primal.net`, and `wss://offchain.pub`; the unavailable local relay
+`ws://localhost:4870` returned no acknowledgement. Every private gift wrap was
+acknowledged by `wss://auth.nostr1.com`.
+
+| Kind | Purpose | Event ID | Acknowledged relays |
+| ---: | --- | --- | --- |
+| 1059 | disposable capability probe | `b320ffca9cc9d9af9e9b81589bf72040e40a0ad883c25398465eb68cf45383bb` | `wss://auth.nostr1.com` |
+| 30078 | open order | `278c1f22f07dc8258997ff10a3877aa42c35af2f1e11f8370b960e178430e7c7` | all three public relays |
+| 10050 | maker order inbox | `e50c0ce58f501978c9cb48aec6c2b2bddef01552803a1b46e2c85c4211781728` | `wss://nos.lol`, `wss://relay.primal.net` |
+| 10050 | taker session inbox | `6913f0ab12e1262b046d6d3d49eaa1d7204a32822dd94bdddce1a73666752208` | `wss://nos.lol`, `wss://relay.primal.net` |
+| 1059 | reserve proposal | `0ae9c9d51660fb5609bd41a70f0aace27eb80e1874d0b70efe87c0a1a28c08fb` | private inbox relay |
+| 10050 | maker session inbox | `b9309fdfc91cf9db4b608aa4366c0d7687e501ae40c005567286a6e6e07778de` | `wss://nos.lol`, `wss://relay.primal.net` |
+| 30078 | reserved order | `8ef21bc227453905f486096aaa9eb52edeb631211f43e679190aaa73bf67a6f6` | all three public relays |
+| 1059 | reserve acceptance | `50f7ea05cc17225ee06522fadee8378e0043a1a2de5911e51ca58ecc8b0ece6e` | private inbox relay |
+| 1059 | quote lock | `0e5bb37f37e948a00b5e59f864517787c1ea181e010a4c8fcaa09d37014209e9` | private inbox relay |
+| 30078 | filled order | `7b9de1f1e08fd0324b5b9199114effab06942c965495f401cab62add1edded74` | all three public relays |
 
 ## Root-cause experiments
 
@@ -99,15 +161,28 @@ npm run benchmark:nip17-live
 Run the last command three times on each commit and take the median for each
 scenario. The profiler logs action names, durations, and operation counts only;
 it never prints private keys, messages, proofs, preimages, or wallet backups.
-The live command is a dry run unless `--publish` is passed explicitly. After
-approval, run `npm run benchmark:nip17-live -- --publish`; it uses fresh test
-keys and records only relay URLs, public keys, event IDs, acknowledgements, and
-timings.
+The live relay command is a dry run unless `--publish` is passed explicitly.
+After approval, run `npm run benchmark:nip17-live -- --publish`; it uses fresh
+test keys and records only relay URLs, public keys, event IDs,
+acknowledgements, and timings.
+
+For a full browser action timeline, add `debug=performance` to each wallet URL.
+The normal interface is unchanged. Read the secret-free measurements in the
+developer console with:
+
+```js
+performance.getEntriesByName("granola:coordinator-action").map((entry) => ({
+  startTime: entry.startTime,
+  duration: entry.duration,
+  ...entry.detail
+}))
+```
 
 ## Remaining ceiling
 
-The accepted fix removes redundant work but does not make websocket setup free.
-The next justified change depends on a live profile showing which cost dominates:
-connection/AUTH setup, discovery fan-out, relay acknowledgement variance, or
-relay-side storage/readback. Until then, a custom identity-aware pool or a new
-quorum durability model would be speculative complexity.
+The accepted duplicate-registration fix remains valid, but the live swap shows
+that inbox polling and sequential private/public relay checkpoints now dominate
+the non-mint path. The next experiment should eliminate empty `poll_inbox`
+requests when a live subscription has not signaled a new event, without
+weakening persisted message validation or retry evidence. Connection pooling is
+still unjustified until that avoidable polling cost is removed and remeasured.
