@@ -34,6 +34,7 @@ class MemoryInboxPort implements InboxRelayPort {
   hideReadback = false;
   publicationGate: Promise<void> | null = null;
   queryGate: Promise<void> | null = null;
+  queryDelayMs = 0;
 
   async info(): Promise<{ supportedNips: number[]; authRequired: boolean }> {
     return { supportedNips: [17, 40, 42], authRequired: true };
@@ -49,6 +50,9 @@ class MemoryInboxPort implements InboxRelayPort {
   }
 
   async query(relay: string, filter: Record<string, unknown>, auth: AuthHandler): Promise<NostrEvent[]> {
+    if (this.queryDelayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, this.queryDelayMs));
+    }
     if (this.queryGate) await this.queryGate;
     const authEvent = await auth(`challenge:${relay}`);
     this.queries.push({ relay, filter: structuredClone(filter), authPubkey: authEvent.pubkey });
@@ -379,6 +383,42 @@ describe("Nostr trade transport", () => {
     expect(registration.confirmed).toHaveLength(3);
     expect(exact).toEqual({ event: persisted, eventId: persisted.id, relays: inboxes });
     expect(selected).toEqual(inboxes);
+  });
+
+  it("shows repeated discovery paying one delayed relay round trip each time", async () => {
+    vi.useFakeTimers();
+    try {
+      const port = new MemoryInboxPort();
+      port.queryDelayMs = 25;
+      const transport = new NostrTradeTransport(
+        port,
+        discovery,
+        inboxes,
+        () => now,
+        probeEvidence()
+      );
+      const recipientKey = key(1);
+      const recipient = getPublicKey(recipientKey);
+      const list = createInboxList(inboxes, recipientKey, now);
+      for (const relay of discovery) port.events.set(relay, [list]);
+      const startedAt = Date.now();
+
+      const discoverOnce = async () => {
+        const startedAt = Date.now();
+        const pending = transport.discoverInbox(recipient, key(2));
+        await vi.advanceTimersByTimeAsync(25);
+        await pending;
+        return Date.now() - startedAt;
+      };
+
+      expect(await discoverOnce()).toBe(25);
+      expect(await discoverOnce()).toBe(25);
+      expect(await discoverOnce()).toBe(25);
+      expect(Date.now() - startedAt).toBe(75);
+      expect(port.queries).toHaveLength(9);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("requires at least one authenticated inbox acknowledgement and reads deduplicated wraps", async () => {

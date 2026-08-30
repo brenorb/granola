@@ -138,6 +138,7 @@ class MemoryOrderRelay implements OrderRelayPort {
 class MemoryTradeTransport {
   private readonly registrations = new Map<string, NostrEvent>();
   private readonly wrappers = new Map<string, NostrEvent[]>();
+  discoverCalls = 0;
 
   createRegistration(protocolSecretKey: Uint8Array): NostrEvent {
     return createInboxList([INBOX_RELAY], protocolSecretKey, NOW);
@@ -166,6 +167,7 @@ class MemoryTradeTransport {
   }
 
   async discoverInbox(authorPubkey: string): Promise<DiscoveredTradeInbox> {
+    this.discoverCalls += 1;
     const event = this.registrations.get(authorPubkey);
     if (!event) throw new Error("Recipient inbox is not registered");
     return {
@@ -642,6 +644,7 @@ describe("two-party coordinator happy path", () => {
       throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
     }
     expect(actionTrace).toHaveLength(53);
+    expect(transport.discoverCalls).toBe(3);
     expect(actionTrace.slice(0, 6)).toEqual([
       "taker:stage_inbox_registration",
       "taker:publish_inbox_registration",
