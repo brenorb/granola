@@ -54,6 +54,7 @@ class FakeRelayPort implements InboxRelayPort {
   readbackOverride = new Map<string, NostrEvent[]>();
   queryOverrideQueue: NostrEvent[][] = [];
   failQuery = new Set<string>();
+  publicationDelay = new Map<string, Promise<void>>();
   publicationGate: Promise<void> | null = null;
   infoGate: Promise<void> | null = null;
   capabilities: InboxRelayCapabilities = {
@@ -72,6 +73,7 @@ class FakeRelayPort implements InboxRelayPort {
 
   async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
     if (this.publicationGate) await this.publicationGate;
+    if (this.publicationDelay.has(relay)) await this.publicationDelay.get(relay);
     const authEvent = await this.authenticate(relay, auth);
     this.published.push({
       relay,
@@ -294,6 +296,27 @@ describe("strict NIP-17 inbox transport", () => {
     expect(second.every((receipt) => receipt.ok)).toBe(true);
     expect(port.published.map((call) => call.id)).toEqual([gift.id, gift.id, gift.id, gift.id]);
     expect(port.published.every((call) => call.authPubkey === getPublicKey(senderKey))).toBe(true);
+  });
+
+  it("keeps every relay receipt observable when one relay is slow and rejects", async () => {
+    const port = new FakeRelayPort();
+    let releaseSlow!: () => void;
+    port.publicationDelay.set(inboxRelays[1]!, new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    }));
+    port.failPublishOnce.add(inboxRelays[1]!);
+    const pending = publishGiftWrap(wrapper(), inboxRelays, senderKey, port, now);
+
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    releaseSlow();
+    await expect(pending).resolves.toEqual([
+      { relay: inboxRelays[0], ok: true, message: "stored" },
+      { relay: inboxRelays[1], ok: false, message: "temporary rejection" }
+    ]);
   });
 
   it("snapshots a gift wrap and sender key before delayed relay capability I/O", async () => {

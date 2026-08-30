@@ -17,10 +17,12 @@ const ADDRESS = `30078:${"b".repeat(64)}:granola:order:v1:11111111-1111-4111-811
 class FakePool implements RelayPoolPort {
   destroyed = false;
   readonly queries: Array<{ relays: string[]; filter: Record<string, unknown>; maxWait: number }> = [];
+  readonly publicationDelay = new Map<string, Promise<void>>();
 
   async ensureRelay(url: string): Promise<{ publish(event: NostrEvent): Promise<string> }> {
     return {
       publish: async () => {
+        if (this.publicationDelay.has(url)) await this.publicationDelay.get(url);
         if (url.includes("two")) throw new Error("blocked");
         return "stored";
       }
@@ -65,6 +67,30 @@ describe("relay client", () => {
       { relay: "wss://one.example", ok: true, message: "stored" },
       { relay: "wss://two.example", ok: false, message: "blocked" },
       { relay: "wss://three.example", ok: true, message: "stored" }
+    ]);
+  });
+
+  it("waits for the slowest order relay to preserve its failure receipt", async () => {
+    const pool = new FakePool();
+    let releaseSlow!: () => void;
+    pool.publicationDelay.set("wss://two.example", new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    }));
+    const client = new RelayClient({
+      relays: ["wss://one.example", "wss://two.example"],
+      pool
+    });
+    const pending = client.publish(EVENT);
+
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    releaseSlow();
+    await expect(pending).resolves.toEqual([
+      { relay: "wss://one.example", ok: true, message: "stored" },
+      { relay: "wss://two.example", ok: false, message: "blocked" }
     ]);
   });
 
