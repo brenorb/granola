@@ -1717,7 +1717,12 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
   const previousInbox = current.privateState.inbox.status;
   const nextInbox = next.privateState.inbox.status;
   const inboxAdvance = INBOX_STATUS_RANK[nextInbox] - INBOX_STATUS_RANK[previousInbox];
-  if (inboxAdvance < 0 || inboxAdvance > 1) {
+  // publishInboxList atomically returns relay ACK and exact readback evidence,
+  // so the staged checkpoint may safely advance straight to registered.
+  if (
+    inboxAdvance < 0 ||
+    (inboxAdvance > 1 && !(previousInbox === "staged" && nextInbox === "registered"))
+  ) {
     throw new Error("Trade inbox checkpoint regressed or skipped a durable stage");
   }
   if (

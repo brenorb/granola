@@ -647,9 +647,9 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       case "clear_order_publication":
         return this.clearOrderPublication(input.session, input.now);
       case "publish_inbox_registration":
-        return this.publishInbox(input.session, input.now, false);
+        return this.publishInbox(input.session, input.now);
       case "verify_inbox_registration":
-        return this.publishInbox(input.session, input.now, true);
+        return this.publishInbox(input.session, input.now);
       case "deliver_outbox":
         return this.deliverOutbox(input.session, input.now);
       case "poll_inbox":
@@ -906,8 +906,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
 
   private async publishInbox(
     session: TradeSession,
-    now: number,
-    verify: boolean
+    now: number
   ): Promise<TradeSession> {
     const inbox = session.privateState.inbox;
     if (!inbox.event) throw new Error("Inbox registration is not checkpointed");
@@ -918,23 +917,16 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         throw new Error("Inbox transport returned a replacement registration");
       }
       const next = bump(session, now);
-      next.privateState.inbox = verify
-        ? {
-            ...structuredClone(inbox),
-            status: "registered",
-            receipts: structuredClone(result.receipts),
-            readbacks: structuredClone(result.readback),
-            acknowledgedAt: inbox.acknowledgedAt ?? now,
-            registeredAt: now
-          }
-        : {
-            ...structuredClone(inbox),
-            status: "acknowledged",
-            receipts: structuredClone(result.receipts),
-            readbacks: [],
-            acknowledgedAt: now,
-            registeredAt: null
-          };
+      next.privateState.inbox = {
+        ...structuredClone(inbox),
+        // publishInboxList already requires both relay ACK and exact readback,
+        // so a second verify action would republish the same event for no gain.
+        status: "registered",
+        receipts: structuredClone(result.receipts),
+        readbacks: structuredClone(result.readback),
+        acknowledgedAt: inbox.acknowledgedAt ?? now,
+        registeredAt: now
+      };
       return next;
     } finally {
       key.fill(0);
