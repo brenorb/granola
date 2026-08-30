@@ -87,6 +87,16 @@ function uuid(counter: number): string {
   return `00000000-0000-4000-8000-${counter.toString().padStart(12, "0")}`;
 }
 
+async function fakeRelayDelay(): Promise<void> {
+  const value = Number((globalThis as {
+    process?: { env?: Record<string, string> };
+  }).process?.env?.GRANOLA_FAKE_RELAY_MS ?? "0");
+  if (!Number.isSafeInteger(value) || value < 0 || value > 1_000) {
+    throw new Error("Fake relay delay must be an integer from 0 to 1000 ms");
+  }
+  if (value > 0) await new Promise((resolve) => setTimeout(resolve, value));
+}
+
 function sessionEntropy(
   role: "maker" | "taker"
 ): SessionFactoryEntropy {
@@ -149,6 +159,7 @@ class MemoryTradeTransport {
     _protocolSecretKey: Uint8Array
   ) {
     this.calls.registrations += 1;
+    await fakeRelayDelay();
     this.registrations.set(event.pubkey, structuredClone(event));
     return {
       event: structuredClone(event),
@@ -169,6 +180,7 @@ class MemoryTradeTransport {
 
   async discoverInbox(authorPubkey: string): Promise<DiscoveredTradeInbox> {
     this.calls.discoveries += 1;
+    await fakeRelayDelay();
     const event = this.registrations.get(authorPubkey);
     if (!event) throw new Error("Recipient inbox is not registered");
     return {
@@ -180,6 +192,7 @@ class MemoryTradeTransport {
 
   async send(wrapper: NostrEvent) {
     this.calls.sends += 1;
+    await fakeRelayDelay();
     const recipient = wrapper.tags.find((tag) => tag[0] === "p")?.[1];
     if (!recipient) throw new Error("Gift wrap has no recipient");
     const current = this.wrappers.get(recipient) ?? [];
@@ -192,6 +205,7 @@ class MemoryTradeTransport {
 
   async read(recipientPubkey: string): Promise<NostrEvent[]> {
     this.calls.reads += 1;
+    await fakeRelayDelay();
     return structuredClone(this.wrappers.get(recipientPubkey) ?? []);
   }
 
@@ -539,6 +553,7 @@ describe("two-party coordinator happy path", () => {
       quoteUnit: selectedMarket.quoteUnit,
       quoteKeyset: QUOTE_KEYSET
     };
+    const callsBeforeClick = structuredClone(transport.calls);
     const clickStartedAt = performance.now();
     await takerSessions.save(await createTakerSession({
       order,
@@ -717,7 +732,11 @@ describe("two-party coordinator happy path", () => {
         mintMs: Number(mintMs.toFixed(2)),
         coordinationMs: Number((totalMs - mintMs).toFixed(2)),
         actionCount: actionSpans.length,
-        transportCalls: transport.calls,
+        transportCalls: Object.fromEntries(Object.entries(transport.calls)
+          .map(([operation, count]) => [
+            operation,
+            count - callsBeforeClick[operation as keyof typeof callsBeforeClick]
+          ])),
         byActionMs: Object.fromEntries(Object.entries(byAction)
           .sort((left, right) => right[1] - left[1])
           .map(([action, duration]) => [action, Number(duration.toFixed(2))]))
