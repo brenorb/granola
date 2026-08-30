@@ -27,7 +27,10 @@ import type {
   StorageDriver,
   WalletRepository
 } from "../storage/wallet-repository.js";
-import { TradeCoordinator } from "../trade/coordinator.js";
+import {
+  TradeCoordinator,
+  type CoordinatorActionProfile
+} from "../trade/coordinator.js";
 import { GranolaCoordinatorEffects } from "../trade/effects.js";
 import {
   withTradeSessionLock,
@@ -99,6 +102,7 @@ export interface CreateBrowserTradeRuntimeInput {
   generateSecretKey?: KeyGenerator;
   cashu?: CashuClient;
   cashuTrade?: CashuTradeClient;
+  profileAction?: (profile: CoordinatorActionProfile) => void;
 }
 
 export interface BrowserTradeRuntime {
@@ -161,7 +165,8 @@ export async function createBrowserTradeRuntime(
     effects,
     now,
     runSessionExclusive: (sessionId, action) =>
-      withTradeSessionLock(input.profile, sessionId, action)
+      withTradeSessionLock(input.profile, sessionId, action),
+    ...(input.profileAction ? { profileAction: input.profileAction } : {})
   });
   return {
     api: new TradeApi({

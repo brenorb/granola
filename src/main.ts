@@ -72,6 +72,7 @@ function byId<T extends HTMLElement>(id: string): T {
 }
 
 const profile = profileFromLocation(window.location.href);
+const debugPerformance = new URL(window.location.href).searchParams.get("debug") === "performance";
 const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
 const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
 const outboxLocked = <T>(action: () => Promise<T>): Promise<T> =>
@@ -244,7 +245,17 @@ function tradeController(): Promise<BrowserTradeController> {
     orderApi,
     orderService,
     orderOutbox,
-    cashu
+    cashu,
+    ...(debugPerformance ? {
+      profileAction: (action) => performance.measure(
+        "granola:coordinator-action",
+        {
+          start: action.startedAt,
+          end: action.endedAt,
+          detail: action
+        }
+      )
+    } : {})
   }).then((runtime) => new BrowserTradeController({
     api: runtime.api,
     sessions: runtime.sessions,

@@ -52,6 +52,18 @@ export interface TradeCoordinatorOptions {
   effects: CoordinatorEffectPort;
   now?: () => number;
   runSessionExclusive?: RunCoordinatorSessionExclusive;
+  profileAction?: (profile: CoordinatorActionProfile) => void;
+}
+
+export interface CoordinatorActionProfile {
+  action: CoordinatorAction["kind"];
+  execution: CoordinatorExecutionKind;
+  sessionId: string;
+  role: TradeSession["role"];
+  revision: number;
+  startedAt: number;
+  endedAt: number;
+  succeeded: boolean;
 }
 
 interface ExternalSnapshot {
@@ -60,6 +72,7 @@ interface ExternalSnapshot {
   revision: number;
   now: number;
   fingerprint: string;
+  profileStartedAt: number;
 }
 
 type InitialStep =
@@ -373,6 +386,7 @@ export class TradeCoordinator {
   private readonly effects: CoordinatorEffectPort;
   private readonly now: () => number;
   private readonly runSessionExclusive: RunCoordinatorSessionExclusive;
+  private readonly profileAction: ((profile: CoordinatorActionProfile) => void) | undefined;
   private readonly inFlight = new Map<string, Promise<PublicTradeView>>();
 
   constructor(options: TradeCoordinatorOptions) {
@@ -381,6 +395,7 @@ export class TradeCoordinator {
     this.now = options.now ?? (() => Math.floor(Date.now() / 1_000));
     this.runSessionExclusive =
       options.runSessionExclusive ?? createSessionExclusiveRunner();
+    this.profileAction = options.profileAction;
   }
 
   async list(): Promise<PublicTradeView[]> {
@@ -418,18 +433,26 @@ export class TradeCoordinator {
         }
         const execution = this.effects.classify(action, structuredClone(current));
         if (execution === "local") {
-          const result = await this.effects.applyLocal({
-            action,
-            session: structuredClone(current),
-            now
-          });
-          assertCompleteResult(current, result);
-          await this.repository.save(result, current.revision);
-          return { kind: "complete", view: publicTradeView(result) };
+          const startedAt = performance.now();
+          let succeeded = false;
+          try {
+            const result = await this.effects.applyLocal({
+              action,
+              session: structuredClone(current),
+              now
+            });
+            assertCompleteResult(current, result);
+            await this.repository.save(result, current.revision);
+            succeeded = true;
+            return { kind: "complete", view: publicTradeView(result) };
+          } finally {
+            this.recordProfile(action, execution, current, startedAt, succeeded);
+          }
         }
         if (execution !== "external") {
           throw new Error("Coordinator effect port returned an invalid execution kind");
         }
+        const profileStartedAt = performance.now();
         return {
           kind: "external",
           snapshot: {
@@ -444,7 +467,8 @@ export class TradeCoordinator {
                 action,
                 structuredClone(current)
               ) ?? null
-            )
+            ),
+            profileStartedAt
           }
         };
       }
@@ -452,43 +476,79 @@ export class TradeCoordinator {
 
     if (initial.kind === "complete") return initial.view;
     const { snapshot } = initial;
-    const result = await this.effects.performExternal({
-      action: snapshot.action,
-      session: structuredClone(snapshot.session),
-      now: snapshot.now,
-      revision: snapshot.revision,
-      fingerprint: snapshot.fingerprint
-    });
-    assertCompleteResult(snapshot.session, result);
+    let succeeded = false;
+    try {
+      const result = await this.effects.performExternal({
+        action: snapshot.action,
+        session: structuredClone(snapshot.session),
+        now: snapshot.now,
+        revision: snapshot.revision,
+        fingerprint: snapshot.fingerprint
+      });
+      assertCompleteResult(snapshot.session, result);
 
-    return this.runSessionExclusive(sessionId, async () => {
-      const current = await this.requiredSession(sessionId);
-      if (canonicalJson(current) === canonicalJson(result)) {
-        return publicTradeView(current);
-      }
-      if (canonicalJson(current) !== canonicalJson(snapshot.session)) {
-        throw new Error(
-          "Coordinator external result conflicts with conflicting concurrent state"
-        );
-      }
-      const currentAction = nextCoordinatorAction(current, snapshot.now);
-      if (currentAction.kind !== snapshot.action.kind) {
-        throw new Error("Coordinator external action identity changed");
-      }
-      const currentFingerprint = await externalFingerprint(
-        currentAction,
-        current,
-        await this.effects.externalFingerprintMaterial?.(
+      const view = await this.runSessionExclusive(sessionId, async () => {
+        const current = await this.requiredSession(sessionId);
+        if (canonicalJson(current) === canonicalJson(result)) {
+          return publicTradeView(current);
+        }
+        if (canonicalJson(current) !== canonicalJson(snapshot.session)) {
+          throw new Error(
+            "Coordinator external result conflicts with conflicting concurrent state"
+          );
+        }
+        const currentAction = nextCoordinatorAction(current, snapshot.now);
+        if (currentAction.kind !== snapshot.action.kind) {
+          throw new Error("Coordinator external action identity changed");
+        }
+        const currentFingerprint = await externalFingerprint(
           currentAction,
-          structuredClone(current)
-        ) ?? null
+          current,
+          await this.effects.externalFingerprintMaterial?.(
+            currentAction,
+            structuredClone(current)
+          ) ?? null
+        );
+        if (currentFingerprint !== snapshot.fingerprint) {
+          throw new Error("Coordinator external action fingerprint changed");
+        }
+        await this.repository.save(result, snapshot.revision);
+        return publicTradeView(result);
+      });
+      succeeded = true;
+      return view;
+    } finally {
+      this.recordProfile(
+        snapshot.action,
+        "external",
+        snapshot.session,
+        snapshot.profileStartedAt,
+        succeeded
       );
-      if (currentFingerprint !== snapshot.fingerprint) {
-        throw new Error("Coordinator external action fingerprint changed");
-      }
-      await this.repository.save(result, snapshot.revision);
-      return publicTradeView(result);
-    });
+    }
+  }
+
+  private recordProfile(
+    action: CoordinatorAction,
+    execution: CoordinatorExecutionKind,
+    session: TradeSession,
+    startedAt: number,
+    succeeded: boolean
+  ): void {
+    try {
+      this.profileAction?.({
+        action: action.kind,
+        execution,
+        sessionId: session.sessionId,
+        role: session.role,
+        revision: session.revision,
+        startedAt,
+        endedAt: performance.now(),
+        succeeded
+      });
+    } catch {
+      // Diagnostics must never change coordinator behavior.
+    }
   }
 
   private async requiredSession(sessionId: string): Promise<TradeSession> {
