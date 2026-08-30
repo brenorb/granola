@@ -20,6 +20,18 @@ function event(): NostrEvent {
   return finalizeEvent({ kind: 1059, created_at: now, tags: [["p", protocolPubkey]], content: "ciphertext" }, key(2));
 }
 
+function identifiedAuth(secretKey = protocolKey) {
+  return Object.assign(
+    async (challenge: string) => createNip42AuthEvent(relayUrl, challenge, secretKey, now),
+    { identity: getPublicKey(secretKey) }
+  );
+}
+
+const fetchCapabilities = async (): Promise<Response> => new Response(JSON.stringify({
+  supported_nips: [17, 40, 42],
+  limitation: { auth_required: true }
+}), { status: 200 });
+
 class FakeConnection implements InboxRelayConnection {
   onauth: ((template: EventTemplate) => Promise<NostrEvent>) | undefined;
   published: NostrEvent[] = [];
@@ -105,6 +117,184 @@ describe("nostr-tools inbox relay port", () => {
       headers: { Accept: "application/nostr+json" }
     }));
     expect(connection.authPubkeys).toEqual([protocolPubkey, protocolPubkey]);
+  });
+
+  it("reuses one authenticated relay connection per auth identity", async () => {
+    let connects = 0;
+    let auths = 0;
+    let delays = 0;
+    let closes = 0;
+    const delay = async (): Promise<void> => {
+      delays += 1;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    };
+    class DelayedConnection extends FakeConnection {
+      override async auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string> {
+        auths += 1;
+        await delay();
+        return super.auth(signer);
+      }
+
+      override async publish(value: NostrEvent): Promise<string> {
+        await delay();
+        return super.publish(value);
+      }
+
+      override close(): void {
+        closes += 1;
+      }
+    }
+    const port = new NostrToolsInboxRelayPort(
+      async () => {
+        connects += 1;
+        await delay();
+        return new DelayedConnection();
+      },
+      fetchCapabilities,
+      1_000,
+      1_000
+    );
+    const auth = identifiedAuth();
+
+    await port.publish(relayUrl, event(), auth);
+    await expect(port.query(relayUrl, { kinds: [1059] }, auth)).resolves.toHaveLength(1);
+    await port.publish(relayUrl, event(), auth);
+
+    expect({ connects, auths, delays, closes }).toEqual({
+      connects: 1,
+      auths: 1,
+      delays: 4,
+      closes: 0
+    });
+    port.close();
+    expect(closes).toBe(1);
+  });
+
+  it("keeps different auth identities on separate connections", async () => {
+    let connects = 0;
+    const connections: FakeConnection[] = [];
+    const port = new NostrToolsInboxRelayPort(
+      async () => {
+        connects += 1;
+        const connection = new FakeConnection();
+        connections.push(connection);
+        return connection;
+      },
+      fetchCapabilities
+    );
+
+    await port.publish(relayUrl, event(), identifiedAuth(protocolKey));
+    await port.publish(relayUrl, event(), identifiedAuth(key(3)));
+
+    expect(connects).toBe(2);
+    expect(connections.map((connection) => connection.authPubkeys)).toEqual([
+      [protocolPubkey],
+      [getPublicKey(key(3))]
+    ]);
+    port.close();
+  });
+
+  it("single-flights concurrent connection setup", async () => {
+    let connects = 0;
+    let release!: (connection: FakeConnection) => void;
+    const opening = new Promise<FakeConnection>((resolve) => { release = resolve; });
+    const port = new NostrToolsInboxRelayPort(
+      async () => {
+        connects += 1;
+        return await opening;
+      },
+      fetchCapabilities
+    );
+    const auth = identifiedAuth();
+    const first = port.publish(relayUrl, event(), auth);
+    const second = port.publish(relayUrl, event(), auth);
+    await Promise.resolve();
+    expect(connects).toBe(1);
+    release(new FakeConnection());
+    await expect(Promise.all([first, second])).resolves.toEqual(["stored", "stored"]);
+    port.close();
+  });
+
+  it("does not reuse a connection after an operation failure", async () => {
+    let connects = 0;
+    let closes = 0;
+    class FailingConnection extends FakeConnection {
+      override async publish(value: NostrEvent): Promise<string> {
+        if (connects === 1) throw new Error("relay write failed");
+        return super.publish(value);
+      }
+
+      override close(): void {
+        closes += 1;
+      }
+    }
+    const port = new NostrToolsInboxRelayPort(
+      async () => {
+        connects += 1;
+        return new FailingConnection();
+      },
+      fetchCapabilities
+    );
+    const auth = identifiedAuth();
+
+    await expect(port.publish(relayUrl, event(), auth)).rejects.toThrow("relay write failed");
+    await expect(port.publish(relayUrl, event(), auth)).resolves.toBe("stored");
+    expect(connects).toBe(2);
+    expect(closes).toBe(1);
+    port.close();
+  });
+
+  it("expires idle connections and closes an in-flight open", async () => {
+    vi.useFakeTimers();
+    try {
+      let connects = 0;
+      let closes = 0;
+      class CountingConnection extends FakeConnection {
+        override close(): void {
+          closes += 1;
+        }
+      }
+      const port = new NostrToolsInboxRelayPort(
+        async () => {
+          connects += 1;
+          return new CountingConnection();
+        },
+        fetchCapabilities,
+        1_000,
+        10
+      );
+      const auth = identifiedAuth();
+
+      await port.publish(relayUrl, event(), auth);
+      await vi.advanceTimersByTimeAsync(9);
+      await port.publish(relayUrl, event(), auth);
+      expect(connects).toBe(1);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(closes).toBe(1);
+      port.close();
+
+      let resolveConnection!: (connection: FakeConnection) => void;
+      const pendingConnection = new Promise<FakeConnection>((resolve) => { resolveConnection = resolve; });
+      const pendingPort = new NostrToolsInboxRelayPort(
+        async () => await pendingConnection,
+        fetchCapabilities
+      );
+      const pending = pendingPort.publish(relayUrl, event(), auth);
+      await Promise.resolve();
+      pendingPort.close();
+      let lateClosed = false;
+      class LateConnection extends FakeConnection {
+        override close(): void {
+          lateClosed = true;
+        }
+      }
+      const lateConnection = new LateConnection();
+      resolveConnection(lateConnection);
+      await expect(pending).rejects.toThrow(/closed/i);
+      expect(lateClosed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects an AUTH template without an exact challenge", async () => {
