@@ -168,6 +168,31 @@ describe("live trade inbox subscription", () => {
     expect(started).toEqual([first.id, second.id]);
   });
 
+  it("delivers an event emitted before subscribe resolves", async () => {
+    const early = wrapper("99".repeat(32));
+    class EarlyEventRelayPort extends FakeRelayPort {
+      override async subscribe(
+        relay: string,
+        filter: Record<string, unknown>,
+        auth: (challenge: string) => Promise<NostrEvent>,
+        callbacks: TradeSubscriptionCallbacks
+      ) {
+        const subscription = await super.subscribe(relay, filter, auth, callbacks);
+        callbacks.onevent(early);
+        return subscription;
+      }
+    }
+    const port = new EarlyEventRelayPort();
+    const received: string[] = [];
+    const subscription = await startTradeSubscription({
+      ...input(port),
+      onEvent: (event) => { received.push(event.id); }
+    });
+
+    await vi.waitFor(() => expect(received).toEqual([early.id]));
+    subscription.stop();
+  });
+
   it("surfaces sanitized relay and event failures without stopping other relays", async () => {
     const secretText = hex(recipientKey);
     const port = new FakeRelayPort();
