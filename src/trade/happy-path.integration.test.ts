@@ -667,15 +667,15 @@ describe("two-party coordinator happy path", () => {
     if (steps >= 200) {
       throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
     }
-    expect(actionTrace).toHaveLength(51);
+    expect(actionTrace).toHaveLength(40);
     expect(transport.calls.registrations).toBe(3);
     expect(actionTrace.slice(0, 6)).toEqual([
       "taker:stage_inbox_registration",
       "taker:publish_inbox_registration",
       "taker:stage_reserve_propose",
       "taker:deliver_outbox",
-      "taker:commit_outbox",
-      "maker:stage_inbox_registration"
+      "maker:stage_inbox_registration",
+      "maker:publish_inbox_registration"
     ]);
     expect(actionTrace.at(-1)).toBe("taker:verify_order_fill");
     expect(actionTrace.some((action) =>

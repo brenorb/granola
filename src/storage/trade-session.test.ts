@@ -877,6 +877,13 @@ describe("trade session v2 repository", () => {
     retargetedOutbox.privateState.outbox!.recipientInboxListId = "09".repeat(32);
     await expect(outboxRepository.save(retargetedOutbox, 0))
       .rejects.toThrow(/outbox.*retry artifact.*changed/i);
+
+    const droppedOutbox = structuredClone(stagedOutbox);
+    droppedOutbox.revision = 1;
+    droppedOutbox.updatedAt += 1;
+    droppedOutbox.privateState.outbox = null;
+    await expect(outboxRepository.save(droppedOutbox, 0))
+      .rejects.toThrow(/outbox.*before acknowledgement/i);
   });
 
   it("allows only the maker order key to sign the reserve acceptance handoff", async () => {

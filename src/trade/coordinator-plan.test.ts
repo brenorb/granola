@@ -331,7 +331,7 @@ describe("atomic swap coordinator action planning", () => {
     });
   });
 
-  it("executes, reconciles, then clears one durable Cashu operation", () => {
+  it("executes and reconciles one durable Cashu operation without a clear checkpoint", () => {
     const current = session("maker", "awaiting_base_lock");
     current.privateState.cashuOperation = {
       status: "prepared",
@@ -348,7 +348,7 @@ describe("atomic swap coordinator action planning", () => {
       .toBe("reconcile_wallet");
     current.privateState.cashuOperation!.status = "wallet_applied";
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
-      .toBe("clear_cashu_operation");
+      .toBe("prepare_base_lock");
   });
 
   it("registers the exact local inbox before any protocol message", () => {
