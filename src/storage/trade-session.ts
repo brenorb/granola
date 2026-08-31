@@ -2,6 +2,8 @@ import { verifyHTLCHash } from "@cashu/cashu-ts";
 import { getEventHash, getPublicKey, verifyEvent } from "nostr-tools";
 
 import { normalizePublicRelay } from "../nostr/relay.js";
+import { canonicalJson } from "../core/canonical-json.js";
+import { withSharedLock } from "../core/lock.js";
 import type { NostrEvent } from "../order/events.js";
 import type {
   CashuOperationJournal,
@@ -39,10 +41,9 @@ const CHOREOGRAPHY_PHASES = new Set([
   "awaiting_settlement_ack", "settling", "settled", "refunding", "failed"
 ]);
 const MINT_STATES = new Set(["UNKNOWN", "UNSPENT", "PENDING", "SPENT"]);
-
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
+const EVENT_VALIDATION_CACHE_LIMIT = 512;
+const EVENT_VALIDATION_CACHE_CONTENT_LIMIT = 8 * 1024;
+const eventValidationCache = new Map<string, true>();
 
 function makerStartIdentity(session: TradeSession): string {
   return JSON.stringify({
@@ -175,6 +176,24 @@ function validateEvent(
     !HEX_32.test(event.pubkey) ||
     (signed && (typeof event.sig !== "string" || !HEX_64.test(event.sig)))
   ) throw new Error(`${label} is invalid`);
+  const cacheKey =
+    event.content.length <= EVENT_VALIDATION_CACHE_CONTENT_LIMIT &&
+    (event.tags as string[][]).reduce(
+      (size, tag) => size + tag.reduce((tagSize, item) => tagSize + item.length, 0),
+      0
+    ) <= EVENT_VALIDATION_CACHE_CONTENT_LIMIT
+      ? JSON.stringify([
+          signed,
+          event.id,
+          event.pubkey,
+          event.created_at,
+          event.kind,
+          event.tags,
+          event.content,
+          signed ? event.sig : null
+        ])
+      : null;
+  if (cacheKey && eventValidationCache.has(cacheKey)) return;
   if (signed) {
     const snapshot: NostrEvent = {
       id: event.id as string,
@@ -185,11 +204,17 @@ function validateEvent(
       content: event.content as string,
       sig: event.sig as string
     };
-    if (!verifyEvent(snapshot)) {
+    if (getEventHash(snapshot) !== snapshot.id || !verifyEvent(snapshot)) {
       throw new Error(`${label} signature is invalid`);
     }
   } else if (getEventHash(event as never) !== event.id) {
     throw new Error(`${label} ID is invalid`);
+  }
+  if (cacheKey) {
+    if (eventValidationCache.size >= EVENT_VALIDATION_CACHE_LIMIT) {
+      eventValidationCache.delete(eventValidationCache.keys().next().value as string);
+    }
+    eventValidationCache.set(cacheKey, true);
   }
 }
 
@@ -687,17 +712,6 @@ function validatePrivateLeg(value: unknown): asserts value is PrivateLegJournal 
         (item.state === "SPENT") !== (item.witnessCommitment !== null);
     })
   ) throw new Error("Private trade observations are invalid");
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function validateInbox(value: unknown): asserts value is TradeInboxJournal {
@@ -1325,6 +1339,12 @@ function assertSession(value: unknown): asserts value is TradeSession {
   }
   validateTranscript(privateState.transcript);
   const transcript = privateState.transcript as TradeTranscriptJournal;
+  const localParticipant = session.role === "maker"
+    ? transcript.choreography.participants.makerSessionPubkey
+    : transcript.choreography.participants.takerSessionPubkey;
+  if (localParticipant !== undefined && localParticipant !== localNostrPubkey) {
+    throw new Error("Trade participant does not match the local session key");
+  }
   if (reservation.abortSeal !== null) {
     const participants = transcript.choreography.participants;
     const expectedAbortAuthor = session.role === "maker"
@@ -1697,7 +1717,12 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
   const previousInbox = current.privateState.inbox.status;
   const nextInbox = next.privateState.inbox.status;
   const inboxAdvance = INBOX_STATUS_RANK[nextInbox] - INBOX_STATUS_RANK[previousInbox];
-  if (inboxAdvance < 0 || inboxAdvance > 1) {
+  // publishInboxList atomically returns relay ACK and exact readback evidence,
+  // so the staged checkpoint may safely advance straight to registered.
+  if (
+    inboxAdvance < 0 ||
+    (inboxAdvance > 1 && !(previousInbox === "staged" && nextInbox === "registered"))
+  ) {
     throw new Error("Trade inbox checkpoint regressed or skipped a durable stage");
   }
   if (
@@ -1784,42 +1809,6 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
 
 export type TradeSessionExclusiveRunner = <T>(action: () => Promise<T>) => Promise<T>;
 
-const localLockTails = new Map<string, Promise<void>>();
-
-async function withLocalLock<T>(
-  name: string,
-  action: () => Promise<T>
-): Promise<T> {
-  const previous = localLockTails.get(name) ?? Promise.resolve();
-  let release = (): void => {};
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  localLockTails.set(name, current);
-  await previous;
-  try {
-    return await action();
-  } finally {
-    release();
-    if (localLockTails.get(name) === current) localLockTails.delete(name);
-  }
-}
-
-async function withSharedLock<T>(
-  name: string,
-  action: () => Promise<T>
-): Promise<T> {
-  const locks = globalThis.navigator?.locks;
-  if (locks !== undefined) {
-    return await locks.request(
-      name,
-      { mode: "exclusive" },
-      async () => action()
-    );
-  }
-  return withLocalLock(name, action);
-}
-
 const withDefaultTradeSessionLock: TradeSessionExclusiveRunner = async <T>(
   action: () => Promise<T>
 ): Promise<T> => withSharedLock(
@@ -1866,12 +1855,12 @@ export class TradeSessionRepository {
       assertSessions(stored);
       return {
         schema: "granola/trade-session-store/v1",
-        sessions: clone(stored),
+        sessions: structuredClone(stored),
         takerStarts: []
       };
     }
     assertTradeSessionStore(stored);
-    return clone(stored);
+    return structuredClone(stored);
   }
 
   async list(): Promise<TradeSession[]> {
@@ -1894,7 +1883,7 @@ export class TradeSessionRepository {
     if (!sameTakerStartIntent(binding, intent)) {
       throw new Error("Taker request ID conflicts with another start intent");
     }
-    return clone(store.sessions.find(
+    return structuredClone(store.sessions.find(
       (session) => session.sessionId === binding.sessionId
     )!);
   }
@@ -1920,7 +1909,7 @@ export class TradeSessionRepository {
         if (!sameTakerStartIntent(binding, intent)) {
           throw new Error("Taker request ID conflicts with another start intent");
         }
-        return clone(store.sessions.find(
+        return structuredClone(store.sessions.find(
           (item) => item.sessionId === binding.sessionId
         )!);
       }
@@ -1934,14 +1923,14 @@ export class TradeSessionRepository {
       if (store.sessions.some((item) => item.sessionId === session.sessionId)) {
         throw new Error("Taker start session identity already exists");
       }
-      store.sessions.push(clone(session));
+      store.sessions.push(structuredClone(session));
       store.takerStarts.push({
-        ...clone(intent),
+        ...structuredClone(intent),
         sessionId: session.sessionId
       });
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);
-      return clone(session);
+      return structuredClone(session);
     });
   }
 
@@ -1959,7 +1948,7 @@ export class TradeSessionRepository {
         if (makerStartIdentity(existing) !== makerStartIdentity(session)) {
           throw new Error("Maker proposal conflicts with an existing trade session");
         }
-        return clone(existing);
+        return structuredClone(existing);
       }
       const competing = store.sessions.find(
         (item) =>
@@ -1971,10 +1960,10 @@ export class TradeSessionRepository {
       if (competing !== undefined) {
         throw new Error("Order is already being taken by another trader");
       }
-      store.sessions.push(clone(session));
+      store.sessions.push(structuredClone(session));
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);
-      return clone(session);
+      return structuredClone(session);
     });
   }
 
@@ -1989,7 +1978,7 @@ export class TradeSessionRepository {
         if (expectedRevision !== null || session.revision !== 0) {
           throw new Error("Trade session creation requires revision zero");
         }
-        sessions.push(clone(session));
+        sessions.push(structuredClone(session));
       } else {
         if (expectedRevision === null) throw new Error("Trade session already exists");
         if (current.revision !== expectedRevision) {
@@ -2002,7 +1991,7 @@ export class TradeSessionRepository {
           throw new Error("Trade session update time regressed");
         }
         assertMonotonicUpdate(current, session);
-        sessions[index] = clone(session);
+        sessions[index] = structuredClone(session);
       }
       assertTradeSessionStore(store);
       await this.driver.set(TRADE_SESSIONS_KEY, store);

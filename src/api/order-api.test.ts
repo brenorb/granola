@@ -222,6 +222,36 @@ describe("OrderApi projections", () => {
     expect(expiredHarness.signer.destroyed).toEqual([ORDER_ID]);
   });
 
+  it("releases a reserved order after an expiry", async () => {
+    const { api, relay, setNow } = harness();
+    const created = await api.publishOrder(createInput);
+    relay.orderEvents = [relay.published[0]!];
+    const reserved = await api.reserveOrder({
+      address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+      expectedProjectionId: created.projectionId,
+      expectedRevision: "0",
+      reservationId: RESERVATION_ID,
+      amount: "100",
+      expiresAt: 1_700_000_600,
+      proposalEventId: "c".repeat(64),
+      takerCommitment: "d".repeat(64)
+    });
+    relay.orderEvents = [relay.published[1]!];
+    await api.clearAcknowledgedOrderPublication(ORDER_ID);
+    setNow(1_700_000_601);
+
+    const released = await api.releaseOrder({
+      address: `30078:${MAKER}:granola:order:v1:${ORDER_ID}`,
+      expectedProjectionId: reserved.projectionId,
+      expectedRevision: reserved.revision,
+      reservationId: RESERVATION_ID,
+      reason: "expired"
+    });
+
+    expect(released.revision).toBe("2");
+    expect(relay.published[2]?.content).toContain('"status":"open"');
+  });
+
   it("recovers a legacy acknowledged create before reserving the order", async () => {
     const { api, relay, outbox } = harness();
     relay.accept = false;

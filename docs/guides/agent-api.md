@@ -120,6 +120,18 @@ If the browser sandbox cannot mutate page DOM, navigate the profile page with
 `runUntilSettled=<session-id>` in the query string. The page starts the same
 executor on load and exposes the same redacted status/result attributes.
 
+With `debug=performance`, the normal interface remains unchanged and a bounded,
+secret-free timeline is available at `#granola-performance`:
+
+```js
+JSON.parse(document.querySelector("#granola-performance").textContent)
+```
+
+It contains coordinator actions, inbox waits, take/filled marks, and sanitized
+external HTTP timings. Network entries retain only the origin, operation class,
+and timing fields; URL paths, query strings, mint quote IDs, and bearer material
+are never copied.
+
 `getMakerPublicKeys()` returns the public keys for active orders. Each order has
 one ephemeral secret signing key in the private IndexedDB store; it is erased
 after an acknowledged terminal projection and is never exposed by this API.

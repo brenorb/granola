@@ -17,10 +17,9 @@ export interface SettlementPlanInput {
   orderExpiresAt: number;
 }
 
-const DAY_SECONDS = 86_400;
-const SHORT_LOCK_SECONDS = 4 * DAY_SECONDS;
-const LONG_LOCK_SECONDS = 7 * DAY_SECONDS;
-const RESERVATION_SECONDS = 8 * DAY_SECONDS;
+const SHORT_LOCK_SECONDS = 10 * 60;
+const LONG_LOCK_SECONDS = 20 * 60;
+const RESERVATION_SECONDS = 30 * 60;
 
 function unixTime(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {

@@ -1,6 +1,7 @@
 import { verifyEvent } from "nostr-tools/pure";
 
 import type { RelayReceipt } from "../nostr/relay.js";
+import { canonicalJson } from "../core/canonical-json.js";
 import type { OrderOutboxEntry } from "../storage/order-outbox.js";
 import {
   createProjectionTemplate,
@@ -58,22 +59,9 @@ function assertMaker(event: NostrEvent, expected: string): void {
   }
 }
 
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) throw new Error("Value cannot be canonically encoded");
-    return encoded;
-  }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(",")}}`;
-}
-
 function sameState(left: OrderState, right: OrderState): boolean {
-  return canonical(left) === canonical(right);
+  return canonicalJson(left, { omitUndefinedObjectProperties: true }) ===
+    canonicalJson(right, { omitUndefinedObjectProperties: true });
 }
 
 function accepted(receipts: RelayReceipt[]): boolean {
@@ -112,7 +100,10 @@ function assertStaticTerms(previous: OrderState, next: OrderState): void {
   const stableNext = Object.fromEntries(
     Object.entries(next).filter(([key]) => !mutable.has(key))
   );
-  if (canonical(stablePrevious) !== canonical(stableNext)) {
+  if (
+    canonicalJson(stablePrevious, { omitUndefinedObjectProperties: true }) !==
+    canonicalJson(stableNext, { omitUndefinedObjectProperties: true })
+  ) {
     throw new Error("Order projection changed immutable terms");
   }
 }

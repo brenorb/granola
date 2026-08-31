@@ -7,6 +7,8 @@ import {
   verifyEvent
 } from "nostr-tools";
 
+import { canonicalJson } from "../core/canonical-json.js";
+
 export type JsonValue =
   | null
   | boolean
@@ -209,27 +211,7 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   }
 }
 
-function canonicalNumber(value: number): string {
-  if (!Number.isFinite(value)) throw new Error("Canonical JSON does not allow non-finite numbers");
-  return JSON.stringify(value);
-}
-
-export function canonicalJson(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-  if (typeof value === "number") return canonicalNumber(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    const object = value as Record<string, unknown>;
-    const entries = Object.keys(object).sort().map((key) => {
-      const item = object[key];
-      if (item === undefined) throw new Error("Canonical JSON does not allow undefined values");
-      return `${JSON.stringify(key)}:${canonicalJson(item)}`;
-    });
-    return `{${entries.join(",")}}`;
-  }
-  throw new Error(`Canonical JSON does not allow ${typeof value}`);
-}
+export { canonicalJson };
 
 function hex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");

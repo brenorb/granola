@@ -191,6 +191,53 @@ describe("Granola order model", () => {
     );
   });
 
+  it("hides reserved orders until a signed release is published", async () => {
+    const initial = createOrderState({
+      orderId: "99999999-9999-4999-8999-999999999999",
+      createdAt: 1_700_000_000,
+      expiresAt: 1_700_010_000,
+      side: "sell",
+      baseUnit: "sat",
+      quoteUnit: "usd",
+      offered: { unit: "sat", mint: testnut },
+      requested: { unit: "usd", acceptableMints: [nofee] },
+      amount: "2000",
+      priceCentsPerBtc: "5050000",
+      execution: "partial",
+      minimumFillAmount: "1000"
+    });
+    const reserved = reserveOrder(initial, {
+      reservationId: "88888888-8888-4888-8888-888888888888",
+      amount: "1000",
+      acceptedAt: 1_700_000_100,
+      expiresAt: 1_700_001_000,
+      proposalEventId: "a".repeat(64),
+      takerCommitment: "b".repeat(64)
+    });
+    const record: OrderRecord = {
+      address: "reserved-order",
+      eventId: "reserved-event",
+      makerPubkey: "maker",
+      verified: true,
+      state: reserved
+    };
+    const market = { baseUnit: "sat", baseMint: testnut, quoteUnit: "usd", quoteMint: nofee };
+
+    await expect(buildOrderBook([record], market, 1_700_000_101))
+      .resolves.toMatchObject({ asks: [], bids: [] });
+    await expect(buildOrderBook([record], market, 1_700_001_001))
+      .resolves.toMatchObject({ asks: [], bids: [] });
+
+    const released = releaseOrder(reserved, {
+      reservationId: reserved.reservation!.id,
+      reason: "abort",
+      releasedAt: 1_700_000_200,
+      abortEventId: "c".repeat(64)
+    });
+    await expect(buildOrderBook([{ ...record, state: released }], market, 1_700_000_201))
+      .resolves.toMatchObject({ asks: [{ state: released }], bids: [] });
+  });
+
   it("reserves an exact all-or-none amount without reducing the remaining amount", () => {
     const initial = createOrderState({
       orderId: askOne,

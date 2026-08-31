@@ -1,4 +1,4 @@
-import { GranolaApi, QuoteRepository, type BrowserGranolaApi, type GranolaState } from "./api/granola-api.js";
+import { GranolaApi, QuoteRepository, type GranolaState } from "./api/granola-api.js";
 import { OrderApi, TEST_MARKET, type PublishOrderInput } from "./api/order-api.js";
 import { TradeApi, type TakeOrderInput } from "./api/trade-api.js";
 import { nip19 } from "nostr-tools";
@@ -7,6 +7,7 @@ import {
   withOrderOutboxLock,
   withWalletLock
 } from "./browser/lock.js";
+import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { startInboxListeners } from "./browser/startup.js";
@@ -38,14 +39,14 @@ import {
 import type { PublicTradeView } from "./trade/session.js";
 
 interface GranolaBrowserFacade {
-  getState: BrowserGranolaApi["getState"];
-  inspectMint: BrowserGranolaApi["inspectMint"];
-  inspectToken: BrowserGranolaApi["inspectToken"];
-  requestMint: BrowserGranolaApi["requestMint"];
-  claimMint: BrowserGranolaApi["claimMint"];
-  receiveToken: BrowserGranolaApi["receiveToken"];
-  createBackup: BrowserGranolaApi["createBackup"];
-  clearWallet: BrowserGranolaApi["clearWallet"];
+  getState: GranolaApi["getState"];
+  inspectMint: GranolaApi["inspectMint"];
+  inspectToken: GranolaApi["inspectToken"];
+  requestMint: GranolaApi["requestMint"];
+  claimMint: GranolaApi["claimMint"];
+  receiveToken: GranolaApi["receiveToken"];
+  createBackup: GranolaApi["createBackup"];
+  clearWallet: GranolaApi["clearWallet"];
   resetProfile: (confirmation: string) => Promise<void>;
   getMakerPublicKeys: OrderApi["getMakerPublicKeys"];
   getOrderBook: OrderApi["getOrderBook"];
@@ -72,6 +73,10 @@ function byId<T extends HTMLElement>(id: string): T {
 }
 
 const profile = profileFromLocation(window.location.href);
+const debugPerformance = new URL(window.location.href).searchParams.get("debug") === "performance";
+const debugTimeline = debugPerformance
+  ? createPerformanceDebugTimeline(document, performance)
+  : undefined;
 const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
 const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
 const outboxLocked = <T>(action: () => Promise<T>): Promise<T> =>
@@ -244,7 +249,10 @@ function tradeController(): Promise<BrowserTradeController> {
     orderApi,
     orderService,
     orderOutbox,
-    cashu
+    cashu,
+    ...(debugPerformance ? {
+      profileAction: (action) => debugTimeline!.action(action)
+    } : {})
   }).then((runtime) => new BrowserTradeController({
     api: runtime.api,
     sessions: runtime.sessions,
@@ -253,6 +261,12 @@ function tradeController(): Promise<BrowserTradeController> {
     inboxRelay: runtime.inboxRelay,
     makerIdentity,
     onChange: (trade) => {
+      if (trade.phase === "filled") {
+        debugTimeline?.mark("granola:trade-filled", {
+          sessionId: trade.sessionId,
+          role: trade.role
+        });
+      }
       void refreshTrades();
       if (trade.phase === "filled") void refresh();
     },
@@ -266,7 +280,10 @@ function tradeController(): Promise<BrowserTradeController> {
         { label: "error", value: message }
       ]);
       report(message, true);
-    }
+    },
+    ...(debugPerformance ? {
+      profileInboxWait: (wait) => debugTimeline!.inboxWait(wait)
+    } : {})
   }));
   return tradeControllerPromise;
 }
@@ -289,6 +306,7 @@ function takeOrderFromBook(
   const requestId = takeRequestIds.get(retryKey) ?? crypto.randomUUID();
   takeRequestIds.set(retryKey, requestId);
   const task = async (): Promise<void> => {
+    debugTimeline?.mark("granola:take-order-click");
     const trade = await granola.takeOrder({
       requestId,
       address: order.address,

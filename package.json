@@ -8,6 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "publish:test-orders": "tsx scripts/publish-test-orders.ts",
     "probe:inbox": "tsx scripts/probe-inbox.ts",
+    "benchmark:performance": "tsx scripts/performance-benchmark.ts",
+    "benchmark:e2e": "node scripts/e2e-performance-benchmark.mjs",
+    "benchmark:nip17-live": "tsx scripts/nip17-live-benchmark.ts",
+    "benchmark:nip17-profile": "GRANOLA_E2E_PROFILE=1 vitest run src/trade/happy-path.integration.test.ts --disableConsoleIntercept --reporter=verbose",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

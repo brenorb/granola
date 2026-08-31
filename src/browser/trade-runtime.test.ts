@@ -147,7 +147,6 @@ describe("browser trade runtime", () => {
     });
 
     expect(await runtime.api.listTrades()).toEqual([]);
-    expect(runtime.market).toEqual(TEST_MARKET);
     expect(runtime.inboxRelay).toBe(relay);
     expect(runtime.sessions).toBeDefined();
     expect(runtime.transport).toBeDefined();

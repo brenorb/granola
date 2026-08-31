@@ -1,6 +1,7 @@
 import { verifyEvent } from "nostr-tools/pure";
 
 import { normalizePublicRelay } from "../nostr/relay.js";
+import { canonicalJson } from "../core/canonical-json.js";
 import type { OrderOperationEvidence } from "../order/events.js";
 import type { OrderState } from "../order/model.js";
 import type {
@@ -44,30 +45,13 @@ export class OrderOutboxConflictError extends Error {
   }
 }
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) throw new Error("Value cannot be canonically encoded");
-    return encoded;
-  }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(",")}}`;
-}
-
 function same(left: unknown, right: unknown): boolean {
-  return canonical(left) === canonical(right);
+  return canonicalJson(left, { omitUndefinedObjectProperties: true }) ===
+    canonicalJson(right, { omitUndefinedObjectProperties: true });
 }
 
 export function canonicalOrderPublicationCompatibility(value: unknown): string {
-  return canonical(value);
+  return canonicalJson(value, { omitUndefinedObjectProperties: true });
 }
 
 function validProjection(
@@ -146,7 +130,11 @@ function assertIntent(value: unknown): asserts value is OrderPublicationIntent {
     throw new Error("Order outbox intent is corrupt");
   }
   try {
-    if (canonical(JSON.parse(intent.compatibility as string)) !== intent.compatibility) {
+    if (
+      canonicalJson(JSON.parse(intent.compatibility as string), {
+        omitUndefinedObjectProperties: true
+      }) !== intent.compatibility
+    ) {
       throw new Error("Order outbox intent is corrupt");
     }
   } catch {
@@ -256,10 +244,10 @@ function mergeExact(existing: OrderOutboxEntry, next: OrderOutboxEntry): OrderOu
     next.publication.receipts
   );
   return {
-    ...clone(existing),
+    ...structuredClone(existing),
     status: validateReceipts(receipts) >= 1 ? "acknowledged" : "staged",
     publication: {
-      ...clone(existing.publication),
+      ...structuredClone(existing.publication),
       receipts
     }
   };
@@ -296,12 +284,12 @@ export class OrderOutboxRepository implements OrderOutboxPort {
     const value = await this.driver.get(OUTBOX_KEY);
     if (value === undefined || value === null) return [];
     assertOutbox(value, this.verify);
-    return clone(value);
+    return structuredClone(value);
   }
 
   private async write(entries: OrderOutboxEntry[]): Promise<void> {
     assertOutbox(entries, this.verify);
-    await this.driver.set(OUTBOX_KEY, clone(entries));
+    await this.driver.set(OUTBOX_KEY, structuredClone(entries));
   }
 
   async list(): Promise<OrderOutboxEntry[]> {
@@ -321,13 +309,13 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const entries = await this.read();
       const existing = entries.find((entry) => entry.intent.orderId === intent.orderId);
       if (existing) {
-        if (same(existing.intent, intent)) return clone(existing);
+        if (same(existing.intent, intent)) return structuredClone(existing);
         if (existing.status !== "committed") throw new OrderOutboxConflictError();
       }
       const entry: OrderOutboxEntry = {
         schema: "granola/order-outbox/v3",
         status: "staged",
-        intent: clone(intent),
+        intent: structuredClone(intent),
         publication: await stage()
       };
       assertEntry(entry, this.verify);
@@ -335,7 +323,7 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       if (index < 0) entries.push(entry);
       else entries[index] = entry;
       await this.write(entries);
-      return clone(entry);
+      return structuredClone(entry);
     });
   }
 
@@ -352,7 +340,7 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const merged = mergeExact(entries[index]!, entry);
       entries[index] = merged;
       await this.write(entries);
-      return clone(merged);
+      return structuredClone(merged);
     });
   }
 
@@ -367,14 +355,14 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const index = entries.findIndex((entry) => entry.intent.orderId === orderId);
       if (index < 0) throw new Error("No acknowledged order projection exists");
       const existing = entries[index]!;
-      if (existing.status === "committed") return clone(existing);
+      if (existing.status === "committed") return structuredClone(existing);
       if (existing.status !== "acknowledged") {
         throw new Error("Order projection is not acknowledged");
       }
       const committed: OrderOutboxEntry = { ...existing, status: "committed" };
       entries[index] = committed;
       await this.write(entries);
-      return clone(committed);
+      return structuredClone(committed);
     });
   }
 

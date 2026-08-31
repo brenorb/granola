@@ -1,5 +1,4 @@
 import type {
-  CashuClient,
   CashuQuote,
   MintCapabilities,
   TokenSummary
@@ -66,10 +65,6 @@ export interface CashuPort {
   encodeToken(pocket: WalletPocket, memo?: string): string;
 }
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function toPublicQuote(stored: StoredQuote): PublicQuote {
   const { quote } = stored;
   return {
@@ -109,12 +104,12 @@ export class QuoteRepository {
     const value = await this.driver.get(QUOTE_KEY);
     if (value === undefined || value === null) return [];
     assertStoredQuotes(value);
-    return clone(value);
+    return structuredClone(value);
   }
 
   async save(quotes: StoredQuote[]): Promise<void> {
     assertStoredQuotes(quotes);
-    await this.driver.set(QUOTE_KEY, clone(quotes));
+    await this.driver.set(QUOTE_KEY, structuredClone(quotes));
   }
 
   async clear(): Promise<void> {
@@ -224,6 +219,3 @@ export class GranolaApi {
     await Promise.all([this.wallets.clear(), this.quotes.clear()]);
   }
 }
-
-export type BrowserGranolaApi = GranolaApi;
-export const satisfiesCashuPort = (client: CashuClient): CashuPort => client;

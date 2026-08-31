@@ -49,11 +49,11 @@ private raw event IDs remain inside encrypted local state. The public API and
 test trace expose commitments, public order events, phases, amounts, units,
 mints, timestamps, and relay/mint outcomes only.
 
-New settlement plans use a 4-day quote-leg lock, a 7-day base-leg lock, and an
-8-day reservation recovery horizon. On `reserve_accept`, the taker persists the
-maker's exact signed plan and validates the maker's offer-side HTLC before
-preparing any Cashu effect, so small independent clock-sampling differences
-cannot produce mismatched HTLC terms.
+New settlement plans use a 10-minute quote-leg lock, a 20-minute base-leg lock,
+and a 30-minute reservation recovery horizon. On `reserve_accept`, the taker
+persists the maker's exact signed plan and validates the maker's offer-side HTLC
+before preparing any Cashu effect, so small independent clock-sampling
+differences cannot produce mismatched HTLC terms.
 ## Happy-path choreography
 
 1. Taker sends `reserve_propose` to the maker order key.

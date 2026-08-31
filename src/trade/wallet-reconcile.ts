@@ -5,20 +5,10 @@ import {
   type WalletPocket,
   type WalletState
 } from "../core/wallet.js";
+import { canonicalJson } from "../core/canonical-json.js";
 
 export interface PreparedProofReplacement extends WalletPocket {
   spentSecrets: string[];
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === undefined) throw new Error("Proof data cannot contain undefined values");
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
-    .join(",")}}`;
 }
 
 function sameProof(left: WalletPocket["proofs"][number], right: WalletPocket["proofs"][number]): boolean {

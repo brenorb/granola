@@ -26,10 +26,13 @@ export interface DiscoveredTradeInbox {
   relays: string[];
 }
 
+const LIVE_INBOX_BUFFER_LIMIT = 64;
+
 export class NostrTradeTransport {
   private readonly discoveryRelays: readonly string[];
   private readonly inboxRelays: readonly string[];
   private readonly probeEvidence: ReadonlyMap<string, VerifiedInboxLiveProbeResult>;
+  private readonly liveInboxEvents = new Map<string, NostrEvent[]>();
 
   constructor(
     private readonly port: InboxRelayPort,
@@ -59,6 +62,27 @@ export class NostrTradeTransport {
       throw new Error("Inbox relay live probe evidence contains a duplicate relay");
     }
     this.probeEvidence = new Map(entries);
+  }
+
+  bufferLiveEvent(recipientPubkey: string, event: NostrEvent): void {
+    if (!/^[0-9a-f]{64}$/.test(recipientPubkey)) {
+      throw new Error("Live inbox recipient pubkey is malformed");
+    }
+    if (
+      event.kind !== 1059 ||
+      !event.tags.some((tag) => tag[0] === "p" && tag[1] === recipientPubkey)
+    ) {
+      throw new Error("Live inbox event does not target the recipient");
+    }
+    const pending = this.liveInboxEvents.get(recipientPubkey) ?? [];
+    if (pending.some((candidate) => candidate.id === event.id)) return;
+    if (pending.length === LIVE_INBOX_BUFFER_LIMIT) pending.shift();
+    pending.push(snapshotNostrEvent(event));
+    this.liveInboxEvents.set(recipientPubkey, pending);
+  }
+
+  hasBufferedLiveEvent(recipientPubkey: string): boolean {
+    return (this.liveInboxEvents.get(recipientPubkey)?.length ?? 0) > 0;
   }
 
   private assertFreshProbeEvidence(relayValues: readonly string[], now: number): string[] {
@@ -189,6 +213,11 @@ export class NostrTradeTransport {
       this.assertFreshProbeEvidence(this.inboxRelays, now);
       if (getPublicKey(keySnapshot) !== recipientPubkey) {
         throw new Error("Trade inbox read requires the exact recipient key");
+      }
+      const buffered = this.liveInboxEvents.get(recipientPubkey);
+      if (buffered?.length) {
+        this.liveInboxEvents.delete(recipientPubkey);
+        return buffered.map(snapshotNostrEvent);
       }
       return await queryGiftWraps(
         recipientPubkey,

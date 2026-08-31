@@ -12,10 +12,6 @@ import type { StorageDriver } from "./wallet-repository.js";
 const PROOF_RESERVATIONS_KEY = "granola.proof-reservations.v1";
 const SESSION_ID = /^[0-9a-f]{64}$/;
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
-}
-
 function assertState(value: unknown): asserts value is ProofReservationState {
   if (!value || typeof value !== "object") {
     throw new Error("Proof reservation storage is corrupt");
@@ -70,7 +66,7 @@ export class ProofReservationRepository {
     const stored = await this.driver.get(PROOF_RESERVATIONS_KEY);
     if (stored === undefined || stored === null) return createEmptyProofReservations();
     assertState(stored);
-    return clone(stored);
+    return structuredClone(stored);
   }
 
   async reserve(
@@ -101,7 +97,7 @@ export class ProofReservationRepository {
     const next = mutate(current);
     if (next === current) return current;
     assertState(next);
-    await this.driver.set(PROOF_RESERVATIONS_KEY, clone(next));
-    return clone(next);
+    await this.driver.set(PROOF_RESERVATIONS_KEY, structuredClone(next));
+    return structuredClone(next);
   }
 }

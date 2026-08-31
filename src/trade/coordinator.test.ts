@@ -329,6 +329,43 @@ describe("durable trade coordinator shell", () => {
     expect(performExternal).not.toHaveBeenCalled();
   });
 
+  it("reports safe action timing without exposing session state", async () => {
+    const current = session();
+    current.privateState.inbox = {
+      status: "unregistered",
+      quorum: 1,
+      event: null,
+      discoveryRelays: [],
+      inboxRelays: [],
+      receipts: [],
+      readbacks: [],
+      stagedAt: null,
+      acknowledgedAt: null,
+      registeredAt: null
+    };
+    const profileAction = vi.fn();
+    const coordinator = new TradeCoordinator({
+      repository: new MemorySessionRepository(current),
+      effects: port(),
+      now: () => 1_800_000_100,
+      profileAction
+    });
+
+    await coordinator.advance(current.sessionId);
+
+    expect(profileAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: "stage_inbox_registration",
+      execution: "local",
+      sessionId: current.sessionId,
+      role: "maker",
+      revision: 0,
+      succeeded: true,
+      startedAt: expect.any(Number),
+      endedAt: expect.any(Number)
+    }));
+    expect(JSON.stringify(profileAction.mock.calls)).not.toContain("privateState");
+  });
+
   it("rejects an external action without its complete persisted checkpoint", async () => {
     const current = stagedInbox();
     current.privateState.inbox.event = null;
