@@ -199,8 +199,166 @@ whether an event or the watchdog ended the wait. The normal interface remains
 unchanged.
 
 The focused tests prove that buffered delivery performs zero relay queries and
-that an exhausted buffer still uses relay backfill. The full suite passes with
-49 files, 385 tests passed, and 7 skipped; the production build also passes. A
-second public Testnut click-to-wallet measurement is still required before
-claiming a latency improvement because no controllable browser was available
-for this verification run.
+that an exhausted buffer still uses relay backfill. With the debug bridge test,
+the full suite passes with 50 files, 386 tests passed, and 7 skipped; the
+production build also passes. A second public Testnut click-to-wallet
+measurement was run below before making any latency claim.
+
+### Direct-delivery live Testnut E2E
+
+With explicit approval, a second in-app Chromium run on 2026-08-31 UTC used
+fresh `maker-live-20260831-b` and `taker-live-20260831-b` IndexedDB profiles.
+The maker published a one-day 20 SAT sell order at 50,000 USD/BTC and the taker
+bought the full amount for USD 0.01. The measured behavior is commit `4313873`;
+commit `d00abc7` only serializes existing performance entries into the opt-in,
+secret-free `debug=performance` bridge.
+
+The end-to-end wall time was **12,608.7 ms** from the taker click at
+`2026-08-31T00:49:39.845Z` until the later wallet reached `filled` at
+`2026-08-31T00:49:52.454Z`. The taker filled 23 ms before the maker.
+
+| Measure | Polling baseline | Direct delivery | Change | Change % |
+| --- | ---: | ---: | ---: | ---: |
+| Click to both wallet views filled | 12,143.0 ms | 12,608.7 ms | +465.7 ms | +3.8% |
+| Mint critical-path union | 4,645.0 ms | 2,330.5 ms | -2,314.5 ms | -49.8% |
+| Non-mint remainder | 7,498.0 ms | 10,278.2 ms | +2,780.2 ms | +37.1% |
+| Relay critical-path union | 11,428.0 ms | 9,246.1 ms | -2,181.9 ms | -19.1% |
+| Cumulative mint HTTP spans | 11,351.0 ms | 4,875.7 ms | -6,475.3 ms | -57.0% |
+| Cumulative relay request/ACK/delivery spans | 42,409.0 ms | 12,867.6 ms | -29,541.4 ms | -69.7% |
+| Coordinator actions observed | 64 | 58 | -6 | -9.4% |
+
+This single public run is not an end-to-end latency improvement: it regressed by
+3.8%. It does prove the intended mechanism. Empty authenticated relay polls fell
+from five to zero and the action count fell by six. Mint timings also varied
+substantially between the two runs, so the mint reductions are environmental,
+not attributed to the inbox change.
+
+The mint union merges the 50 Testnut HTTP resource intervals in the click
+window. The relay union merges relay-bearing coordinator actions and the two
+subscription wait-to-delivery intervals. Cumulative figures sum those same
+intervals, including overlaps, and therefore do not add up to wall time.
+
+| Mint operation class | Requests | Cumulative span |
+| --- | ---: | ---: |
+| Other Testnut HTTP | 39 | 3,145.0 ms |
+| NUT-13 restore | 2 | 377.9 ms |
+| Cashu swap | 2 | 364.6 ms |
+| NUT-07 check state | 7 | 988.2 ms |
+
+Both inbox waits ended on a live event. The immediately following
+`poll_inbox` actions took only 22.2 ms and 16.1 ms because they drained the
+validated buffer; neither issued an authenticated relay query. No watchdog
+expired and no backfill query ran.
+
+| Role | Start after click | Wait | Outcome | Following `poll_inbox` |
+| --- | ---: | ---: | --- | ---: |
+| taker | 2,480.2 ms | 4,603.3 ms | event | 22.2 ms |
+| maker | 7,076.5 ms | 2,479.9 ms | event | 16.1 ms |
+
+Relay-bearing action spans were:
+
+| Role | Rev | Action | Start after click | Duration |
+| --- | ---: | --- | ---: | ---: |
+| taker | 1 | `publish_inbox_registration` | 558.7 ms | 702.6 ms |
+| taker | 3 | `deliver_outbox` | 1,572.9 ms | 874.2 ms |
+| maker | 1 | `publish_inbox_registration` | 3,090.8 ms | 1,208.0 ms |
+| maker | 3 | `publish_order_projection` | 4,486.7 ms | 337.7 ms |
+| maker | 12 | `deliver_outbox` | 6,238.9 ms | 781.1 ms |
+| taker | 14 | `deliver_outbox` | 8,718.6 ms | 752.2 ms |
+| maker | 27 | `publish_order_projection` | 11,992.3 ms | 570.3 ms |
+| taker | 27 | `verify_order_fill` | 11,996.2 ms | 400.9 ms |
+| taker | 28 | `verify_order_fill` | 12,428.0 ms | 157.4 ms |
+
+The 337.7 ms projection is the reserved order; the 570.3 ms projection is the
+filled order. The taker needed two public fill reads before observing revision
+2. The three private deliveries all completed with an acknowledgement from
+`wss://auth.nostr1.com`.
+
+#### Settlement and event evidence
+
+The maker balance changed from 10,000 SAT to 9,978 SAT plus USD 0.01; the taker
+changed from USD 100.00 to 20 SAT plus USD 99.99. The extra two-satoshi maker
+debit is the Testnut swap fee. After refreshing both order books, the exact
+order no longer appeared.
+
+- Order ID: `f11ed300-f866-4c69-a322-d6b2c4d188fe`
+- Session ID: `e6b0173d665781a35aa698cc7971dd58d07def3f4144b27407904673b9644562`
+- Order authority: `npub1ursc5hu8andm6qlwn2l5cz8etxkntfkaxq2hs4g54jqs7ehfljds836km3`
+- Open kind `30078`: `c7bcad7f7a6114ae486362b841a918cc10077856560c02d68f554a4a3238d124`, acknowledged by all three configured public relays
+- Taker kind `10050`: `6c10cb5c1ec0652c43fcec5bc1c4703cb0cace8a013708c52db161ed71dc94b9`, two public relay acknowledgements
+- Maker kind `10050`: `8a22b155e285c9c70cee49be9c8088f6e96f666ae9e64a407530c41ef5161977`, two public relay acknowledgements
+- Reserve-proposal rumor: `75e86b03578b45f96e5dc66d8f0f2c83dd40013545c30d18ac3c0e182eaebb3e`
+- Reserve-acceptance rumor: `028e61aa5f5080ac175801fdedd69b01344277b74c66f09fd579171285b027dc`
+- Quote-lock rumor: `9803571b0b0174f7f0711cc4d3ac9065e5f7e5d4d73cddcb7d0dc394b419972a`
+- Filled kind `30078`, revision 2: `099e8da85571547ea022861a60914b727458dc5ddf797c53771d0ec47d19c836`
+
+A post-run query found the filled projection and both kind `10050` events on
+`wss://nos.lol` and `wss://relay.primal.net`; `wss://offchain.pub` did not
+return them in that read. `nostr-tools.verifyEvent` verified all three queried
+events. Granola accepted all three private messages only after its full NIP-17
+wrapper, seal, rumor, recipient, author, replay, transcript, expiry, mint, and
+keyset validation. No wrapper body or bearer material was exposed to the debug
+bridge.
+
+#### Complete coordinator timeline
+
+| Role | Rev | Action | Duration |
+| --- | ---: | --- | ---: |
+| maker | 0 | `stage_inbox_registration` | 11.5 ms |
+| maker | 1 | `publish_inbox_registration` | 1,208.0 ms |
+| maker | 2 | `stage_order_reserve` | 168.8 ms |
+| maker | 3 | `publish_order_projection` | 337.7 ms |
+| maker | 4 | `commit_order_publication` | 15.5 ms |
+| maker | 5 | `clear_order_publication` | 9.6 ms |
+| maker | 6 | `prepare_base_lock` | 99.8 ms |
+| maker | 7 | `reserve_cashu_inputs` | 11.6 ms |
+| maker | 8 | `execute_cashu_operation` | 860.7 ms |
+| maker | 9 | `reconcile_wallet` | 9.9 ms |
+| maker | 10 | `clear_cashu_operation` | 3.9 ms |
+| maker | 11 | `stage_reserve_accept` | 308.6 ms |
+| maker | 12 | `deliver_outbox` | 781.1 ms |
+| maker | 13 | `commit_outbox` | 10.9 ms |
+| maker | 14 | `poll_inbox` | 16.1 ms |
+| maker | 15 | `validate_incoming` | 317.8 ms |
+| maker | 16 | `commit_incoming` | 4.7 ms |
+| maker | 17 | `prepare_quote_claim` | 262.0 ms |
+| maker | 18 | `reserve_cashu_inputs` | 6.9 ms |
+| maker | 19 | `execute_cashu_operation` | 434.8 ms |
+| maker | 20 | `reconcile_wallet` | 9.1 ms |
+| maker | 21 | `clear_cashu_operation` | 7.5 ms |
+| maker | 22 | `observe_quote` | 236.1 ms |
+| maker | 23 | `observe_base` | 251.8 ms |
+| maker | 24 | `observe_base` | 233.4 ms |
+| maker | 25 | `observe_base` | 231.2 ms |
+| maker | 26 | `stage_order_fill` | 165.3 ms |
+| maker | 27 | `publish_order_projection` | 570.3 ms |
+| maker | 28 | `commit_order_publication` | 21.6 ms |
+| taker | 0 | `stage_inbox_registration` | 10.4 ms |
+| taker | 1 | `publish_inbox_registration` | 702.6 ms |
+| taker | 2 | `stage_reserve_propose` | 299.7 ms |
+| taker | 3 | `deliver_outbox` | 874.2 ms |
+| taker | 4 | `commit_outbox` | 6.1 ms |
+| taker | 5 | `poll_inbox` | 22.2 ms |
+| taker | 6 | `validate_incoming` | 251.4 ms |
+| taker | 7 | `commit_incoming` | 14.7 ms |
+| taker | 8 | `prepare_quote_lock` | 105.0 ms |
+| taker | 9 | `reserve_cashu_inputs` | 7.5 ms |
+| taker | 10 | `execute_cashu_operation` | 736.1 ms |
+| taker | 11 | `reconcile_wallet` | 18.0 ms |
+| taker | 12 | `clear_cashu_operation` | 4.4 ms |
+| taker | 13 | `stage_quote_lock` | 340.3 ms |
+| taker | 14 | `deliver_outbox` | 752.2 ms |
+| taker | 15 | `commit_outbox` | 21.4 ms |
+| taker | 16 | `observe_quote` | 323.8 ms |
+| taker | 17 | `observe_quote` | 237.7 ms |
+| taker | 18 | `observe_quote` | 268.4 ms |
+| taker | 19 | `observe_quote` | 239.7 ms |
+| taker | 20 | `observe_quote` | 250.1 ms |
+| taker | 21 | `prepare_base_claim` | 301.3 ms |
+| taker | 22 | `reserve_cashu_inputs` | 7.9 ms |
+| taker | 23 | `execute_cashu_operation` | 433.1 ms |
+| taker | 24 | `reconcile_wallet` | 9.4 ms |
+| taker | 25 | `clear_cashu_operation` | 3.6 ms |
+| taker | 26 | `observe_base` | 245.8 ms |
+| taker | 27 | `verify_order_fill` | 400.9 ms |
+| taker | 28 | `verify_order_fill` | 157.4 ms |
