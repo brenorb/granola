@@ -7,6 +7,7 @@ import {
   withOrderOutboxLock,
   withWalletLock
 } from "./browser/lock.js";
+import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { startInboxListeners } from "./browser/startup.js";
@@ -73,6 +74,9 @@ function byId<T extends HTMLElement>(id: string): T {
 
 const profile = profileFromLocation(window.location.href);
 const debugPerformance = new URL(window.location.href).searchParams.get("debug") === "performance";
+const debugTimeline = debugPerformance
+  ? createPerformanceDebugTimeline(document, performance)
+  : undefined;
 const driver = new IndexedDbStorageDriver(storageNameForProfile(profile));
 const locked = <T>(action: () => Promise<T>): Promise<T> => withWalletLock(profile, action);
 const outboxLocked = <T>(action: () => Promise<T>): Promise<T> =>
@@ -247,14 +251,7 @@ function tradeController(): Promise<BrowserTradeController> {
     orderOutbox,
     cashu,
     ...(debugPerformance ? {
-      profileAction: (action) => performance.measure(
-        "granola:coordinator-action",
-        {
-          start: action.startedAt,
-          end: action.endedAt,
-          detail: action
-        }
-      )
+      profileAction: (action) => debugTimeline!.action(action)
     } : {})
   }).then((runtime) => new BrowserTradeController({
     api: runtime.api,
@@ -264,6 +261,12 @@ function tradeController(): Promise<BrowserTradeController> {
     inboxRelay: runtime.inboxRelay,
     makerIdentity,
     onChange: (trade) => {
+      if (trade.phase === "filled") {
+        debugTimeline?.mark("granola:trade-filled", {
+          sessionId: trade.sessionId,
+          role: trade.role
+        });
+      }
       void refreshTrades();
       if (trade.phase === "filled") void refresh();
     },
@@ -279,14 +282,7 @@ function tradeController(): Promise<BrowserTradeController> {
       report(message, true);
     },
     ...(debugPerformance ? {
-      profileInboxWait: (wait) => performance.measure(
-        "granola:inbox-wait",
-        {
-          start: wait.startedAt,
-          end: wait.endedAt,
-          detail: wait
-        }
-      )
+      profileInboxWait: (wait) => debugTimeline!.inboxWait(wait)
     } : {})
   }));
   return tradeControllerPromise;
@@ -310,6 +306,7 @@ function takeOrderFromBook(
   const requestId = takeRequestIds.get(retryKey) ?? crypto.randomUUID();
   takeRequestIds.set(retryKey, requestId);
   const task = async (): Promise<void> => {
+    debugTimeline?.mark("granola:take-order-click");
     const trade = await granola.takeOrder({
       requestId,
       address: order.address,

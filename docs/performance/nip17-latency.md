@@ -167,15 +167,11 @@ test keys and records only relay URLs, public keys, event IDs,
 acknowledgements, and timings.
 
 For a full browser action timeline, add `debug=performance` to each wallet URL.
-The normal interface is unchanged. Read the secret-free measurements in the
-developer console with:
+The normal interface is unchanged. Browser automation can read the bounded,
+secret-free measurements without developer-console access:
 
 ```js
-performance.getEntriesByName("granola:coordinator-action").map((entry) => ({
-  startTime: entry.startTime,
-  duration: entry.duration,
-  ...entry.detail
-}))
+JSON.parse(document.querySelector("#granola-performance").textContent)
 ```
 
 ## Remaining ceiling
