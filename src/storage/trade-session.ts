@@ -1761,7 +1761,18 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
       OUTBOX_STATUS_RANK[nextOutbox.status] > OUTBOX_STATUS_RANK[currentOutbox.status] + 1
     ) throw new Error("Trade outbox retry artifact regressed or changed");
   } else if (currentOutbox?.status === "staged" && nextOutbox === null) {
-    throw new Error("A staged trade outbox cannot be cleared before acknowledgement");
+    const accepted = next.privateState.transcript.accepted.at(-1);
+    if (
+      accepted?.messageId !== currentOutbox.message.message_id ||
+      accepted.rumorId !== currentOutbox.rumor.id ||
+      accepted.type !== currentOutbox.message.type ||
+      accepted.authorPubkey !== currentOutbox.message.author_pubkey ||
+      accepted.recipientPubkey !== currentOutbox.message.recipient_pubkey ||
+      canonicalJson(next.privateState.transcript.choreography) !==
+        canonicalJson(currentOutbox.nextChoreography)
+    ) {
+      throw new Error("A staged trade outbox cannot be cleared before acknowledgement");
+    }
   }
 
   const currentCashu = current.privateState.cashuOperation;
@@ -1769,12 +1780,19 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
   if (currentCashu && nextCashu) {
     const advance = CASHU_STATUS_RANK[nextCashu.status] -
       CASHU_STATUS_RANK[currentCashu.status];
+    const replacesApplied =
+      currentCashu.status === "wallet_applied" &&
+      nextCashu.status === "prepared" &&
+      currentCashu.operationId !== nextCashu.operationId;
     if (
-      currentCashu.operationId !== nextCashu.operationId ||
-      currentCashu.artifact.operationCommitment !==
-        nextCashu.artifact.operationCommitment ||
-      advance < 0 ||
-      advance > 1
+      !replacesApplied &&
+      (
+        currentCashu.operationId !== nextCashu.operationId ||
+        currentCashu.artifact.operationCommitment !==
+          nextCashu.artifact.operationCommitment ||
+        advance < 0 ||
+        advance > 1
+      )
     ) throw new Error("Cashu operation checkpoint regressed or changed");
   } else if (currentCashu && currentCashu.status !== "wallet_applied") {
     throw new Error("Cashu operation cannot be cleared before wallet application");
@@ -1789,7 +1807,10 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
     if (
       currentOrder.projection.id !== nextOrder.projection.id ||
       advance < 0 ||
-      advance > 1
+      (
+        advance > 1 &&
+        !(currentOrder.status === "staged" && nextOrder.status === "committed")
+      )
     ) throw new Error("Order publication checkpoint regressed or changed");
   } else if (currentOrder && nextOrder === null && currentOrder.status !== "committed") {
     throw new Error("Order publication cannot be cleared before commit");

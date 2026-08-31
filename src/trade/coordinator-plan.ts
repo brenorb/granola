@@ -277,7 +277,7 @@ export function nextCoordinatorAction(
   const cashu = session.privateState.cashuOperation;
   const publication = session.pendingOrderPublication;
   if (cashu?.status === "completed") return { kind: "reconcile_wallet" };
-  if (cashu?.status === "wallet_applied") {
+  if (cashu?.status === "wallet_applied" && cashu.kind === "refund") {
     const releasableRefund =
       session.role === "maker" &&
       session.reserveProjectionId !== null &&

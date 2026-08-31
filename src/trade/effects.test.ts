@@ -391,6 +391,7 @@ interface Harness {
   orderApi: {
     ensureReserveStaged: ReturnType<typeof vi.fn>;
     publishNextStage: ReturnType<typeof vi.fn>;
+    clearAcknowledgedOrderPublication: ReturnType<typeof vi.fn>;
   };
   orderOutbox: {
     load: ReturnType<typeof vi.fn>;
@@ -422,7 +423,8 @@ interface Harness {
 function harness(): Harness {
   const orderApi = {
     ensureReserveStaged: vi.fn(),
-    publishNextStage: vi.fn()
+    publishNextStage: vi.fn(),
+    clearAcknowledgedOrderPublication: vi.fn()
   };
   const orderOutbox = {
     load: vi.fn(),
@@ -606,7 +608,7 @@ describe("GranolaCoordinatorEffects", () => {
     }
   });
 
-  it("retries the exact persisted Nostr wrapper and only records its receipts", async () => {
+  it("retries the exact persisted Nostr wrapper and commits its transcript", async () => {
     const { effects, nostr } = harness();
     const current = stagedDeliverySession();
     const receipts = [{
@@ -640,11 +642,14 @@ describe("GranolaCoordinatorEffects", () => {
       new Uint8Array(32).fill(1),
       new Uint8Array(32).fill(1)
     ]);
-    expect(first.privateState.outbox).toEqual({
-      ...current.privateState.outbox,
-      receipts,
-      status: "acknowledged"
+    expect(first.privateState.outbox).toBeNull();
+    expect(first.privateState.transcript.accepted.at(-1)).toMatchObject({
+      messageId: current.privateState.outbox!.message.message_id,
+      rumorId: current.privateState.outbox!.rumor.id,
+      type: current.privateState.outbox!.message.type
     });
+    expect(first.privateState.transcript.choreography)
+      .toEqual(current.privateState.outbox!.nextChoreography);
     expect(retry).toEqual(first);
     expect(first.revision).toBe(current.revision + 1);
     expect(first.updatedAt).toBe(NOW);
@@ -675,6 +680,12 @@ describe("GranolaCoordinatorEffects", () => {
       ok: true,
       message: "stored"
     }];
+    acknowledgedEntry.intent.state = {
+      revision: "1",
+      reservation: { taker_commitment: "bc".repeat(32) }
+    } as never;
+    const committedEntry = clone(acknowledgedEntry);
+    committedEntry.status = "committed";
     let durableEntry = stagedEntry;
     orderOutbox.load.mockImplementation(async () => clone(durableEntry));
     orderApi.publishNextStage.mockImplementation(async () => {
@@ -687,6 +698,9 @@ describe("GranolaCoordinatorEffects", () => {
         receipts: clone(acknowledgedEntry.publication.receipts),
         status: "acknowledged"
       };
+    });
+    orderApi.clearAcknowledgedOrderPublication.mockImplementation(async () => {
+      durableEntry = committedEntry;
     });
 
     const first = await effects.performExternal(
@@ -703,7 +717,7 @@ describe("GranolaCoordinatorEffects", () => {
     expect(first.pendingOrderPublication?.receipts)
       .toEqual(acknowledgedEntry.publication.receipts);
     expect(first.pendingOrderPublication?.status)
-      .toBe("acknowledged");
+      .toBe("committed");
     expect(retry).toEqual(first);
   });
 
@@ -907,6 +921,28 @@ describe("GranolaCoordinatorEffects", () => {
     expect(retry).toEqual(first);
     expect(wallet.save).not.toHaveBeenCalled();
     expect(reservations.release).not.toHaveBeenCalled();
+
+    wallet.load.mockResolvedValue(walletState());
+    reservations.load.mockResolvedValue({
+      version: 1,
+      revision: 4,
+      reservations: preparedOperation().spentSecrets.map((proofSecret) => ({
+        proofSecret,
+        sessionId: prepared.sessionId,
+        mintUrl: prepared.terms.baseMint,
+        unit: prepared.terms.baseUnit,
+        reservedAt: prepared.privateState.cashuOperation!.preparedAt
+      }))
+    });
+    const reconciled = await effects.performExternal(
+      externalInput({ kind: "reconcile_wallet" }, first)
+    );
+
+    expect(reconciled.privateState.cashuOperation?.status).toBe("wallet_applied");
+    expect(reservations.release).toHaveBeenCalledWith(4, {
+      sessionId: prepared.sessionId,
+      proofSecrets: preparedOperation().spentSecrets
+    });
   });
 
   it("accepts only the maker's exact current published fill before taker termination", async () => {

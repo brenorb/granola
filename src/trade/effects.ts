@@ -834,14 +834,20 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
   ): Promise<TradeSession> {
     const pending = session.pendingOrderPublication;
     if (!pending) throw new Error("Order publication is not checkpointed");
-    const before = await this.requiredOrderEntry(pending.orderId);
-    if (before.status !== pending.status) {
-      const next = bump(session, now);
-      next.pendingOrderPublication = exactPendingPublication(session, before, now);
-      return next;
+    let entry = await this.requiredOrderEntry(pending.orderId);
+    if (entry.status === pending.status) {
+      await this.orderApi.publishNextStage(pending.orderId);
+      entry = await this.requiredOrderEntry(pending.orderId);
     }
-    await this.orderApi.publishNextStage(pending.orderId);
-    const entry = await this.requiredOrderEntry(pending.orderId);
+    if (entry.status === "acknowledged" || entry.status === "committed") {
+      const acknowledged = structuredClone(session);
+      acknowledged.pendingOrderPublication = exactPendingPublication(
+        session,
+        entry,
+        now
+      );
+      return this.commitOrderPublication(acknowledged, now);
+    }
     const next = bump(session, now);
     next.pendingOrderPublication = exactPendingPublication(session, entry, now);
     return next;
@@ -852,7 +858,10 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     now: number
   ): Promise<TradeSession> {
     const pending = session.pendingOrderPublication;
-    if (!pending || pending.status !== "acknowledged") {
+    if (
+      !pending ||
+      (pending.status !== "acknowledged" && pending.status !== "committed")
+    ) {
       throw new Error("Order projection is not acknowledged");
     }
     await this.orderApi.clearAcknowledgedOrderPublication(pending.orderId);
@@ -1213,13 +1222,13 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const receipts = keyHex === null
       ? await this.withMakerOrderKey(session, send)
       : await this.withSessionKey(session, send);
-    const next = bump(session, now);
-    next.privateState.outbox = {
+    const acknowledged = structuredClone(session);
+    acknowledged.privateState.outbox = {
       ...structuredClone(outbox),
       receipts: structuredClone(receipts),
       status: "acknowledged"
     };
-    return next;
+    return this.commitOutbox(acknowledged, now);
   }
 
   private async pollInbox(
@@ -1352,8 +1361,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       session.privateState.transcript.choreography,
       checked
     );
-    const next = bump(session, now);
-    next.privateState.pendingIncoming = {
+    const validated = structuredClone(session);
+    validated.privateState.pendingIncoming = {
       ...structuredClone(pending),
       validation: { status: "validated", checkedAt: now, error: null }
     };
@@ -1401,16 +1410,16 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         summary.keysetId !== body.keyset ||
         summary.amount !== body.amount
       ) throw new Error("Incoming Cashu validation differs from the signed lock body");
-      next.privateState.htlcHash ??= body.settlement_hash;
-      if (!next.evidence.commitments.includes(body.settlement_hash)) {
-        next.evidence.commitments.push(body.settlement_hash);
+      validated.privateState.htlcHash ??= body.settlement_hash;
+      if (!validated.evidence.commitments.includes(body.settlement_hash)) {
+        validated.evidence.commitments.push(body.settlement_hash);
       }
-      next.privateState.legs[leg] = {
-        ...next.privateState.legs[leg],
+      validated.privateState.legs[leg] = {
+        ...validated.privateState.legs[leg],
         token: body.cashu_token,
         expected,
         observations: [
-          ...next.privateState.legs[leg].observations,
+          ...validated.privateState.legs[leg].observations,
           {
             observedAt: now,
             state: "UNSPENT",
@@ -1419,8 +1428,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
           }
         ]
       };
-      next.evidence.legs[leg] = {
-        ...next.evidence.legs[leg],
+      validated.evidence.legs[leg] = {
+        ...validated.evidence.legs[leg],
         tokenCommitment: body.token_commitment,
         validationCommitment: body.validation_commitment,
         proofCount: summary.proofCount,
@@ -1429,7 +1438,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         observedAt: now
       };
     }
-    return next;
+    return this.commitIncoming(validated, now);
   }
 
   private async commitIncoming(

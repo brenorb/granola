@@ -362,3 +362,21 @@ bridge.
 | taker | 26 | `observe_base` | 245.8 ms |
 | taker | 27 | `verify_order_fill` | 400.9 ms |
 | taker | 28 | `verify_order_fill` | 157.4 ms |
+
+### Coordinator checkpoint folding
+
+The controlled happy path now uses 40 coordinator actions instead of 51: 11
+fewer actions, or 21.6%. Delivery commits its accepted transcript, incoming
+validation commits the validated message, wallet reconciliation proceeds
+without a separate clear for non-refund operations, and publication commits
+the acknowledged shared order outbox. The durable pre-effect stages remain.
+
+Applied to the exact 58-action live trace above, those same three outbox, two
+incoming, four Cashu, and two publication checkpoints would reduce the trace
+to 47 actions (19.0%). This is a projection from the recorded trace, not a new
+public-network latency measurement.
+
+Crash retries still use the exact staged Nostr, Cashu, and order artifacts.
+Persisted legacy acknowledged, validated, and wallet-applied states retain
+their recovery actions, while storage rejects clearing an uncommitted staged
+artifact.
