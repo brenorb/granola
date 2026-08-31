@@ -21,8 +21,10 @@ import type {
   PublicTradeView,
   TradeSession
 } from "../trade/session.js";
+import { nextCoordinatorAction } from "../trade/coordinator-plan.js";
 
 const GIFT_WRAP_LOOKBACK = 172_800;
+const INBOX_BACKFILL_WATCHDOG_MS = 5_000;
 const HEX_SECRET = /^[0-9a-f]{64}$/;
 
 function bytes(hex: string): Uint8Array {
@@ -52,6 +54,13 @@ export interface RunUntilSettledResult {
   checkpoints: readonly RedactedTradeCheckpoint[];
 }
 
+export interface InboxWaitProfile {
+  sessionId: string;
+  outcome: "event" | "watchdog";
+  startedAt: number;
+  endedAt: number;
+}
+
 type StartSubscription = (
   input: StartTradeSubscriptionInput
 ) => Promise<TradeSubscription>;
@@ -68,7 +77,10 @@ export interface BrowserTradeControllerOptions {
   sessions: Pick<TradeSessionRepository, "get">;
   transport: Pick<
     NostrTradeTransport,
-    "createRegistration" | "publishRegistration"
+    | "createRegistration"
+    | "publishRegistration"
+    | "bufferLiveEvent"
+    | "hasBufferedLiveEvent"
   >;
   inboxPort: BrowserInboxPort;
   inboxRelay: string;
@@ -90,6 +102,7 @@ export interface BrowserTradeControllerOptions {
   onError?: (message: string) => void;
   onMakerError?: (message: string) => void;
   wait?: (delayMs: number) => Promise<void>;
+  profileInboxWait?: (profile: InboxWaitProfile) => void;
 }
 
 function messageOf(error: unknown): string {
@@ -143,6 +156,7 @@ export class BrowserTradeController {
   private readonly onError: (message: string) => void;
   private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
+  private readonly profileInboxWait: ((profile: InboxWaitProfile) => void) | undefined;
   private readonly subscriptions = new Map<string, TradeSubscription>();
   private readonly settlementRuns = new Map<string, Promise<RunUntilSettledResult>>();
   private readonly settlementSignals = new Map<string, number>();
@@ -172,6 +186,7 @@ export class BrowserTradeController {
     this.onMakerError = options.onMakerError ?? this.onError;
     this.wait = options.wait ?? ((delayMs) =>
       new Promise((resolve) => globalThis.setTimeout(resolve, delayMs)));
+    this.profileInboxWait = options.profileInboxWait;
   }
 
   listTrades(): Promise<PublicTradeView[]> {
@@ -265,6 +280,7 @@ export class BrowserTradeController {
         throw new Error("Trade did not settle within 200 coordinator actions");
       }
       const observedSignal = this.settlementSignals.get(sessionId) ?? 0;
+      await this.waitForLiveInboxEvent(sessionId, observedSignal);
       try {
         current = await this.api.advanceTrade(sessionId);
         this.startSessionSubscriptionInBackground(sessionId, reportError);
@@ -487,10 +503,14 @@ export class BrowserTradeController {
           },
           port: this.inboxPort,
           now: this.now,
-          onEvent: async () => {
+          onEvent: async (event) => {
             try {
               const trade = await this.api.getTrade(sessionId);
               if (trade === undefined || !this.isActive(trade)) return;
+              this.transport.bufferLiveEvent(
+                this.sessionPubkey(session),
+                event
+              );
               this.signalSettlement(sessionId);
               if (trade.role === "maker") {
                 await this.startWinningMakerSettlement(trade.orderAddress);
@@ -539,13 +559,40 @@ export class BrowserTradeController {
         resolve();
       }
     });
+    const startedAt = performance.now();
     try {
-      await Promise.race([signal, this.wait(250)]);
+      const outcome = await Promise.race([
+        signal.then(() => "event" as const),
+        this.wait(INBOX_BACKFILL_WATCHDOG_MS).then(() => "watchdog" as const)
+      ]);
+      try {
+        this.profileInboxWait?.({
+          sessionId,
+          outcome,
+          startedAt,
+          endedAt: performance.now()
+        });
+      } catch {
+        // Diagnostics must never change settlement behavior.
+      }
     } finally {
       const waiters = this.settlementWaiters.get(sessionId);
       waiters?.delete(resolveSignal);
       if (waiters?.size === 0) this.settlementWaiters.delete(sessionId);
     }
+  }
+
+  private async waitForLiveInboxEvent(
+    sessionId: string,
+    observedSignal: number
+  ): Promise<void> {
+    const session = await this.sessions.get(sessionId);
+    if (
+      session === undefined ||
+      nextCoordinatorAction(session, this.now()).kind !== "poll_inbox"
+    ) return;
+    if (this.transport.hasBufferedLiveEvent(this.sessionPubkey(session))) return;
+    await this.waitForSettlementSignal(sessionId, observedSignal);
   }
 
   private startSubscriptionOnce(

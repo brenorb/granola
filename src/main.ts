@@ -277,7 +277,17 @@ function tradeController(): Promise<BrowserTradeController> {
         { label: "error", value: message }
       ]);
       report(message, true);
-    }
+    },
+    ...(debugPerformance ? {
+      profileInboxWait: (wait) => performance.measure(
+        "granola:inbox-wait",
+        {
+          start: wait.startedAt,
+          end: wait.endedAt,
+          detail: wait
+        }
+      )
+    } : {})
   }));
   return tradeControllerPromise;
 }

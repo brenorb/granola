@@ -439,10 +439,15 @@ describe("Nostr trade transport", () => {
 
     const receipts = await transport.send(wrapped.wrapper, inboxes, takerKey);
     await transport.send(wrapped.wrapper, inboxes, takerKey);
+    transport.bufferLiveEvent(maker, wrapped.wrapper);
     const received = await transport.read(maker, makerKey, now - 60);
 
     expect(receipts.filter((receipt) => receipt.ok)).toHaveLength(1);
     expect(received.map((event) => event.id)).toEqual([wrapped.wrapper.id]);
+    expect(port.queries).toHaveLength(0);
+    const backfilled = await transport.read(maker, makerKey, now - 60);
+    expect(backfilled.map((event) => event.id)).toEqual([wrapped.wrapper.id]);
+    expect(port.queries).toHaveLength(1);
   });
 
   it("snapshots transport send, discovery, and read inputs before delayed I/O", async () => {

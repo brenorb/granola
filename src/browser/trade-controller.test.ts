@@ -190,6 +190,7 @@ function setup(options: {
   onMakerError?: (message: string) => void;
   makerOrderIds?: string[];
   trades?: PublicTradeView[];
+  session?: TradeSession;
 } = {}): {
   controller: BrowserTradeController;
   api: {
@@ -201,6 +202,10 @@ function setup(options: {
   };
   subscriptions: StartTradeSubscriptionInput[];
   stops: Array<ReturnType<typeof vi.fn>>;
+  transport: {
+    bufferLiveEvent: ReturnType<typeof vi.fn>;
+    hasBufferedLiveEvent: ReturnType<typeof vi.fn>;
+  };
 } {
   const publicView = view();
   const api = {
@@ -214,20 +219,28 @@ function setup(options: {
     BrowserTradeControllerOptions["startSubscription"]
   >>[0]> = [];
   const stops: Array<ReturnType<typeof vi.fn>> = [];
+  const bufferedRecipients = new Set<string>();
+  const transport = {
+    createRegistration: vi.fn(() => wrapper),
+    publishRegistration: vi.fn(async () => ({
+      event: wrapper,
+      receipts: [],
+      readback: [],
+      confirmed: ["wss://inbox.example"]
+    })),
+    bufferLiveEvent: vi.fn((recipient: string) => {
+      bufferedRecipients.add(recipient);
+    }),
+    hasBufferedLiveEvent: vi.fn((recipient: string) =>
+      bufferedRecipients.has(recipient)
+    )
+  };
   const controller = new BrowserTradeController({
     api: api as unknown as TradeApi,
     sessions: {
-      get: vi.fn(async () => privateSession())
+      get: vi.fn(async () => options.session ?? privateSession())
     } as unknown as TradeSessionRepository,
-    transport: {
-      createRegistration: vi.fn(() => wrapper),
-      publishRegistration: vi.fn(async () => ({
-        event: wrapper,
-        receipts: [],
-        readback: [],
-        confirmed: ["wss://inbox.example"]
-      }))
-    },
+    transport,
     inboxPort: {} as BrowserTradeControllerOptions["inboxPort"],
     inboxRelay: "wss://inbox.example",
     makerIdentity: {
@@ -254,7 +267,7 @@ function setup(options: {
     }),
     openProposal: vi.fn(async () => ({ message: {} } as VerifiedInitialReserveProposal))
   });
-  return { controller, api, subscriptions, stops };
+  return { controller, api, subscriptions, stops, transport };
 }
 
 describe("BrowserTradeController", () => {
@@ -521,7 +534,7 @@ describe("BrowserTradeController", () => {
 
     const result = await controller.runUntilSettled(sessionId);
 
-    expect(wait).toHaveBeenCalledWith(250);
+    expect(wait).toHaveBeenCalledWith(5_000);
     expect(api.advanceTrade).toHaveBeenCalledTimes(3);
     expect(result).toEqual({
       sessionId,
@@ -579,7 +592,33 @@ describe("BrowserTradeController", () => {
 
     await expect(settlement).resolves.toMatchObject({ finalPhase: "filled" });
     expect(api.advanceTrade).toHaveBeenCalledTimes(2);
-    expect(wait).toHaveBeenCalledWith(250);
+    expect(wait).toHaveBeenCalledWith(5_000);
+  });
+
+  it("delivers a live wrapper before polling the relay fallback", async () => {
+    const waiting = privateSession();
+    waiting.role = "maker";
+    const wait = vi.fn(() => new Promise<void>(() => undefined));
+    const { controller, api, subscriptions, transport } = setup({
+      session: waiting,
+      wait
+    });
+    api.advanceTrade.mockResolvedValueOnce({
+      ...view(1),
+      role: "maker",
+      phase: "filled"
+    });
+
+    const settlement = controller.runUntilSettled(sessionId);
+    await vi.waitFor(() => expect(subscriptions).toHaveLength(1));
+    expect(api.advanceTrade).not.toHaveBeenCalled();
+
+    await subscriptions[0]!.onEvent(wrapper, "wss://inbox.example");
+
+    await expect(settlement).resolves.toMatchObject({ finalPhase: "filled" });
+    expect(transport.bufferLiveEvent).toHaveBeenCalledWith(sessionPubkey, wrapper);
+    expect(api.advanceTrade).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledWith(5_000);
   });
 
   it("reopens a session inbox after its relay subscription closes", async () => {

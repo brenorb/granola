@@ -182,7 +182,29 @@ performance.getEntriesByName("granola:coordinator-action").map((entry) => ({
 
 The accepted duplicate-registration fix remains valid, but the live swap shows
 that inbox polling and sequential private/public relay checkpoints now dominate
-the non-mint path. The next experiment should eliminate empty `poll_inbox`
-requests when a live subscription has not signaled a new event, without
-weakening persisted message validation or retry evidence. Connection pooling is
-still unjustified until that avoidable polling cost is removed and remeasured.
+the non-mint path. The experiment below removes relay reads when the live
+subscription has already delivered the event without weakening persisted
+message validation or retry evidence. Connection pooling is still unjustified
+until this avoidable polling cost is remeasured publicly.
+
+## Direct live delivery
+
+The next experiment is implemented after the recorded live run. The existing
+subscription now places each received wrapper in a bounded per-recipient buffer
+before waking the coordinator. `poll_inbox` drains that wrapper through the
+unchanged signature, replay, transcript, expiry, mint, and keyset validation
+path without querying the relay again. If no live wrapper arrives, a five-second
+watchdog falls back to the existing authenticated relay query; restart and
+reconnect subscriptions retain the two-day NIP-17 lookback.
+
+With `debug=performance`, subscription waits are recorded as
+`granola:inbox-wait` entries whose secret-free detail reports the session ID and
+whether an event or the watchdog ended the wait. The normal interface remains
+unchanged.
+
+The focused tests prove that buffered delivery performs zero relay queries and
+that an exhausted buffer still uses relay backfill. The full suite passes with
+49 files, 385 tests passed, and 7 skipped; the production build also passes. A
+second public Testnut click-to-wallet measurement is still required before
+claiming a latency improvement because no controllable browser was available
+for this verification run.
