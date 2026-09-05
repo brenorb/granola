@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { finalizeEvent, getPublicKey, type EventTemplate } from "nostr-tools";
+import { finalizeEvent, getPublicKey, verifyEvent, type EventTemplate } from "nostr-tools";
 
 import type { NostrEvent } from "../order/events.js";
 import { createNip42AuthEvent } from "./inbox.js";
@@ -56,6 +56,26 @@ class FakeConnection implements InboxRelayConnection {
 }
 
 describe("nostr-tools inbox relay port", () => {
+  it("finishes verified exact readback before EOSE and closes a synchronous subscription", async () => {
+    const candidate = event();
+    const subscriptionClose = vi.fn();
+    const connection = new FakeConnection();
+    const close = vi.spyOn(connection, "close");
+    connection.subscribe = (_filters, callbacks) => {
+      callbacks.onevent({ ...candidate, content: "tampered" });
+      callbacks.onevent(candidate);
+      return { close: subscriptionClose };
+    };
+    const port = new NostrToolsInboxRelayPort(async () => connection,
+      async () => new Response(JSON.stringify({ supported_nips: [], limitation: {} })));
+    const result = await port.query(relayUrl, { ids: [candidate.id] },
+      async (challenge) => createNip42AuthEvent(relayUrl, challenge, protocolKey, now),
+      (value) => verifyEvent(structuredClone(value)) && value.id === candidate.id);
+    expect(result).toEqual([structuredClone(candidate)]);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(subscriptionClose).toHaveBeenCalledTimes(1);
+  });
+
   it("calls the browser fetch implementation with the Window receiver", async () => {
     const receiver = vi.fn();
     vi.stubGlobal("fetch", function (

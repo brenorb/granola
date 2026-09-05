@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { NostrEvent } from "../order/events.js";
 import { LOCAL_MESH_RELAY, PUBLIC_RELAYS, RelayClient, type RelayPoolPort } from "./relay.js";
@@ -43,6 +43,20 @@ class FakePool implements RelayPoolPort {
 }
 
 describe("relay client", () => {
+  it("uses the existing pool for a persistent exact-market subscription", () => {
+    const close = vi.fn();
+    const subscribeMany = vi.fn(() => ({ close }));
+    const pool = Object.assign(new FakePool(), { subscribeMany });
+    const client = new RelayClient({ relays: ["wss://one.example"], pool, maxWait: 1234 });
+    const onevent = vi.fn();
+    const subscription = client.subscribeProjections("d".repeat(64), { onevent });
+    expect(subscribeMany).toHaveBeenCalledWith(["wss://one.example"], {
+      kinds: [30078], "#t": ["granola-order"], "#m": ["d".repeat(64)], limit: 500
+    }, { onevent, maxWait: 1234 });
+    subscription.close();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("includes and accepts the local mesh relay", () => {
     expect(PUBLIC_RELAYS).toContain(LOCAL_MESH_RELAY);
 

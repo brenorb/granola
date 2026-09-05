@@ -68,6 +68,47 @@ recipients, so a generic recipient cache would not eliminate those three reads.
 
 ## Validation of this patch
 
+### Implemented follow-up
+
+The approved first three opportunities are now implemented:
+
+- Browser order-book and trade refresh bursts share outstanding work, with a
+  trailing refresh when another update arrives during a read.
+- The browser book subscribes through the existing public SimplePool. It
+  validates incoming projections, keeps the latest event per address, retains
+  canceled/filled tombstones, and renders changed books as events arrive after
+  EOSE. Unchanged rows retain their inputs, focus and busy buttons. Order and
+  reservation deadlines schedule local availability updates.
+- Explicit refresh and a 60-second backfill reopen the subscription and reload
+  its backlog, including recovery from initial connection failures. The feed
+  is bounded to 2,000 queued events and 2,000 addresses; full backfill retains
+  the existing 500-event limit per relay. This is a bounded live book, not a
+  complete historical index. Action-time latest-projection queries are unchanged.
+- Inbox registration supplies an exact validated-event completion predicate.
+  Query cleanup closes both the subscription and connection immediately after
+  a match, even when callbacks fire synchronously. Other queries still wait
+  for EOSE, and malformed candidates cannot cause early completion.
+
+The follow-up adds no library or private connection pooling. A clean snapshot
+of the selected commit files passed the build and all 384 active tests in 50
+files (7 skipped). The deterministic E2E benchmark passed all 10 scenarios in
+three runs. A public-network feed check received eight book updates and ended
+with two asks and five bids, then closed the subscription and pool.
+
+A fresh disposable-event inbox check also passed: registration 2,243.34 ms,
+discovery 999.66 ms, send 550.19 ms, read 611.26 ms. No paired speedup claim is
+made. Kind 10050 `d493f6ac1d9f2286ad9f6a51cc91d75034c84095c0f228de12421776c09461bb`
+had an ACK and exact readback from `wss://nos.lol`; kind 1059
+`fcc0abf1939a0daeca25774e8f34fe7e1cc5a2a596977bb3425c8fc86fe60623`
+had an ACK and recipient readback from `wss://auth.nostr1.com`.
+Disposable signer public keys were recipient
+`e8c55b5db383b7e5c8b7e8b38036fef2f5e719579ec1354fda499763cd347fe8`,
+sender `1b09f4e3a561cc261e344eb5aeb63b2c7a69ce3ebdf3a9b863b7e04018c08093`,
+and wrapper `ce89e9a7a2f7b746b0170814ac469c099722d78f282499e6555a86766d8d3013`.
+Manual Testnut UI validation remains pending because the Mac is still locked.
+
+### Earlier quorum-only validation
+
 - `npm test`: 48 files passed; 379 tests passed, 7 skipped.
 - `npm run build`: passed; existing large-chunk warning remains.
 - `npm run benchmark:e2e`: all 10 deterministic scenarios passed in each of

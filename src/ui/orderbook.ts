@@ -6,6 +6,7 @@ import type {
 import { beginButtonFeedback } from "./button-feedback.js";
 
 const COLLAPSED_ORDER_COUNT = 3;
+const previousOptions = new WeakMap<HTMLElement, OrderBookRenderOptions>();
 
 export type OrderBookRenderState =
   | { status: "loading" }
@@ -140,6 +141,8 @@ function orderRow(
   const row = element("tr");
   row.className = `order-row order-row--${order.state.side === "sell" ? "ask" : "bid"}`;
   row.dataset.orderId = order.state.order_id;
+  row.dataset.projectionId = order.eventId;
+  row.dataset.canCancel = String(Boolean(options.canCancel?.(order)));
   const side = order.state.side === "sell" ? "Ask" : "Bid";
   row.setAttribute("aria-label", best ? `Best ${side.toLowerCase()}` : side);
   if (best !== undefined) row.dataset.best = best;
@@ -246,7 +249,8 @@ function renderSideTable(
   orders: OrderRecord[],
   best: OrderRecord | undefined,
   market: ExactMarket,
-  options: OrderBookRenderOptions
+  options: OrderBookRenderOptions,
+  rows: Map<string, HTMLTableRowElement>
 ): HTMLElement {
   const section = element("section");
   section.className = `orderbook-side orderbook-side--${label.toLowerCase()}`;
@@ -272,12 +276,18 @@ function renderSideTable(
   body.setAttribute("aria-label", label);
   const overflowRows: HTMLTableRowElement[] = [];
   orders.forEach((order, index) => {
-    const row = orderRow(
+    const previous = rows.get(order.eventId);
+    const row = previous?.dataset.canCancel === String(Boolean(options.canCancel?.(order))) ? previous : orderRow(
       order,
       market,
       order.address === best?.address ? label === "Asks" ? "ask" : "bid" : undefined,
       options
     );
+    const isBest = order.address === best?.address;
+    row.setAttribute("aria-label", isBest ? `Best ${label === "Asks" ? "ask" : "bid"}` : label === "Asks" ? "Ask" : "Bid");
+    if (isBest) row.dataset.best = label === "Asks" ? "ask" : "bid";
+    else delete row.dataset.best;
+    row.hidden = false;
     if (index >= COLLAPSED_ORDER_COUNT) {
       row.hidden = true;
       overflowRows.push(row);
@@ -322,7 +332,7 @@ function renderSideTable(
   return section;
 }
 
-function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRenderOptions): void {
+function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRenderOptions, rows: Map<string, HTMLTableRowElement>): void {
   if (book.asks.length === 0 && book.bids.length === 0) {
     const empty = element("div");
     empty.className = "empty-state";
@@ -342,8 +352,8 @@ function renderReady(root: HTMLElement, book: OrderBook, options: OrderBookRende
   const columns = element("div");
   columns.className = "orderbook-columns";
   columns.append(
-    renderSideTable("Asks", book.asks, book.topAsk, book.market, options),
-    renderSideTable("Bids", book.bids, book.topBid, book.market, options)
+    renderSideTable("Asks", book.asks, book.topAsk, book.market, options, rows),
+    renderSideTable("Bids", book.bids, book.topBid, book.market, options, rows)
   );
   frame.append(marketStrip, columns);
   root.append(frame);
@@ -354,6 +364,17 @@ export function renderOrderBook(
   state: OrderBookRenderState,
   options: OrderBookRenderOptions = {}
 ): void {
+  const previous = previousOptions.get(root);
+  const rows = new Map<string, HTMLTableRowElement>();
+  if (previous?.onTake === options.onTake && previous?.onCancel === options.onCancel) {
+    for (const row of root.querySelectorAll<HTMLTableRowElement>("tr[data-projection-id]")) {
+      rows.set(row.dataset.projectionId!, row);
+    }
+  }
+  previousOptions.set(root, options);
+  const focused = root.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+  const expanded = [...root.querySelectorAll<HTMLButtonElement>("button[aria-expanded=true]")]
+    .map((button) => button.closest(".orderbook-side")?.className);
   root.replaceChildren();
   root.setAttribute("aria-live", "polite");
   root.removeAttribute("role");
@@ -369,5 +390,9 @@ export function renderOrderBook(
     root.append(element("p", state.message));
     return;
   }
-  renderReady(root, state.book, options);
+  renderReady(root, state.book, options, rows);
+  for (const button of root.querySelectorAll<HTMLButtonElement>("button[aria-expanded=false]")) {
+    if (expanded.includes(button.closest(".orderbook-side")?.className)) button.click();
+  }
+  if (focused && root.contains(focused)) focused.focus();
 }

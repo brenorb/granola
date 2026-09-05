@@ -8,6 +8,8 @@ import {
   withWalletLock
 } from "./browser/lock.js";
 import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
+import { coalesceRefresh } from "./browser/refresh.js";
+import { watchOrderBook } from "./order/book-feed.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
@@ -217,27 +219,29 @@ async function refresh(state?: GranolaState): Promise<GranolaState> {
   return next;
 }
 
-async function refreshOrderBook(): Promise<void> {
-  renderOrderBook(orderbook, { status: "loading" });
+let bookFeed: { close(): void } | undefined;
+const refreshOrderBook = coalesceRefresh(async () => {
+  bookFeed?.close();
   try {
-    const [result, identities] = await Promise.all([
-      orderApi.getOrderBook(),
-      orderApi.getMakerPublicKeys()
-    ]);
-    renderOrderBook(
+    const identities = await orderApi.getMakerPublicKeys();
+    bookFeed = await watchOrderBook(relayClient, TEST_MARKET, (book) => renderOrderBook(
       orderbook,
-      { status: "ready", book: result.book },
+      { status: "ready", book },
       {
         onTake: takeOrderFromBook,
         onCancel: cancelOrderFromBook,
         canCancel: (order) => identities.includes(order.makerPubkey)
       }
-    );
+    ), (error) => renderOrderBook(orderbook, { status: "error", message: messageOf(error) }));
   } catch (error) {
     renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
     throw error;
   }
-}
+});
+
+// Periodic full backfill also recovers relays unavailable during subscription startup.
+const bookBackfillTimer = setInterval(() => { void refreshOrderBook().catch(() => {}); }, 60_000);
+window.addEventListener("pagehide", () => { clearInterval(bookBackfillTimer); bookFeed?.close(); });
 
 function tradeController(): Promise<BrowserTradeController> {
   tradeControllerPromise ??= createBrowserTradeRuntime({
@@ -287,12 +291,12 @@ function tradeController(): Promise<BrowserTradeController> {
   return tradeControllerPromise;
 }
 
-async function refreshTrades(): Promise<void> {
+const refreshTrades = coalesceRefresh(async () => {
   const controller = await tradeController();
   const current = await controller.resume();
   current.forEach(tradeTrace);
   renderTrades(trades, current);
-}
+});
 
 const takeRequestIds = new Map<string, string>();
 

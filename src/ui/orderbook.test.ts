@@ -48,6 +48,28 @@ function record(
 }
 
 describe("order-book presentation", () => {
+  it("preserves an unchanged row's amount, focus and busy action during live updates", async () => {
+    const root = document.createElement("section");
+    document.body.append(root);
+    const options = { onTake: vi.fn() };
+    const ask = record(askHigh, "sell", "5200000");
+    const book = await buildOrderBook([ask], market, 1_700_000_100);
+    renderOrderBook(root, { status: "ready", book }, options);
+    const input = root.querySelector<HTMLInputElement>("input")!;
+    input.value = "2000";
+    input.focus();
+    const button = root.querySelector<HTMLButtonElement>("button[data-take-order]")!;
+    button.click();
+    const updated = await buildOrderBook([ask, record(bidLow, "buy", "4800000")], market, 1_700_000_100);
+    renderOrderBook(root, { status: "ready", book: updated }, options);
+    expect(root.querySelector("input")).toBe(input);
+    expect(input.value).toBe("2000");
+    expect(document.activeElement).toBe(input);
+    expect(button.disabled).toBe(true);
+    expect(options.onTake).toHaveBeenCalledOnce();
+    root.remove();
+  });
+
   it("renders a compact market strip above asks and bids and identifies the inside market", async () => {
     const book = await buildOrderBook([
       record(askHigh, "sell", "5200000"),

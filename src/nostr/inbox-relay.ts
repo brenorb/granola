@@ -146,7 +146,8 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
   async query(
     relay: string,
     filter: Record<string, unknown>,
-    auth: AuthHandler
+    auth: AuthHandler,
+    completeOn?: (event: NostrEvent) => boolean
   ): Promise<NostrEvent[]> {
     const connection = await this.open(relay, auth);
     return await new Promise<NostrEvent[]>((resolve, reject) => {
@@ -163,10 +164,20 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
       };
       const timeout = setTimeout(() => finish(() => reject(new Error("Inbox relay query timed out"))), this.queryTimeoutMs);
       subscription = connection.subscribe([filter], {
-        onevent: (event) => events.push(event),
+        onevent: (event) => {
+          if (settled) return;
+          const candidate = structuredClone(event);
+          events.push(candidate);
+          try {
+            if (completeOn?.(candidate)) finish(() => resolve([candidate]));
+          } catch {
+            // Invalid candidates cannot end the query ahead of valid readback.
+          }
+        },
         oneose: () => finish(() => resolve(events)),
         onclose: (reason) => finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)))
       });
+      if (settled) subscription.close("granola query complete");
     });
   }
 

@@ -1,5 +1,6 @@
 import type { Filter } from "nostr-tools/filter";
 import { SimplePool } from "nostr-tools/pool";
+import type { SubscribeManyParams } from "nostr-tools/abstract-pool";
 
 import type { NostrEvent } from "../order/events.js";
 
@@ -23,6 +24,7 @@ export interface RelayReadback {
 }
 
 export interface RelayPoolPort {
+  subscribeMany?: SimplePool["subscribeMany"];
   ensureRelay(
     url: string,
     options?: { connectionTimeout?: number }
@@ -130,6 +132,14 @@ export class RelayClient {
       { maxWait: this.maxWait }
     );
     return uniqueEvents(events);
+  }
+
+  subscribeProjections(market: string, callbacks: SubscribeManyParams): { close(): void } {
+    if (!/^[0-9a-f]{64}$/.test(market)) throw new Error("Market ID must be lowercase hex");
+    if (!this.pool.subscribeMany) throw new Error("Relay pool does not support subscriptions");
+    return this.pool.subscribeMany(this.relays, {
+      kinds: [30078], "#t": ["granola-order"], "#m": [market], limit: 500
+    }, { ...callbacks, maxWait: this.maxWait });
   }
 
   async queryOrder(address: string): Promise<NostrEvent[]> {

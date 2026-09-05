@@ -16,7 +16,8 @@ export interface InboxRelayPort {
   query(
     relay: string,
     filter: Record<string, unknown>,
-    auth: AuthHandler
+    auth: AuthHandler,
+    completeOn?: (event: NostrEvent) => boolean
   ): Promise<NostrEvent[]>;
 }
 
@@ -342,7 +343,10 @@ export async function publishInboxList(
             authors: [eventSnapshot.pubkey],
             kinds: [10050],
             limit: 1
-          }, authHandler(relay, relayKey, now));
+          }, authHandler(relay, relayKey, now), (candidate) => {
+            validateInboxList(candidate, eventSnapshot.pubkey, now);
+            return candidate.id === eventSnapshot.id;
+          });
           const exactCandidate = events.find((candidate) => {
             try {
               validateInboxList(candidate, eventSnapshot.pubkey, now);
