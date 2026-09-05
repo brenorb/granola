@@ -75,14 +75,17 @@ Two side branches were retained explicitly:
 - `fix/first-valid-ack-readback`: unmerged relay ACK/readback behavior.
 
 Historical experiments were archived, not merged into the application. Remote
-refs were left intact. The main workspace's pre-existing documentation, SDK,
+cleanup was subsequently completed with user approval. The main workspace's pre-existing documentation, SDK,
 publication configuration, and performance artifacts remain uncommitted.
 
-## Prepared remote cleanup
+## Completed remote cleanup
 
 The following 26 remote branches are merged, patch-equivalent, or (for
 `fix/pending-publication-below-order`) incorporated by squash PR #14.
-Deletion is pending approval; `main` and the unmerged relay branch are excluded.
+The user approved deletion. A fresh remote listing showed 21 were already
+absent and five remained. Deleted those five atomically with exact-SHA leases,
+then pruned stale local tracking refs. Verified that only `main` and
+`fix/first-valid-ack-readback` remain on GitHub.
 
 - `agent/orderbook-performance-audit`
 - `experiment/nip17-profiling-base`
@@ -112,4 +115,7 @@ Deletion is pending approval; `main` and the unmerged relay branch are excluded.
 - `perf/reduce-coordinator-checkpoints`
 
 For future cleanup, enumerate full refs and exclude symbolic refs explicitly;
-Git can shorten `origin/HEAD` to `origin`.
+Git can shorten `origin/HEAD` to `origin`. Use `ls-remote --heads` to distinguish
+actual remote branches from stale tracking refs. Local and remote tips can
+differ, so remote recovery tags use `archive/2026-09-05/remote/<branch>`.
+The verified remote backup is `.git/remote-branches-before-cleanup-2026-09-05.bundle`.
