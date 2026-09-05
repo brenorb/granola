@@ -478,7 +478,7 @@ function harness(): Harness {
     reservations: reservations as unknown as ProofReservationRepository,
     makerIdentity: {
       publicKey: async () => MAKER,
-      useSecretKey: async (action) => action(new Uint8Array(32).fill(9))
+      useOrderSecretKey: async (_orderId, action) => action(new Uint8Array(32).fill(9))
     },
     discoveryRelays: DISCOVERY_RELAYS,
     withWalletLock: withWalletLock as unknown as

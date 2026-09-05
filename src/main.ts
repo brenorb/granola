@@ -10,7 +10,6 @@ import {
 import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
-import { startInboxListeners } from "./browser/startup.js";
 import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import {
@@ -706,10 +705,8 @@ void Promise.all([
   refresh(),
   refreshOrderBook(),
   refreshPendingPublications(),
-  startInboxListeners({
-    startSessions: refreshTrades,
-    startMaker: syncMakerInboxes
-  }),
+  refreshTrades(),
+  syncMakerInboxes(),
 ])
   .then(() => log("Opened the shared maker/taker workspace"))
   .catch((error: unknown) => report(messageOf(error), true));

@@ -507,9 +507,13 @@ describe("two-party coordinator happy path", () => {
       cashu,
       makerIdentity: {
         publicKey: async () => makerPubkey,
-        useSecretKey: async <T>(
+        useOrderSecretKey: async <T>(
+          _orderId: string,
           action: (key: Uint8Array) => Promise<T>
-        ): Promise<T> => action(Uint8Array.from(makerOrderKey))
+        ): Promise<T> => {
+          expect(_orderId).toBe(ORDER_ID);
+          return action(Uint8Array.from(makerOrderKey));
+        }
       },
       discoveryRelays: DISCOVERY_RELAYS,
       withWalletLock: async <T>(action: () => Promise<T>) => action(),

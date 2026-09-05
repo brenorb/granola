@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  advanceTrade,
   createSettlementPlan,
-  settlementAmounts,
-  type TradePhase
+  settlementAmounts
 } from "./model.js";
 
 describe("Granola settlement model", () => {
@@ -75,38 +73,4 @@ describe("Granola settlement model", () => {
     })).toEqual({ base: "200", quote: "9" });
   });
 
-  it("allows only the persisted happy-path sequence", () => {
-    const sequence: Array<[TradePhase, Parameters<typeof advanceTrade>[1], TradePhase]> = [
-      ["negotiating", "reserve_confirmed", "reserved"],
-      ["reserved", "base_lock_validated", "base_locked"],
-      ["base_locked", "quote_lock_validated", "quote_locked"],
-      ["quote_locked", "quote_spent_with_preimage", "quote_claimed"],
-      ["quote_claimed", "base_spent", "base_claimed"],
-      ["base_claimed", "fill_confirmed", "filled"]
-    ];
-
-    for (const [from, event, to] of sequence) {
-      expect(advanceTrade(from, event)).toBe(to);
-    }
-  });
-
-  it("does not treat messages, pending proofs, or timeouts as settlement", () => {
-    expect(() => advanceTrade("quote_locked", "claim_notice_received" as never))
-      .toThrow("Invalid trade transition");
-    expect(() => advanceTrade("quote_locked", "base_spent"))
-      .toThrow("Invalid trade transition");
-    expect(() => advanceTrade("base_claimed", "release_confirmed"))
-      .toThrow("Invalid trade transition");
-  });
-
-  it("enters explicit recovery without releasing locked value", () => {
-    expect(advanceTrade("reserved", "abort_confirmed")).toBe("released");
-    expect(advanceTrade("base_locked", "settlement_cutoff_reached")).toBe("waiting_base_refund");
-    expect(advanceTrade("quote_locked", "settlement_cutoff_reached")).toBe("waiting_quote_refund");
-    expect(advanceTrade("waiting_quote_refund", "quote_refund_confirmed")).toBe("waiting_base_refund");
-    expect(advanceTrade("waiting_base_refund", "base_refund_confirmed")).toBe("released");
-    expect(advanceTrade("quote_claimed", "settlement_cutoff_reached")).toBe("waiting_base_claim");
-    expect(advanceTrade("waiting_base_claim", "base_spent")).toBe("base_claimed");
-    expect(advanceTrade("quote_locked", "contradiction_detected")).toBe("frozen");
-  });
 });

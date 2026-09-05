@@ -1,3 +1,4 @@
+import { slotLeg } from "./model.js";
 import {
   getPubKeyFromPrivKey,
   verifyHTLCHash
@@ -78,8 +79,7 @@ type WithWalletLock = <T>(action: () => Promise<T>) => Promise<T>;
 
 export interface CoordinatorMakerIdentity {
   publicKey(orderId?: string): Promise<string>;
-  useSecretKey?<T>(action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
-  useOrderSecretKey?<T>(orderId: string, action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
+  useOrderSecretKey<T>(orderId: string, action: (secretKey: Uint8Array) => Promise<T>): Promise<T>;
 }
 
 export interface CoordinatorEffectsEntropy {
@@ -293,16 +293,6 @@ function localCashuPubkey(session: TradeSession, kind: "cashu" | "refund"): stri
 
 type ProtocolSlot = "base" | "quote";
 
-function makerOffersBase(session: TradeSession): boolean {
-  return session.orderSide !== "buy";
-}
-
-/** Maps the protocol's two lock slots to the actual market legs. */
-function slotLeg(session: TradeSession, slot: ProtocolSlot): "base" | "quote" {
-  if (slot === "base") return makerOffersBase(session) ? "base" : "quote";
-  return makerOffersBase(session) ? "quote" : "base";
-}
-
 function expectedLock(session: TradeSession, slot: ProtocolSlot): ExpectedHtlcLock {
   const leg = slotLeg(session, slot);
   const transcriptHash = session.privateState.settlementTranscriptHash;
@@ -377,6 +367,30 @@ function completedLockBody(
     refund_cashu_pubkey: expected.refundPubkey,
     locktime: expected.locktime
   };
+}
+
+function commitTranscript(
+  session: TradeSession,
+  message: GranolaTradeMessage,
+  rumorId: string,
+  hash: string,
+  choreography: TradeSession["privateState"]["transcript"]["choreography"]
+): void {
+  const transcript = session.privateState.transcript;
+  transcript.choreography = structuredClone(choreography);
+  transcript.nextSequence = (BigInt(transcript.nextSequence) + 1n).toString();
+  transcript.lastRumorId = rumorId;
+  transcript.lastMessageId = message.message_id;
+  transcript.lastTranscriptHash = hash;
+  transcript.accepted.push({
+    sequence: message.sequence,
+    messageId: message.message_id,
+    rumorId,
+    transcriptHash: hash,
+    type: message.type,
+    authorPubkey: message.author_pubkey,
+    recipientPubkey: message.recipient_pubkey
+  });
 }
 
 function rootPhase(
@@ -1034,7 +1048,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     };
 
     const staged = type === "reserve_accept"
-      ? await this.withMakerOrderKey(session, stageWithKey)
+      ? await this.makerIdentity.useOrderSecretKey(orderId(session), stageWithKey)
       : await this.withSessionKey(session, stageWithKey);
     const next = bump(session, now);
     next.privateState.outbox = {
@@ -1052,18 +1066,6 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       next.privateState.htlcHash = session.privateState.htlcHash;
     }
     return next;
-  }
-
-  private async withMakerOrderKey<T>(
-    session: TradeSession,
-    action: (secretKey: Uint8Array) => Promise<T>
-  ): Promise<T> {
-    const id = orderId(session);
-    if (this.makerIdentity.useOrderSecretKey) {
-      return this.makerIdentity.useOrderSecretKey(id, action);
-    }
-    if (this.makerIdentity.useSecretKey) return this.makerIdentity.useSecretKey(action);
-    throw new Error("Maker order key access is unavailable");
   }
 
   private outgoingRecipient(
@@ -1220,7 +1222,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const send = async (key: Uint8Array) =>
       this.nostr.send(outbox.wrapper, outbox.recipientRelays, key);
     const receipts = keyHex === null
-      ? await this.withMakerOrderKey(session, send)
+      ? await this.makerIdentity.useOrderSecretKey(orderId(session), send)
       : await this.withSessionKey(session, send);
     const acknowledged = structuredClone(session);
     acknowledged.privateState.outbox = {
@@ -1455,26 +1457,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       message
     );
     const next = bump(session, now);
-    next.privateState.transcript = {
-      choreography,
-      nextSequence: (BigInt(session.privateState.transcript.nextSequence) + 1n)
-        .toString(),
-        lastRumorId: pending.rumor.id,
-      lastMessageId: pending.message.message_id,
-      lastTranscriptHash: pending.transcriptHash,
-      accepted: [
-        ...structuredClone(session.privateState.transcript.accepted),
-        {
-          sequence: pending.message.sequence,
-          messageId: pending.message.message_id,
-          rumorId: pending.rumor.id,
-          transcriptHash: pending.transcriptHash,
-          type: pending.message.type,
-          authorPubkey: pending.message.author_pubkey,
-          recipientPubkey: pending.message.recipient_pubkey
-        }
-      ]
-    };
+    commitTranscript(next, pending.message, pending.rumor.id, pending.transcriptHash, choreography);
     next.privateState.pendingIncoming = null;
     next.phase = rootPhase(choreography);
     if (message.type === "reserve_accept") {
@@ -1529,26 +1512,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       outbox.rumor.id
     );
     const next = bump(session, now);
-    next.privateState.transcript = {
-      choreography: structuredClone(outbox.nextChoreography),
-      nextSequence: (BigInt(session.privateState.transcript.nextSequence) + 1n)
-        .toString(),
-        lastRumorId: outbox.rumor.id,
-      lastMessageId: outbox.message.message_id,
-      lastTranscriptHash: hash,
-      accepted: [
-        ...structuredClone(session.privateState.transcript.accepted),
-        {
-          sequence: outbox.message.sequence,
-          messageId: outbox.message.message_id,
-          rumorId: outbox.rumor.id,
-          transcriptHash: hash,
-          type: outbox.message.type,
-          authorPubkey: outbox.message.author_pubkey,
-          recipientPubkey: outbox.message.recipient_pubkey
-        }
-      ]
-    };
+    commitTranscript(next, outbox.message, outbox.rumor.id, hash, outbox.nextChoreography);
     next.privateState.outbox = null;
     next.phase = rootPhase(outbox.nextChoreography);
     if (outbox.message.type === "session_ack") {

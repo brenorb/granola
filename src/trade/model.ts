@@ -109,41 +109,10 @@ export type TradePhase =
   | "released"
   | "frozen";
 
-export type TradeEvent =
-  | "reserve_confirmed"
-  | "base_lock_validated"
-  | "quote_lock_validated"
-  | "quote_spent_with_preimage"
-  | "base_spent"
-  | "fill_confirmed"
-  | "abort_confirmed"
-  | "settlement_cutoff_reached"
-  | "quote_refund_confirmed"
-  | "base_refund_confirmed"
-  | "release_confirmed"
-  | "contradiction_detected";
-
-const transitions = new Map<string, TradePhase>([
-  ["negotiating:reserve_confirmed", "reserved"],
-  ["reserved:base_lock_validated", "base_locked"],
-  ["base_locked:quote_lock_validated", "quote_locked"],
-  ["quote_locked:quote_spent_with_preimage", "quote_claimed"],
-  ["quote_claimed:base_spent", "base_claimed"],
-  ["waiting_base_claim:base_spent", "base_claimed"],
-  ["base_claimed:fill_confirmed", "filled"],
-  ["reserved:abort_confirmed", "released"],
-  ["base_locked:settlement_cutoff_reached", "waiting_base_refund"],
-  ["quote_locked:settlement_cutoff_reached", "waiting_quote_refund"],
-  ["quote_claimed:settlement_cutoff_reached", "waiting_base_claim"],
-  ["waiting_quote_refund:quote_refund_confirmed", "waiting_base_refund"],
-  ["waiting_base_refund:base_refund_confirmed", "released"]
-]);
-
-export function advanceTrade(phase: TradePhase, event: TradeEvent): TradePhase {
-  if (event === "contradiction_detected" && phase !== "filled" && phase !== "released") {
-    return "frozen";
-  }
-  const next = transitions.get(`${phase}:${event}`);
-  if (!next) throw new Error(`Invalid trade transition: ${phase} + ${event}`);
-  return next;
+/** Maps a protocol lock slot to its market leg for either order side. */
+export function slotLeg(
+  session: { orderSide?: "buy" | "sell" },
+  slot: "base" | "quote"
+): "base" | "quote" {
+  return session.orderSide !== "buy" ? slot : slot === "base" ? "quote" : "base";
 }

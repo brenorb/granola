@@ -245,10 +245,11 @@ function setup(options: {
     inboxRelay: "wss://inbox.example",
     makerIdentity: {
       publicKey: vi.fn(async () => getPublicKey(makerKey)),
-      ...(options.makerOrderIds === undefined ? {} : {
-        listOrderIds: vi.fn(async () => options.makerOrderIds!)
-      }),
-      useSecretKey: vi.fn(async (action) => action(makerKey.slice()))
+      listOrderIds: vi.fn(async () => options.makerOrderIds ?? ["11111111-1111-4111-8111-111111111111"]),
+      useOrderSecretKey: vi.fn(async (orderId, action) => {
+        expect(options.makerOrderIds ?? ["11111111-1111-4111-8111-111111111111"]).toContain(orderId);
+        return action(makerKey.slice());
+      })
     },
     now: () => 1_800_000_000,
     ...(options.wait === undefined ? {} : { wait: options.wait }),

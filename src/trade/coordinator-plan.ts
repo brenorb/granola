@@ -1,3 +1,4 @@
+import { slotLeg } from "./model.js";
 import type { TradeSession } from "./session.js";
 
 export type CoordinatorAction =
@@ -49,15 +50,6 @@ function safeNow(value: number): number {
 }
 
 const HEX_32 = /^[0-9a-f]{64}$/;
-
-function makerOffersBase(session: TradeSession): boolean {
-  return session.orderSide !== "buy";
-}
-
-function slotLeg(session: TradeSession, slot: "base" | "quote"): "base" | "quote" {
-  if (slot === "base") return makerOffersBase(session) ? "base" : "quote";
-  return makerOffersBase(session) ? "quote" : "base";
-}
 
 function legSlot(session: TradeSession, leg: "base" | "quote"): "base" | "quote" {
   return slotLeg(session, "base") === leg ? "base" : "quote";
