@@ -1,0 +1,101 @@
+# Relay fix and Applesauce review — 2026-09-05
+
+## Branch decision
+
+Bring `e6acd2f` (first valid inbox confirmation), with its redundant post-loop
+wait removed and a regression check for delayed authentication after return.
+Each discovery relay now publishes and reads back independently. Return when
+the configured number of relays has acknowledged and returned the exact,
+validated signed event. The default remains one. Other attempts finish in the
+background with their own copied signing keys, erased on completion.
+
+This is an inbox-registration change. Its durable evidence permits quorum-sized
+receipt/readback sets. It does not change public order or private message outbox
+receipt requirements. The August report's blanket rejection of early return
+was too broad for this particular operation.
+
+Leave `1b2a508` (copy: clarify Cashu exchange positioning) out. It changes UI
+wording, not transport. Main already includes “Public orders. Private
+settlement.” and Testnut funding messages. Other hunks target older controls
+that main removed or redesigned. There is no separate performance fix to gain
+from merging that commit; any still-desired wording should be reapplied to the
+current UI individually. Preserve the branch because this commit remains
+unmerged in ancestry.
+
+## What Applesauce actually does
+
+Reviewed official documentation and source at
+`ec51f7d4ecfd3db6099e786e8eec0062255588d4` using the read-github workflow.
+
+- Its [RelayPool](https://github.com/hzrd149/applesauce/blob/ec51f7d4ecfd3db6099e786e8eec0062255588d4/packages/relay/src/pool.ts)
+  normalizes URLs and reuses a Relay object per URL. Pool removal can close its
+  connection; closing the pool tears down all connections and timers.
+- Its [RelayGroup](https://github.com/hzrd149/applesauce/blob/ec51f7d4ecfd3db6099e786e8eec0062255588d4/packages/relay/src/group.ts)
+  shares upstream subscriptions, deduplicates returned events by default, and
+  supports configurable completion. Its default request completes after all
+  relays finish or five seconds after the first EOSE, subject to its operation
+  timeout/auth handling. Ordinary `publish()` still gathers all responses.
+- Its [loaders](https://applesauce.build/typedoc/modules/applesauce-loaders.html)
+  batch and deduplicate address/ID requests, optionally consult a cache, and
+  feed an event store. They accept a custom request method, including a
+  nostr-tools adapter. The documented default batching window is 1,000 ms.
+
+These are reusable design ideas, not evidence that replacing nostr-tools would
+make Granola faster. No dependency was added.
+
+## Ranked opportunities in Granola
+
+| Priority | Concrete opportunity | Expected benefit and boundary |
+| --- | --- | --- |
+| 1 | Coalesce overlapping `refreshOrderBook` calls and trade-list renders in `src/main.ts`. | Share only in-flight presentation work; avoid duplicate relay queries and encrypted session reads. Schedule a trailing refresh when a mutation happens during the request, so a newly published/canceled order is not missed. Keep action-time order revalidation. |
+| 2 | Render validated public order projections incrementally instead of fetching from `since=0` and rebuilding the whole book on every refresh (`OrderService.loadBook`). | Faster visible book updates and less repeated parsing. Reuse the existing public SimplePool. Keep latest-event replacement ordering, expiry, bounded memory, and reconnect backfill; cached open orders cannot authorize a trade. Measure request counts before adding a persistent store. |
+| 3 | Finish exact-ID readbacks on a verified matching event, rather than waiting for EOSE (`NostrToolsInboxRelayPort.query`). | Removes event-to-EOSE waiting where only one exact artifact is needed. Requires a narrowly scoped completion predicate and cleanup. Do not apply first-event completion to latest kind-10050 discovery or whole-book queries. Measure that interval first. |
+| 4 | Coalesce concurrent NIP-11 metadata requests (`NostrToolsInboxRelayPort.info`). | The existing cache stores completed results but concurrent cold callers can duplicate HTTP requests. Share an in-flight promise and evict failures if traces show duplicate cold loads. This does not replace capability probing. |
+| 5 | Reuse authenticated connections within one reservation identity. | Could remove repeated connect/AUTH cycles. Only reconsider if fresh live profiles show those dominate; scope by relay and reservation pubkey, with bounded cleanup. A previous experiment saved roughly 41 ms synthetically but added about 316 production/test lines and was reverted. A global pool risks linking identities. |
+
+Separate from Nostr, both Cashu adapters create wallets and call `loadMint()`.
+Inspect repeated metadata HTTP calls before adding a cache for immutable public
+key material. Never cache proof-spent observations or assume active keysets and
+fees cannot change. The build's 593.58 kB JS chunk (176.06 kB gzip) also warrants
+measuring cold startup before considering lazy imports; code splitting alone
+does not make settlement faster.
+
+Do not add Applesauce's one-second loader buffering to sequential swap steps.
+Do not add another public connection pool: `RelayClient` already owns a
+nostr-tools SimplePool. Private delivery already consumes a bounded live-event
+buffer before polling. Prior discovery profiling found three distinct ephemeral
+recipients, so a generic recipient cache would not eliminate those three reads.
+
+## Validation of this patch
+
+- `npm test`: 48 files passed; 379 tests passed, 7 skipped.
+- `npm run build`: passed; existing large-chunk warning remains.
+- `npm run benchmark:e2e`: all 10 deterministic scenarios passed in each of
+  three runs, including buy, sell, one-mint settlement, retry, stale operations,
+  reservation, release, cancellation and expiry. These are in-process fixtures.
+- The gated relay regression proves completion while two relays remain blocked,
+  then releases them and verifies their publish/query authentication identities
+  and the returned evidence's unchanged size. Existing tests reject malformed
+  readback and insufficient quorum and verify immutable evidence.
+- A fresh public-network disposable-event probe succeeded. Registration took
+  2,264.80 ms, discovery 1,415.78 ms, send 605.35 ms, read 589.12 ms. This single
+  run has no paired baseline and establishes correctness, not a speedup.
+- Manual Testnut UI validation of this exact patch remains pending: computer
+  automation reported that the Mac was locked and automatic unlock failed.
+  Earlier buy/sell Testnut validation predates this patch and is not substituted
+  for a new run.
+
+### Live relay evidence
+
+Fresh disposable signers only; no wallet secrets or bearer material recorded.
+
+- Recipient public key: `cbfe9e0625b03048b86c3f509c1730e941fc2ba164bfe049dd711044705fea9d`.
+- Sender public key: `f513cf16145c97893b149dbe2c3346faf34161db87ed2e741ff1a7bac1864567`.
+- Wrapper signer: `8b0d022693d54acbac841a1a94b3ea60bc2cd146f0a8aed96d6ff60c063b218f`.
+- Kind 10050: `c1bbc2f69d998c5995f275a5f4886c297470dc4cdce466e8f0158cf0a0e5ea42`.
+  ACK and exact readback: `wss://nos.lol`. Completed attempts also included
+  failures from `wss://offchain.pub` and `ws://localhost:4870`.
+  `wss://relay.primal.net` was also attempted; its outcome was not required in
+  the returned quorum evidence.
+- Disposable kind 1059: `6ad4f322e2e6fd8e12778e226d204704fcd6159606c0db52d75f91c340669096`.
+  ACK and recipient readback: `wss://auth.nostr1.com`.

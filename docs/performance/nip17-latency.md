@@ -1,5 +1,9 @@
 # NIP-17 coordination latency
 
+September follow-up: [inbox-only early quorum and Applesauce review](2026-09-05-relay-and-applesauce.md)
+narrows the early-return rejection below. Inbox registration accepts quorum
+evidence; public order and private-message outboxes retain their receipt rules.
+
 This report records the August 2026 investigation into Granola's private trade
 coordination path. The result is deliberately small: remove one duplicated
 inbox-list publication/readback cycle and keep the rest of the security model.

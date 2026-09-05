@@ -55,6 +55,7 @@ class FakeRelayPort implements InboxRelayPort {
   queryOverrideQueue: NostrEvent[][] = [];
   failQuery = new Set<string>();
   publicationGate: Promise<void> | null = null;
+  publicationGates = new Map<string, Promise<void>>();
   infoGate: Promise<void> | null = null;
   capabilities: InboxRelayCapabilities = {
     supportedNips: [17, 40, 42],
@@ -72,6 +73,8 @@ class FakeRelayPort implements InboxRelayPort {
 
   async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
     if (this.publicationGate) await this.publicationGate;
+    const relayGate = this.publicationGates.get(relay);
+    if (relayGate) await relayGate;
     const authEvent = await this.authenticate(relay, auth);
     this.published.push({
       relay,
@@ -227,6 +230,34 @@ describe("strict NIP-17 inbox transport", () => {
     expect(result.confirmed).toEqual([discoveryRelays[0]]);
   });
 
+  it("returns after the first valid ACK and exact readback", async () => {
+    const port = new FakeRelayPort();
+    let releaseSlowRelays!: () => void;
+    const slowRelays = new Promise<void>((resolve) => {
+      releaseSlowRelays = resolve;
+    });
+    port.publicationGates.set(discoveryRelays[1]!, slowRelays);
+    port.publicationGates.set(discoveryRelays[2]!, slowRelays);
+    const list = createInboxList(inboxRelays, recipientKey, now);
+    const publication = publishInboxList(list, discoveryRelays, recipientKey, port, now);
+    try {
+      let result: Awaited<typeof publication> | undefined;
+      void publication.then((value) => { result = value; });
+      await vi.waitFor(() => expect(result).toBeDefined());
+      expect(result!.confirmed).toEqual([discoveryRelays[0]]);
+      expect(result!.receipts).toHaveLength(1);
+      expect(result!.readback).toHaveLength(1);
+      releaseSlowRelays();
+      await vi.waitFor(() => expect(port.queried).toHaveLength(3));
+      expect(port.published.every(({ authPubkey }) => authPubkey === recipient)).toBe(true);
+      expect(port.queried.every(({ authPubkey }) => authPubkey === recipient)).toBe(true);
+      expect(result!.receipts).toHaveLength(1);
+    } finally {
+      releaseSlowRelays();
+      await publication;
+    }
+  });
+
   it("does not count a malformed relay substitution as exact readback", async () => {
     const port = new FakeRelayPort();
     const list = createInboxList(inboxRelays, recipientKey, now);
@@ -276,7 +307,7 @@ describe("strict NIP-17 inbox transport", () => {
 
     expect(result.event).toEqual(persisted);
     expect(result.readback.filter(({ found }) => found).map(({ event }) => event))
-      .toEqual([persisted, persisted, persisted]);
+      .toEqual([persisted, persisted]);
     expect(port.published.every(({ id, authPubkey }) =>
       id === persisted.id && authPubkey === expectedSigner
     )).toBe(true);
