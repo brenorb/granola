@@ -1,0 +1,353 @@
+{
+  "codeCommit": "ae25679",
+  "asset": "index-DR0O-JUR.js",
+  "baselineCommit": "4e03e2e",
+  "browsingSeconds": 20,
+  "baseline": [
+    {
+      "run": 1,
+      "side": "sell",
+      "durationMs": 16781.3,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "OPTIONS restore": 4,
+        "POST restore": 4,
+        "OPTIONS swap": 4,
+        "POST swap": 4,
+        "OPTIONS checkstate": 10,
+        "POST checkstate": 10
+      },
+      "nostrQueries": {
+        "nostr_query:30078": 16,
+        "nostr_query:10050": 10,
+        "nostr_query:1059": 3
+      },
+      "connectionAcquisitions": {
+        "warm": 16,
+        "warming": 0,
+        "cold": 1,
+        "failed": 10
+      },
+      "warmAcquisitionMs": 8.8,
+      "networkIntervalUnionsMs": {
+        "http": 10059.75,
+        "mintWsHandshake": 1097.48,
+        "relayWsHandshake": 4275.33,
+        "mintWsResponse": 1056.97,
+        "relayWsResponse": 5442.8
+      },
+      "allNetworkIntervalUnionMs": 15467.61,
+      "sessionKeyGenerationMs": [],
+      "idb": {
+        "count": 375,
+        "sum": 342.6,
+        "union": 309.5
+      },
+      "sampledJsMsByWallet": [
+        656.03,
+        547.15
+      ]
+    },
+    {
+      "run": 2,
+      "side": "buy",
+      "durationMs": 18426.3,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "POST checkstate": 10,
+        "OPTIONS checkstate": 10,
+        "POST restore": 4,
+        "OPTIONS restore": 4,
+        "POST swap": 4,
+        "OPTIONS swap": 4
+      },
+      "nostrQueries": {
+        "nostr_query:30078": 21,
+        "nostr_query:10050": 10,
+        "nostr_query:1059": 3
+      },
+      "connectionAcquisitions": {
+        "warm": 16,
+        "warming": 0,
+        "cold": 0,
+        "failed": 10
+      },
+      "warmAcquisitionMs": 8.2,
+      "networkIntervalUnionsMs": {
+        "http": 10609.46,
+        "mintWsHandshake": 1044.6,
+        "relayWsHandshake": 5027.34,
+        "mintWsResponse": 2218.58,
+        "relayWsResponse": 6457.47
+      },
+      "allNetworkIntervalUnionMs": 17418.84,
+      "sessionKeyGenerationMs": [],
+      "idb": {
+        "count": 367,
+        "sum": 525,
+        "union": 480.9
+      },
+      "sampledJsMsByWallet": [
+        589.51,
+        775.65
+      ]
+    },
+    {
+      "run": 3,
+      "side": "sell",
+      "durationMs": 17685.6,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "OPTIONS restore": 4,
+        "POST restore": 4,
+        "OPTIONS swap": 4,
+        "POST swap": 4,
+        "OPTIONS checkstate": 11,
+        "POST checkstate": 11
+      },
+      "nostrQueries": {
+        "nostr_query:30078": 16,
+        "nostr_query:10050": 10,
+        "nostr_query:1059": 3
+      },
+      "connectionAcquisitions": {
+        "warm": 16,
+        "warming": 0,
+        "cold": 0,
+        "failed": 11
+      },
+      "warmAcquisitionMs": 8.4,
+      "networkIntervalUnionsMs": {
+        "http": 9487.51,
+        "mintWsHandshake": 537.78,
+        "relayWsHandshake": 5157.97,
+        "mintWsResponse": 461.3,
+        "relayWsResponse": 6344.36
+      },
+      "allNetworkIntervalUnionMs": 15807.11,
+      "sessionKeyGenerationMs": [],
+      "idb": {
+        "count": 376,
+        "sum": 570.1,
+        "union": 515.3
+      },
+      "sampledJsMsByWallet": [
+        966.72,
+        897.49
+      ]
+    }
+  ],
+  "current": [
+    {
+      "run": 1,
+      "side": "sell",
+      "durationMs": 14226.8,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "POST restore": 4,
+        "OPTIONS restore": 4,
+        "OPTIONS swap": 4,
+        "POST swap": 4,
+        "POST checkstate": 10,
+        "OPTIONS checkstate": 10
+      },
+      "nostrQueries": {
+        "nostr_query:10050": 6,
+        "nostr_query:30078": 6,
+        "nostr_query:1059": 2
+      },
+      "connectionAcquisitions": {
+        "warm": 9,
+        "warming": 0,
+        "cold": 0,
+        "failed": 4
+      },
+      "warmAcquisitionMs": 0.6,
+      "networkIntervalUnionsMs": {
+        "http": 9832.91,
+        "mintWsHandshake": 1002.08,
+        "relayWsHandshake": 2152.59,
+        "mintWsResponse": 945.78,
+        "relayWsResponse": 3307.67
+      },
+      "allNetworkIntervalUnionMs": 13001.11,
+      "sessionKeyGenerationMs": [
+        13.9,
+        9.2
+      ],
+      "idb": {
+        "count": 398,
+        "sum": 342.2,
+        "union": 304.8
+      },
+      "sampledJsMsByWallet": [
+        796.06,
+        718.75
+      ]
+    },
+    {
+      "run": 2,
+      "side": "buy",
+      "durationMs": 13771.6,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "POST checkstate": 10,
+        "OPTIONS checkstate": 10,
+        "POST restore": 4,
+        "OPTIONS restore": 4,
+        "POST swap": 4,
+        "OPTIONS swap": 4
+      },
+      "nostrQueries": {
+        "nostr_query:30078": 6,
+        "nostr_query:10050": 6,
+        "nostr_query:1059": 2
+      },
+      "connectionAcquisitions": {
+        "warm": 9,
+        "warming": 0,
+        "cold": 0,
+        "failed": 4
+      },
+      "warmAcquisitionMs": 1.2,
+      "networkIntervalUnionsMs": {
+        "http": 9680.34,
+        "mintWsHandshake": 993.85,
+        "relayWsHandshake": 2174.92,
+        "mintWsResponse": 2001.51,
+        "relayWsResponse": 3218.38
+      },
+      "allNetworkIntervalUnionMs": 12703.82,
+      "sessionKeyGenerationMs": [
+        7.9,
+        15.1
+      ],
+      "idb": {
+        "count": 390,
+        "sum": 494,
+        "union": 429
+      },
+      "sampledJsMsByWallet": [
+        659.12,
+        852.26
+      ]
+    },
+    {
+      "run": 3,
+      "side": "sell",
+      "durationMs": 14119.7,
+      "httpRequests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "POST restore": 4,
+        "OPTIONS restore": 4,
+        "POST swap": 4,
+        "OPTIONS swap": 4,
+        "POST checkstate": 11,
+        "OPTIONS checkstate": 11
+      },
+      "nostrQueries": {
+        "nostr_query:10050": 6,
+        "nostr_query:30078": 6,
+        "nostr_query:1059": 2
+      },
+      "connectionAcquisitions": {
+        "warm": 9,
+        "warming": 0,
+        "cold": 0,
+        "failed": 4
+      },
+      "warmAcquisitionMs": 1.2,
+      "networkIntervalUnionsMs": {
+        "http": 9142.03,
+        "mintWsHandshake": 557.73,
+        "relayWsHandshake": 2337.91,
+        "mintWsResponse": 709.54,
+        "relayWsResponse": 3383.9
+      },
+      "allNetworkIntervalUnionMs": 12547.59,
+      "sessionKeyGenerationMs": [
+        16.6,
+        17.3
+      ],
+      "idb": {
+        "count": 384,
+        "sum": 511.7,
+        "union": 453.8
+      },
+      "sampledJsMsByWallet": [
+        1020.29,
+        1070.35
+      ]
+    }
+  ],
+  "medianImprovementPercent": 20.16,
+  "manual": {
+    "durationMs": 15485.6,
+    "spentWebsocketNotifications": 4,
+    "filledWallets": 2,
+    "reloadConfirmed": true,
+    "publicOrderEventId": "3cb0644d08bd476c07538ddc5d9c1fcacfa6a612da76035ead5cc26e8fcefd9d"
+  },
+  "concurrency": {
+    "before": [
+      {
+        "balance": "SAT balance9,978 satUSD balance0.01 USD",
+        "status": "Order is already being taken by another trader",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balance9,978 satUSD balance0.01 USD",
+        "status": "Order is already being taken by another trader",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balance20 satUSD balance99.99 USD",
+        "status": "Swap filled after 19 verified actions",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balanceNo balanceUSD balance100.00 USD",
+        "status": "Trade stopped in terminal phase frozen",
+        "filled": 0,
+        "frozen": 1
+      }
+    ],
+    "after": [
+      {
+        "balance": "SAT balance9,978 satUSD balance0.01 USD",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balance9,978 satUSD balance0.01 USD",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balance20 satUSD balance99.99 USD",
+        "filled": 1,
+        "frozen": 0
+      },
+      {
+        "balance": "SAT balanceNo balanceUSD balance100.00 USD",
+        "filled": 0,
+        "frozen": 1
+      }
+    ]
+  }
+}

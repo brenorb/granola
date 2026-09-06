@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="727" viewBox="0 0 1080 727" role="img" aria-labelledby="title desc">
+<title id="title">Granola: anúncios em paralelo com a liquidação</title>
+<desc id="desc">Gantt medido do primeiro swap na versão ae25679. Cada linha é um intervalo de ação de uma carteira; linhas simultâneas não são somadas.</desc>
+<rect width="1080" height="727" fill="#faf9f6"/>
+<g font-family="system-ui,sans-serif" fill="#202522">
+<text x="24" y="30" font-size="21" font-weight="650">Liquidação: 14,23 s · execução medida 1</text>
+<text x="24" y="54" font-size="13">Azul: relay · verde: mint/validação · cinza: conclusão local · intervalo de ação, não CPU</text>
+<path d="M285.0 83 V687" stroke="#dddeda"/><text x="285.0" y="73" text-anchor="middle" font-size="12">0s</text>
+<path d="M333.3 83 V687" stroke="#dddeda"/><text x="333.3" y="73" text-anchor="middle" font-size="12">1s</text>
+<path d="M381.7 83 V687" stroke="#dddeda"/><text x="381.7" y="73" text-anchor="middle" font-size="12">2s</text>
+<path d="M430.0 83 V687" stroke="#dddeda"/><text x="430.0" y="73" text-anchor="middle" font-size="12">3s</text>
+<path d="M478.3 83 V687" stroke="#dddeda"/><text x="478.3" y="73" text-anchor="middle" font-size="12">4s</text>
+<path d="M526.7 83 V687" stroke="#dddeda"/><text x="526.7" y="73" text-anchor="middle" font-size="12">5s</text>
+<path d="M575.0 83 V687" stroke="#dddeda"/><text x="575.0" y="73" text-anchor="middle" font-size="12">6s</text>
+<path d="M623.3 83 V687" stroke="#dddeda"/><text x="623.3" y="73" text-anchor="middle" font-size="12">7s</text>
+<path d="M671.7 83 V687" stroke="#dddeda"/><text x="671.7" y="73" text-anchor="middle" font-size="12">8s</text>
+<path d="M720.0 83 V687" stroke="#dddeda"/><text x="720.0" y="73" text-anchor="middle" font-size="12">9s</text>
+<path d="M768.3 83 V687" stroke="#dddeda"/><text x="768.3" y="73" text-anchor="middle" font-size="12">10s</text>
+<path d="M816.7 83 V687" stroke="#dddeda"/><text x="816.7" y="73" text-anchor="middle" font-size="12">11s</text>
+<path d="M865.0 83 V687" stroke="#dddeda"/><text x="865.0" y="73" text-anchor="middle" font-size="12">12s</text>
+<path d="M913.3 83 V687" stroke="#dddeda"/><text x="913.3" y="73" text-anchor="middle" font-size="12">13s</text>
+<path d="M961.7 83 V687" stroke="#dddeda"/><text x="961.7" y="73" text-anchor="middle" font-size="12">14s</text>
+<path d="M1010.0 83 V687" stroke="#dddeda"/><text x="1010.0" y="73" text-anchor="middle" font-size="12">15s</text>
+<text x="24" y="109" font-size="13">Maker · Anunciar inbox</text><rect x="390.1" y="95" width="23.3" height="19" rx="3" fill="#4075a5"><title>Maker · Anunciar inbox: 2.174–2.657s</title></rect><text x="418.4" y="109" font-size="11">0.48s</text>
+<text x="24" y="136" font-size="13">Maker · Publicar livro</text><rect x="391.3" y="122" width="55.9" height="19" rx="3" fill="#4075a5"><title>Maker · Publicar livro: 2.200–3.357s</title></rect><text x="452.3" y="136" font-size="11">1.16s</text>
+<text x="24" y="163" font-size="13">Maker · Operação na mint</text><rect x="392.7" y="149" width="81.4" height="19" rx="3" fill="#6b8471"><title>Maker · Operação na mint: 2.229–3.912s</title></rect><text x="479.1" y="163" font-size="11">1.68s</text>
+<text x="24" y="190" font-size="13">Maker · Entregar mensagem</text><rect x="478.2" y="176" width="27.9" height="19" rx="3" fill="#4075a5"><title>Maker · Entregar mensagem: 3.998–4.575s</title></rect><text x="511.1" y="190" font-size="11">0.58s</text>
+<text x="24" y="217" font-size="13">Maker · Validar tokens recebidos</text><rect x="663.9" y="203" width="29.9" height="19" rx="3" fill="#6b8471"><title>Maker · Validar tokens recebidos: 7.840–8.460s</title></rect><text x="698.9" y="217" font-size="11">0.62s</text>
+<text x="24" y="244" font-size="13">Maker · Preparar resgate USD</text><rect x="694.7" y="230" width="26.6" height="19" rx="3" fill="#6b8471"><title>Maker · Preparar resgate USD: 8.476–9.025s</title></rect><text x="726.2" y="244" font-size="11">0.55s</text>
+<text x="24" y="271" font-size="13">Maker · Operação na mint</text><rect x="722.5" y="257" width="63.0" height="19" rx="3" fill="#6b8471"><title>Maker · Operação na mint: 9.051–10.354s</title></rect><text x="790.5" y="271" font-size="11">1.30s</text>
+<text x="24" y="298" font-size="13">Maker · Observar gasto USD</text><rect x="787.0" y="284" width="77.4" height="19" rx="3" fill="#6b8471"><title>Maker · Observar gasto USD: 10.385–11.987s</title></rect><text x="869.4" y="298" font-size="11">1.60s</text>
+<text x="24" y="325" font-size="13">Maker · Observar gasto SAT</text><rect x="864.8" y="311" width="70.0" height="19" rx="3" fill="#6b8471"><title>Maker · Observar gasto SAT: 11.996–13.444s</title></rect><text x="939.8" y="325" font-size="11">1.45s</text>
+<text x="24" y="352" font-size="13">Maker · Publicar livro</text><rect x="936.2" y="338" width="25.9" height="19" rx="3" fill="#4075a5"><title>Maker · Publicar livro: 13.474–14.010s</title></rect><text x="967.1" y="352" font-size="11">0.54s</text>
+<text x="24" y="379" font-size="13">Maker · Concluir carteira</text><rect x="936.8" y="365" width="3.0" height="19" rx="3" fill="#727574"><title>Maker · Concluir carteira: 13.486–13.495s</title></rect><text x="942.2" y="379" font-size="11">0.01s</text>
+<text x="24" y="406" font-size="13">Taker · Anunciar inbox</text><rect x="352.2" y="392" width="21.4" height="19" rx="3" fill="#4075a5"><title>Taker · Anunciar inbox: 1.390–1.833s</title></rect><text x="378.6" y="406" font-size="11">0.44s</text>
+<text x="24" y="433" font-size="13">Taker · Entregar mensagem</text><rect x="353.7" y="419" width="19.5" height="19" rx="3" fill="#4075a5"><title>Taker · Entregar mensagem: 1.421–1.825s</title></rect><text x="378.2" y="433" font-size="11">0.40s</text>
+<text x="24" y="460" font-size="13">Taker · Validar tokens recebidos</text><rect x="519.9" y="446" width="26.9" height="19" rx="3" fill="#6b8471"><title>Taker · Validar tokens recebidos: 4.860–5.416s</title></rect><text x="551.8" y="460" font-size="11">0.56s</text>
+<text x="24" y="487" font-size="13">Taker · Operação na mint</text><rect x="548.7" y="473" width="80.3" height="19" rx="3" fill="#6b8471"><title>Taker · Operação na mint: 5.457–7.117s</title></rect><text x="634.0" y="487" font-size="11">1.66s</text>
+<text x="24" y="514" font-size="13">Taker · Entregar mensagem</text><rect x="632.0" y="500" width="22.8" height="19" rx="3" fill="#4075a5"><title>Taker · Entregar mensagem: 7.179–7.652s</title></rect><text x="659.8" y="514" font-size="11">0.47s</text>
+<text x="24" y="541" font-size="13">Taker · Observar gasto USD</text><rect x="655.4" y="527" width="153.6" height="19" rx="3" fill="#6b8471"><title>Taker · Observar gasto USD: 7.664–10.842s</title></rect><text x="814.0" y="541" font-size="11">3.18s</text>
+<text x="24" y="568" font-size="13">Taker · Preparar resgate SAT</text><rect x="809.7" y="554" width="29.3" height="19" rx="3" fill="#6b8471"><title>Taker · Preparar resgate SAT: 10.856–11.462s</title></rect><text x="844.0" y="568" font-size="11">0.61s</text>
+<text x="24" y="595" font-size="13">Taker · Operação na mint</text><rect x="840.2" y="581" width="52.3" height="19" rx="3" fill="#6b8471"><title>Taker · Operação na mint: 11.487–12.568s</title></rect><text x="897.5" y="595" font-size="11">1.08s</text>
+<text x="24" y="622" font-size="13">Taker · Observar gasto SAT</text><rect x="894.1" y="608" width="77.9" height="19" rx="3" fill="#6b8471"><title>Taker · Observar gasto SAT: 12.601–14.212s</title></rect><text x="976.9" y="622" font-size="11">1.61s</text>
+<text x="24" y="649" font-size="13">Taker · Concluir carteira</text><rect x="972.3" y="635" width="3.0" height="19" rx="3" fill="#727574"><title>Taker · Concluir carteira: 14.221–14.225s</title></rect><text x="977.6" y="649" font-size="11">0.00s</text>
+</g></svg>
