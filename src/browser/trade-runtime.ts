@@ -1,3 +1,5 @@
+import { createOrderResponse } from "../trade/order-response.js";
+import type { VerifiedInitialReserveProposal } from "../trade/messages.js";
 import {
   finalizeEvent,
   generateSecretKey,
@@ -106,6 +108,7 @@ export interface CreateBrowserTradeRuntimeInput {
 }
 
 export interface BrowserTradeRuntime {
+  onRejectedProposal(proposal: VerifiedInitialReserveProposal): Promise<void>;
   api: TradeApi;
   sessions: TradeSessionRepository;
   transport: NostrTradeTransport;
@@ -174,10 +177,55 @@ export async function createBrowserTradeRuntime(
       withTradeSessionLock(input.profile, sessionId, action),
     ...(input.profileAction ? { profileAction: input.profileAction } : {})
   });
+  let repliesRunning: Promise<void> | undefined;
+  const flushReplies = (): void => {
+    if (repliesRunning) return;
+    repliesRunning = (async () => {
+      for (const reply of await input.orderOutbox.listReplies()) {
+        if (reply.delivered || reply.expiresAt <= now()) continue;
+        // AUTH for publishing uses a fresh transport key; the persisted seal authenticates the maker.
+        const key = generateSecretKey();
+        try {
+          let route = await transport.discoverInbox(reply.recipient, key, reply.relays.length ? reply.relays : undefined);
+          try { await transport.send(reply.wrapper, route.relays, key); }
+          catch {
+            route = await transport.discoverInbox(reply.recipient, key);
+            await transport.send(reply.wrapper, route.relays, key);
+          }
+          await input.orderOutbox.acknowledgeReply(reply.proposalRumorId, reply.wrapper.id);
+        } catch { /* Keep the exact encrypted reply for retry/reload. */ }
+        finally { key.fill(0); }
+      }
+    })().finally(async () => {
+      repliesRunning = undefined;
+      if ((await input.orderOutbox.listReplies()).some(reply => !reply.delivered && reply.expiresAt > now())) {
+        const timer = setTimeout(flushReplies, 5_000);
+        (timer as unknown as { unref?: () => void }).unref?.();
+      }
+    });
+    void repliesRunning.catch(() => undefined);
+  };
+  const onRejectedProposal = async (proposal: VerifiedInitialReserveProposal): Promise<void> => {
+    const current = (await input.orderOutbox.list()).find(entry => entry.intent.address === proposal.message.order_address);
+    if (!current) return;
+    const busy = (await sessions.list()).some(session => session.role === "maker" &&
+      session.orderAddress === proposal.message.order_address && session.sessionId !== proposal.message.session_id &&
+      !["filled", "released"].includes(session.phase));
+    const changed = current.publication.projection.id !== proposal.message.order_projection_id ||
+      current.publication.state.status !== "open";
+    if (!busy && !changed) return;
+    await input.orderOutbox.stageReply(proposal.rumor.id, now(), () =>
+      input.makerIdentity.useOrderSecretKey(current.intent.orderId, key =>
+        createOrderResponse(proposal, current.publication.projection, busy ? "preparing" : "changed", key, now())));
+    flushReplies();
+  };
+  flushReplies();
+
   return {
     api: new TradeApi({
       coordinator,
       orders: input.orderService,
+      orderOutbox: input.orderOutbox,
       cashu,
       wallets: input.wallet,
       spendability: cashu,
@@ -185,6 +233,7 @@ export async function createBrowserTradeRuntime(
       market: TEST_MARKET,
       now
     }),
+    onRejectedProposal,
     sessions,
     transport,
     inboxPort,

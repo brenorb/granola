@@ -271,8 +271,9 @@ function tradeController(): Promise<BrowserTradeController> {
         });
       }
       void refreshTrades();
-      if (trade.phase === "filled") void refresh();
+      if (trade.phase === "filled" || trade.phase === "frozen") void refresh();
     },
+    onRejectedProposal: runtime.onRejectedProposal,
     onMakerAccepted: (trade) => {
       tradeTrace(trade);
       report("Incoming order accepted automatically");

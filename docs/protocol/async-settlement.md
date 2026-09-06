@@ -48,3 +48,22 @@ The live book also rejects a lower revision even if it arrives with a later time
 Session identities remain separate from order authority (ADR 0003). The safe timing
 `granola:session-keys` measures creation/derivation of the three independent session
 keys separately from registration; no key material is included in diagnostics.
+
+## Stale and competing proposals
+
+The maker validates its persisted signed head locally before mint preflight; an
+unavailable public book does not delay that check. The storage reservation lock
+still chooses one active maker session per order. Rejected competing or stale
+proposals receive an order-authority-signed, encrypted, session/transcript-bound
+`error` carrying the current signed projection and `preparing` or `changed`.
+The receiver validates that projection's signature, address, maker and revision;
+an authenticated refusal terminates the attempted negotiation before spending.
+The verified projection updates the local book head, which does not regress to
+older revisions delivered later. A retry is a new attempt against the new head.
+
+The existing order outbox also persists exact encrypted refusals, bounded to 100
+short-lived attempts. Repeated delivery of a proposal reuses its reply. Startup
+resumes unacknowledged replies; ACK cannot acknowledge a different wrapper. These
+messages contain no bearer material. The order's signed public head can remain
+open while the separate authenticated availability says `preparing`; the local
+reservation is the exclusivity mechanism, not the timelock or public timestamp.

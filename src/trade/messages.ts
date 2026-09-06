@@ -723,9 +723,10 @@ export async function unwrapReserveAcceptance(
 ): Promise<OpenedTradeMessage> {
   const opened = await unwrapTradeMessageInternal(outerValue, recipientSecretKey, {
     ...options,
-    expectedType: "reserve_accept",
     expectedSequence: "1"
   });
+  if (opened.message.type === "error") return opened;
+  if (opened.message.type !== "reserve_accept") throw new Error("Expected reservation acceptance or authenticated refusal");
   const body = record(opened.message.body, "Reserve acceptance body");
   if (
     requiredString(body.reserve_projection_id, "Reserve projection ID", HEX_32) !==

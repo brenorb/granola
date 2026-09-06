@@ -94,6 +94,7 @@ export interface BrowserTradeControllerOptions {
   ) => Promise<VerifiedInitialReserveProposal>;
   onChange?: (trade: PublicTradeView) => void;
   onMakerAccepted?: (trade: PublicTradeView) => void;
+  onRejectedProposal?: (proposal: VerifiedInitialReserveProposal) => Promise<void>;
   onError?: (message: string) => void;
   onMakerError?: (message: string) => void;
   wait?: (delayMs: number) => Promise<void>;
@@ -148,6 +149,7 @@ export class BrowserTradeController {
   >;
   private readonly onChange: (trade: PublicTradeView) => void;
   private readonly onMakerAccepted: (trade: PublicTradeView) => void;
+  private readonly onRejectedProposal: BrowserTradeControllerOptions["onRejectedProposal"];
   private readonly onError: (message: string) => void;
   private readonly onMakerError: (message: string) => void;
   private readonly wait: (delayMs: number) => Promise<void>;
@@ -176,6 +178,7 @@ export class BrowserTradeController {
       ((event, secretKey, openOptions) =>
         unwrapInitialReserveProposalForMaker(event, secretKey, openOptions));
     this.onChange = options.onChange ?? (() => undefined);
+    this.onRejectedProposal = options.onRejectedProposal;
     this.onMakerAccepted = options.onMakerAccepted ?? (() => undefined);
     this.onError = options.onError ?? (() => undefined);
     this.onMakerError = options.onMakerError ?? this.onError;
@@ -429,7 +432,10 @@ export class BrowserTradeController {
                   { now: this.now() }
                 )
               );
-              const trade = await this.api.acceptReserveProposal(proposal);
+              const trade = await this.api.acceptReserveProposal(proposal).catch(async error => {
+                await this.onRejectedProposal?.(proposal);
+                throw error;
+              });
               this.onMakerAccepted(trade);
               this.onChange(trade);
               await this.startWinningMakerSettlement(trade.orderAddress);

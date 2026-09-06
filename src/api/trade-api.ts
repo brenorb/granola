@@ -1,3 +1,6 @@
+import { verifyEvent } from "nostr-tools/pure";
+import { parseProjectionEvent } from "../order/events.js";
+import type { OrderOutboxPort } from "../storage/order-outbox.js";
 import type {
   TradeMintPreflight,
   TradeSpendability
@@ -91,6 +94,7 @@ export interface TradeApiOptions {
   market: ExactMarket;
   now?: () => number;
   sessionFactory?: TradeSessionFactoryPort;
+  orderOutbox?: Pick<OrderOutboxPort, "list">;
 }
 
 export interface TakeOrderInput {
@@ -235,8 +239,10 @@ export class TradeApi {
   private readonly market: ExactMarket;
   private readonly now: () => number;
   private readonly sessionFactory: TradeSessionFactoryPort;
+  private readonly orderOutbox: TradeApiOptions["orderOutbox"];
 
   constructor(options: TradeApiOptions) {
+    this.orderOutbox = options.orderOutbox;
     this.coordinator = options.coordinator;
     this.orders = options.orders;
     this.cashu = options.cashu;
@@ -329,7 +335,8 @@ export class TradeApi {
       proposal.message.order_address,
       proposal.message.order_projection_id,
       proposal.message.order_revision,
-      currentTime
+      currentTime,
+      true
     );
     const selectedMarket = await this.preflightMarket(order);
     const session = await this.sessionFactory.createMaker({
@@ -427,7 +434,8 @@ export class TradeApi {
     address: string,
     expectedProjectionId: string,
     expectedRevision: string,
-    now: number
+    now: number,
+    useLocalHead = false
   ): Promise<OrderRecord> {
     if (
       !address ||
@@ -436,12 +444,19 @@ export class TradeApi {
     ) {
       throw new Error("Trade order projection binding is invalid");
     }
-    const loaded = await this.orders.loadBook(this.market, now);
-    if (!exactMarket(loaded.book.market, this.market)) {
-      throw new Error("Loaded order book does not match the exact trade market");
+    const local = useLocalHead
+      ? (await this.orderOutbox?.list())?.find(entry => entry.intent.address === address)
+      : undefined;
+    let matching: OrderRecord[];
+    if (local) {
+      matching = [await parseProjectionEvent(local.publication.projection, verifyEvent)];
+    } else {
+      const loaded = await this.orders.loadBook(this.market, now);
+      if (!exactMarket(loaded.book.market, this.market)) {
+        throw new Error("Loaded order book does not match the exact trade market");
+      }
+      matching = [...loaded.book.asks, ...loaded.book.bids].filter(record => record.address === address);
     }
-    const matching = [...loaded.book.asks, ...loaded.book.bids]
-      .filter((record) => record.address === address);
     if (matching.length !== 1) {
       throw new Error("Exact current order was not found in the verified order book");
     }
@@ -467,6 +482,7 @@ export class TradeApi {
     if (
       (state.side !== "sell" && state.side !== "buy") ||
       state.status !== "open" ||
+      state.expires_at <= now ||
       state.reservation !== null ||
       state.base_unit !== this.market.baseUnit ||
       state.quote_unit !== this.market.quoteUnit ||

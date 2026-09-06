@@ -399,6 +399,9 @@ describe("atomic swap message bodies", () => {
       await message("session_ack", 2)
     )).rejects.toThrow(/expected reserve_accept/i);
 
+    await expect(advanceAtomicSwapChoreography(state,
+      await message("reserve_accept", 1, { order_revision: "2" }, { reserve_revision: "2" })
+    )).rejects.toThrow(/projection/i);
     state = await advanceAtomicSwapChoreography(state, await message("reserve_accept", 1));
     await expect(advanceAtomicSwapChoreography(
       state,

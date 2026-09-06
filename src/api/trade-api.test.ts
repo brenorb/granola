@@ -1,18 +1,26 @@
+import { TradeSessionRepository } from "../storage/trade-session.js";
+import { createOrderResponse } from "../trade/order-response.js";
+import { advanceAtomicSwapChoreography, initialAtomicSwapChoreography, validateAtomicSwapMessage } from "../trade/atomic-messages.js";
+import { OrderOutboxRepository } from "../storage/order-outbox.js";
+import { MemoryStorageDriver } from "../storage/wallet-repository.js";
+import { createProjectionTemplate } from "../order/events.js";
+import type { OrderOutboxEntry } from "../storage/order-outbox.js";
 import { createHTLCHash, getPubKeyFromPrivKey } from "@cashu/cashu-ts";
-import { getPublicKey } from "nostr-tools/pure";
+import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
   TradeMintPreflight,
   TradeSpendability
 } from "../cashu/client.js";
-import { createOrderState, type ExactMarket, type OrderRecord } from "../order/model.js";
-import type { LoadedOrderBook } from "../order/service.js";
+import { cancelOrder, createOrderState, type ExactMarket, type OrderRecord } from "../order/model.js";
+import { NostrOrderService, type LoadedOrderBook } from "../order/service.js";
 import type { WalletState } from "../core/wallet.js";
 import {
   createTradeRumor,
   termsHash,
   unwrapInitialReserveProposal,
+  unwrapReserveAcceptance,
   wrapTradeRumor,
   type GranolaTradeMessage,
   type VerifiedInitialReserveProposal
@@ -627,6 +635,81 @@ describe("trade start API", () => {
       fillBaseAmount: "1000"
     })).rejects.toThrow(/quote.*fund/i);
     expect(short.sessions.createTakerForRequest).not.toHaveBeenCalled();
+  });
+
+  it("allows one maker reservation across two repository instances sharing the wallet", async () => {
+    const driver = new MemoryStorageDriver();
+    const leftSessions = new TradeSessionRepository(driver);
+    const rightSessions = new TradeSessionRepository(driver);
+    const funding = { load: async () => wallet(baseMint, "sat", "1000") };
+    const left = options({ sessions: leftSessions, wallets: funding });
+    const right = options({ sessions: rightSessions, wallets: funding });
+    const proposals = await Promise.all([proposal(), proposal(order(), {
+      sessionId: "fe".repeat(32), reservationId: "77777777-7777-4777-8777-777777777777",
+      messageId: "88888888-8888-4888-8888-888888888888", entropyOffset: 10
+    })]);
+    const results = await Promise.allSettled([
+      left.api.acceptReserveProposal(proposals[0]!), right.api.acceptReserveProposal(proposals[1]!)
+    ]);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(result => result.status === "rejected") as PromiseRejectedResult;
+    expect(String(rejected.reason)).toMatch(/already being taken/);
+    expect(await new TradeSessionRepository(driver).list()).toHaveLength(1);
+  });
+
+  it("authenticates stale/busy responses, preserves the exact reply after restart, and rejects replay", async () => {
+    const verified = await proposal();
+    const projection = finalizeEvent(await createProjectionTemplate(cancelOrder(order().state), maker, now), makerOrderSecret);
+    const driver = new MemoryStorageDriver();
+    const outbox = new OrderOutboxRepository(driver);
+    const create = vi.fn(() => createOrderResponse(verified, projection, "changed", makerOrderSecret, now));
+    await outbox.stageReply(verified.rumor.id, now, create);
+    const restarted = new OrderOutboxRepository(driver);
+    await restarted.stageReply(verified.rumor.id, now, create);
+    expect(create).toHaveBeenCalledOnce();
+    const [reply] = await restarted.listReplies();
+    const opened = await unwrapReserveAcceptance(reply!.wrapper, bytes(entropy().privateKey("nostr")), {
+      now, expectedAuthorPubkey: maker, expectedOrderAddress: order().address,
+      expectedTermsHash: verified.message.terms_hash, expectedPreviousRumorId: verified.rumor.id,
+      expectedPreviousMessageId: verified.message.message_id, expectedPreviousTranscriptHash: verified.transcriptHash
+    });
+    expect(opened.message.type).toBe("error");
+    expect(opened.message.body.availability).toBe("changed");
+    expect(opened.message.body.retryable).toBe(false);
+    const waiting = await advanceAtomicSwapChoreography(initialAtomicSwapChoreography(maker), verified.message);
+    const rejected = await advanceAtomicSwapChoreography(waiting, opened.message);
+    expect(rejected.phase).toBe("failed");
+    await expect(advanceAtomicSwapChoreography(rejected, opened.message)).rejects.toThrow(/terminal/);
+    await expect(advanceAtomicSwapChoreography({ ...waiting, sessionId: "ff".repeat(32) }, opened.message)).rejects.toThrow();
+    await expect(validateAtomicSwapMessage({ ...opened.message, author_pubkey: "aa".repeat(32) })).rejects.toThrow(/bound/);
+    await expect(createOrderResponse(verified, projection, "changed", makerOrderSecret, verified.message.expires_at)).rejects.toThrow();
+    await expect(restarted.acknowledgeReply(verified.rumor.id, "aa".repeat(32))).rejects.toThrow(/artifact/);
+    await restarted.acknowledgeReply(verified.rumor.id, reply!.wrapper.id);
+    expect((await restarted.listReplies())[0]!.delivered).toBe(true);
+    const busyProjection = finalizeEvent(await createProjectionTemplate(order().state, maker), makerOrderSecret);
+    const service = new NostrOrderService({ publicKey: async () => maker, sign: async template => finalizeEvent(template, makerOrderSecret) }, {
+      publish: async () => [], queryOrder: async () => [busyProjection], queryProjections: async () => [busyProjection]
+    });
+    await service.rememberProjection(projection);
+    expect((await service.loadBook(market, now)).book.asks).toHaveLength(0);
+    await service.rememberProjection(busyProjection);
+    expect((await service.loadBook(market, now)).book.asks).toHaveLength(0);
+
+    const busy = await createOrderResponse(verified, busyProjection, "preparing", makerOrderSecret, now);
+    expect(busy.recipient).toBe(verified.message.author_pubkey);
+  });
+
+  it("uses the verified durable maker head without querying the public book", async () => {
+    const projection = finalizeEvent(await createProjectionTemplate(order().state, maker), makerOrderSecret);
+    const current = order({ eventId: projection.id });
+    const entry = { intent: { address: current.address }, publication: { projection } } as unknown as OrderOutboxEntry;
+    const { api, books } = options({
+      wallets: { load: async () => wallet(baseMint, "sat", "1000") },
+      orderOutbox: { list: async () => [entry] }
+    });
+    books.loadBook.mockRejectedValue(new Error("Public relays offline"));
+    await expect(api.acceptReserveProposal(await proposal(current))).resolves.toMatchObject({ role: "maker" });
+    expect(books.loadBook).not.toHaveBeenCalled();
   });
 
   it("starts a maker session only from a verified inbox proposal after base balance preflight", async () => {

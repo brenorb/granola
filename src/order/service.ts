@@ -164,12 +164,26 @@ function assertSuccessorState(
 }
 
 function replaceableOrder(events: NostrEvent[]): NostrEvent | undefined {
-  return [...events].sort((left, right) =>
-    right.created_at - left.created_at || left.id.localeCompare(right.id)
-  )[0];
+  // Callers pass validated projections; revision orders the book, timestamp breaks ties.
+  return [...events].sort((left, right) => {
+    const a = BigInt(JSON.parse(left.content).revision);
+    const b = BigInt(JSON.parse(right.content).revision);
+    return a === b ? right.created_at - left.created_at || left.id.localeCompare(right.id) : a > b ? -1 : 1;
+  })[0];
 }
 
 export class NostrOrderService {
+  private readonly knownHeads = new Map<string, NostrEvent>();
+
+  async rememberProjection(event: NostrEvent): Promise<void> {
+    const record = await parseProjectionEvent(event, this.verify);
+    const previous = this.knownHeads.get(record.address);
+    // ponytail: same bounded lifetime as the live book; no transaction history.
+    if (!previous && this.knownHeads.size >= 2_000) return;
+    const selected = replaceableOrder(previous ? [previous, event] : [event])!;
+    this.knownHeads.set(record.address, structuredClone(selected));
+  }
+
   constructor(
     private readonly signer: OrderSigner,
     private readonly relays: OrderRelayPort,
@@ -280,7 +294,8 @@ export class NostrOrderService {
     address: string
   ): Promise<{ event: NostrEvent; record: OrderRecord } | undefined> {
     const valid: Array<{ event: NostrEvent; record: OrderRecord }> = [];
-    for (const event of await this.relays.queryOrder(address)) {
+    const known = this.knownHeads.get(address);
+    for (const event of [...await this.relays.queryOrder(address), ...(known ? [known] : [])]) {
       try {
         const record = await parseProjectionEvent(event, this.verify);
         if (record.address === address) valid.push({ event, record });
@@ -343,7 +358,7 @@ export class NostrOrderService {
 
   async loadBook(market: ExactMarket, now: number): Promise<LoadedOrderBook> {
     const selectedMarket = await marketId(market);
-    const events = await this.relays.queryProjections(selectedMarket, 0);
+    const events = [...await this.relays.queryProjections(selectedMarket, 0), ...this.knownHeads.values()];
     let rejected = 0;
     const byAddress = new Map<
       string,
@@ -366,7 +381,10 @@ export class NostrOrderService {
       const selected = current
         ? candidates.find(({ event }) => event.id === current.id)
         : undefined;
-      if (selected) records.push(selected.record);
+      if (selected) {
+        records.push(selected.record);
+        await this.rememberProjection(selected.event);
+      }
       rejected += Math.max(0, candidates.length - 1);
     }
     return {

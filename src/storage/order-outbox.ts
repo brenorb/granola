@@ -1,3 +1,5 @@
+import { normalizeInboxListRelays } from "../nostr/inbox.js";
+import type { NostrEvent } from "../order/events.js";
 import { verifyEvent } from "nostr-tools/pure";
 
 import { normalizePublicRelay } from "../nostr/relay.js";
@@ -272,6 +274,29 @@ const withoutCrossTabLock: OrderOutboxExclusiveRunner = async <T>(
   action: () => Promise<T>
 ): Promise<T> => action();
 
+export interface PendingOrderReply {
+  proposalRumorId: string;
+  recipient: string;
+  relays: string[];
+  expiresAt: number;
+  wrapper: NostrEvent;
+  delivered: boolean;
+}
+
+const REPLIES_KEY = "granola.order-outbox.replies.v1";
+
+function assertReply(value: PendingOrderReply): void {
+  if (!value || !HEX_32.test(value.proposalRumorId) || !HEX_32.test(value.recipient) ||
+    !Number.isSafeInteger(value.expiresAt) || value.expiresAt < 0 || typeof value.delivered !== "boolean" ||
+    !value.wrapper || value.wrapper.kind !== 1059 || !verifyEvent(value.wrapper) ||
+    value.wrapper.tags.filter(tag => tag[0] === "p").length !== 1 ||
+    value.wrapper.tags.find(tag => tag[0] === "p")?.[1] !== value.recipient ||
+    !Array.isArray(value.relays) ||
+    (value.relays.length > 0 && !same(normalizeInboxListRelays(value.relays), value.relays))) {
+    throw new Error("Pending order response is corrupt");
+  }
+}
+
 export class OrderOutboxRepository implements OrderOutboxPort {
   constructor(
     private readonly driver: StorageDriver,
@@ -279,6 +304,38 @@ export class OrderOutboxRepository implements OrderOutboxPort {
     private readonly verify: (event: StagedOrderPublication["projection"]) => boolean =
       (event) => verifyEvent(event)
   ) {}
+
+  async listReplies(): Promise<PendingOrderReply[]> {
+    const value = await this.driver.get(REPLIES_KEY) ?? [];
+    if (!Array.isArray(value) || value.length > 100) throw new Error("Pending order responses are corrupt");
+    value.forEach(assertReply);
+    return structuredClone(value);
+  }
+
+  async stageReply(proposalRumorId: string, now: number, create: () => Promise<PendingOrderReply>): Promise<void> {
+    await this.runExclusive(async () => {
+      const replies = (await this.listReplies()).filter(reply => reply.expiresAt > now);
+      if (replies.some(reply => reply.proposalRumorId === proposalRumorId)) return;
+      // ponytail: bounded short-lived rejection outbox; backpressure at 100 pending attempts.
+      if (replies.length >= 100) throw new Error("Order response outbox is full");
+      const reply = await create();
+      assertReply(reply);
+      if (reply.proposalRumorId !== proposalRumorId || reply.delivered || reply.expiresAt <= now) {
+        throw new Error("Order response does not match the pending proposal");
+      }
+      await this.driver.set(REPLIES_KEY, [...replies, structuredClone(reply)]);
+    });
+  }
+
+  async acknowledgeReply(proposalRumorId: string, wrapperId: string): Promise<void> {
+    await this.runExclusive(async () => {
+      const replies = await this.listReplies();
+      const reply = replies.find(value => value.proposalRumorId === proposalRumorId);
+      if (!reply || reply.wrapper.id !== wrapperId) throw new Error("Order response artifact changed");
+      reply.delivered = true;
+      await this.driver.set(REPLIES_KEY, replies);
+    });
+  }
 
   private async read(): Promise<OrderOutboxEntry[]> {
     const value = await this.driver.get(OUTBOX_KEY);

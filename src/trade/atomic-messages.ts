@@ -1,3 +1,5 @@
+import { verifyEvent } from "nostr-tools/pure";
+import { parseProjectionEvent, type NostrEvent } from "../order/events.js";
 import { normalizeInboxListRelays } from "../nostr/inbox.js";
 import {
   canonicalJson,
@@ -485,7 +487,10 @@ function refund(value: unknown): RefundBody {
 }
 
 function errorBody(value: unknown): ErrorBody {
-  const body = exactBody(value, ["code", "at_phase", "failed_message_id", "retryable"]);
+  const optional = bodyRecord(value).current_projection === undefined ? [] : ["current_projection", "availability"];
+  const body = exactBody(value, ["code", "at_phase", "failed_message_id", "retryable", ...optional]);
+  if (optional.length && (body.code !== "order_changed" || body.at_phase !== "negotiating" ||
+    !["preparing", "changed"].includes(String(body.availability)))) throw new Error("Order response is invalid");
   if (!ATOMIC_SWAP_ERROR_CODES.includes(body.code as AtomicSwapErrorCode)) {
     throw new Error("Atomic swap error code is invalid");
   }
@@ -522,6 +527,14 @@ export async function validateAtomicSwapMessage(
   }
   const type = message.type as AtomicSwapMessageType;
   const parsedBody = parsers[type](message.body);
+  if (type === "error" && parsedBody.current_projection !== undefined) {
+    const current = await parseProjectionEvent(parsedBody.current_projection as unknown as NostrEvent, verifyEvent);
+    if (current.address !== message.order_address || current.makerPubkey !== message.author_pubkey ||
+      message.author_pubkey !== message.maker_order_pubkey || BigInt(current.state.revision) < BigInt(message.order_revision)) {
+      throw new Error("Order response projection is not bound to the current maker/order/revision");
+    }
+  }
+
   const sentAt = timestamp(message.sent_at, "Message sent_at");
   const hasTerms = message.terms !== undefined;
   if (type === "reserve_propose" || type === "reserve_accept") {
@@ -862,6 +875,7 @@ export async function advanceAtomicSwapChoreography(
       body.taker_session_pubkey !== takerSession ||
       body.reserve_projection_id !== message.order_projection_id ||
       body.reserve_revision !== message.order_revision ||
+      state.orderRevision === undefined || BigInt(body.reserve_revision) !== BigInt(state.orderRevision) + 1n ||
       body.maker_session_pubkey === makerOrder ||
       body.maker_session_pubkey === takerSession
     ) {

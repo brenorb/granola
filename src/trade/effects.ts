@@ -96,6 +96,7 @@ export interface CoordinatorEffectsEntropy {
 export type { PublishedOrderProjection } from "../order/service.js";
 
 export interface CoordinatorOrderReadPort {
+  rememberProjection?(event: NostrEvent): Promise<void>;
   loadPublishedProjection(
     address: string,
     expectedProjectionId: string,
@@ -1433,6 +1434,10 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       opened.transcriptHash !== pending.transcriptHash
     ) throw new Error("Incoming retry opened a different exact message");
     const checked = await validateAtomicSwapMessage(opened.message);
+    if (checked.type === "error" && checked.body.current_projection !== undefined) {
+      await this.orderReader.rememberProjection?.(checked.body.current_projection as unknown as NostrEvent);
+    }
+
     const nextChoreography = await advanceAtomicSwapChoreography(
       session.privateState.transcript.choreography,
       checked

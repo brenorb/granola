@@ -272,6 +272,31 @@ describe("CashuTradeClient durable outgoing locks", () => {
     expect(wallet.completeSwap).not.toHaveBeenCalled();
   });
 
+  it("fails closed when independent instances submit copied bearer proofs", async () => {
+    const material = createHtlcMaterial();
+    const left = harness(material.hash);
+    const right = harness(material.hash);
+    const terms = expected(material.hash);
+    const prepared = await Promise.all([left.client, right.client].map(client =>
+      client.prepareOutgoingLock({ pocket: pocket(), expected: terms, now: 1000 })));
+    let spent = false;
+    for (const h of [left, right]) {
+      vi.mocked(h.dependencies.recover).mockReset().mockResolvedValue(undefined);
+      vi.mocked(h.wallet.completeSwap).mockReset().mockImplementation(async () => {
+        if (spent) throw new Error("mint-proof-already-spent");
+        spent = true;
+        return { keep: h.change, send: h.locked };
+      });
+    }
+    const results = await Promise.allSettled([
+      left.client.completeOutgoingLock(prepared[0]!, terms),
+      right.client.completeOutgoingLock(prepared[1]!, terms)
+    ]);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const failed = results.find(result => result.status === "rejected") as PromiseRejectedResult;
+    expect(String(failed.reason)).toMatch(/already-spent/);
+  });
+
   it("recovers exact outputs with NUT-09 after a response is lost", async () => {
     const material = createHtlcMaterial();
     const { client, dependencies, wallet, change, locked } = harness(material.hash);

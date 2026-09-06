@@ -93,10 +93,11 @@ This limits cross-session exposure after key erasure. It is not a ratchet and
 does not provide forward secrecy or post-compromise security during a live
 session. Social Nostr keys are never used automatically.
 
-Every receiving key publishes and reads back a signed kind `10050` inbox list
-before a counterparty sends to it. A missing, stale, invalid, or empty list means
-the recipient is not ready. Publishing an inbox list does not prove the relay
-will enforce the privacy behavior it advertises.
+Every receiving key stages its receiving route and starts its authenticated subscription.
+When the route is communicated directly, kind `10050` publication/readback runs in
+parallel and is durably retried. When discovery is needed, a missing, stale, invalid,
+or empty list fails closed. Receiving readiness and public discoverability are
+separate; neither advertisement proves the relay enforces its declared privacy.
 
 ## Granola message profile
 
@@ -302,11 +303,11 @@ outer expiries remain live.
 - Retry until an authenticated application `ack` or the encrypted deadline.
   An ACK references the message, rumor, and seal IDs plus the resulting
   transcript hash.
-- The maker publishes and reads back the public reserve projection before
-  sending `reserve_accept`. The acceptance references that
-  exact projection event ID and revision and binds the maker's fresh settlement key.
-- The taker verifies both the private acceptance and current signed public projection
-  before making bearer material claimable.
+- The maker persists its exclusive local reservation and signed reserve projection,
+  then performs the mint lock concurrently with public publication. `reserve_accept`
+  waits for the mint result and binds the exact reserve ID/revision and fresh session key.
+- The taker validates the authenticated acceptance, exact terms, session binding,
+  deadlines and locked Cashu proofs before making bearer material claimable.
 - A proposal alone never reserves an order. A reserved public projection alone does not
   prove that the intended taker received a valid private acceptance.
 
@@ -362,6 +363,15 @@ with the protocol key that authored the sealed rumor: taker session, maker order
 or maker settlement key according to the signer matrix. Never authenticate with
 the one-time wrapper key or a social identity. Relay authentication is transport
 access control and does not replace validation of the encrypted sender.
+
+Non-financial refusal messages are an exception to the AUTH identity rule: their
+persisted seal is signed by order authority, while retries may authenticate with a
+fresh transport key. This lets an already-encrypted refusal survive order-key erasure
+without retaining another copy of that key. It does not change sender authentication
+or the recipient-only retrieval requirements. Refusals carry the signed current public
+projection and `preparing`/`changed` availability inside a session/transcript-bound
+`error` message. They terminate the attempted reservation before any taker mint lock.
+Exact encrypted replies remain in the existing order outbox until ACK/expiry.
 
 ## What this does not solve
 
