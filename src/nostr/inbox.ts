@@ -10,7 +10,13 @@ export interface InboxRelayCapabilities {
 
 export type AuthHandler = (challenge: string) => Promise<NostrEvent>;
 
+export interface InboxRelaySession {
+  publish(event: NostrEvent): Promise<string>;
+  query(filter: Record<string, unknown>, completeOn?: (event: NostrEvent) => boolean): Promise<NostrEvent[]>;
+}
+
 export interface InboxRelayPort {
+  withConnection?<T>(relay: string, auth: AuthHandler, action: (session: InboxRelaySession) => Promise<T>): Promise<T>;
   info(relay: string): Promise<InboxRelayCapabilities>;
   publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string>;
   query(
@@ -317,59 +323,70 @@ export async function publishInboxList(
     const attempts = relays.map((relay) => (async (): Promise<Attempt> => {
       const relayKey = Uint8Array.from(keySnapshot);
       try {
-        let receipt: InboxReceipt;
-        try {
-          receipt = {
-            relay,
-            ok: true,
-            message: await port.publish(
+        const auth = authHandler(relay, relayKey, now);
+        const attempt = async (connection: InboxRelaySession): Promise<Attempt> => {
+          let receipt: InboxReceipt;
+          try {
+            receipt = {
               relay,
-              eventSnapshot,
-              authHandler(relay, relayKey, now)
-            )
-          };
-        } catch (error) {
-          return {
-            relay,
-            receipt: { relay, ok: false, message: relayError(error) },
-            readback: { relay, found: false, event: null, observedAt: now },
-            confirmed: false
-          };
-        }
+              ok: true,
+              message: await connection.publish(eventSnapshot)
+            };
+          } catch (error) {
+            return {
+              relay,
+              receipt: { relay, ok: false, message: relayError(error) },
+              readback: { relay, found: false, event: null, observedAt: now },
+              confirmed: false
+            };
+          }
 
-        try {
-          const events = await port.query(relay, {
-            ids: [eventSnapshot.id],
-            authors: [eventSnapshot.pubkey],
-            kinds: [10050],
-            limit: 1
-          }, authHandler(relay, relayKey, now), (candidate) => {
-            validateInboxList(candidate, eventSnapshot.pubkey, now);
-            return candidate.id === eventSnapshot.id;
-          });
-          const exactCandidate = events.find((candidate) => {
-            try {
+          try {
+            const events = await connection.query({
+              ids: [eventSnapshot.id],
+              authors: [eventSnapshot.pubkey],
+              kinds: [10050],
+              limit: 1
+            }, (candidate) => {
               validateInboxList(candidate, eventSnapshot.pubkey, now);
               return candidate.id === eventSnapshot.id;
-            } catch {
-              return false;
-            }
-          }) ?? null;
-          const exact = exactCandidate === null ? null : snapshotNostrEvent(exactCandidate);
-          return {
-            relay,
-            receipt,
-            readback: { relay, found: exact !== null, event: exact, observedAt: now },
-            confirmed: exact !== null
-          };
-        } catch {
-          return {
-            relay,
-            receipt,
-            readback: { relay, found: false, event: null, observedAt: now },
-            confirmed: false
-          };
-        }
+            });
+            const exactCandidate = events.find((candidate) => {
+              try {
+                validateInboxList(candidate, eventSnapshot.pubkey, now);
+                return candidate.id === eventSnapshot.id;
+              } catch {
+                return false;
+              }
+            }) ?? null;
+            const exact = exactCandidate === null ? null : snapshotNostrEvent(exactCandidate);
+            return {
+              relay,
+              receipt,
+              readback: { relay, found: exact !== null, event: exact, observedAt: now },
+              confirmed: exact !== null
+            };
+          } catch {
+            return {
+              relay,
+              receipt,
+              readback: { relay, found: false, event: null, observedAt: now },
+              confirmed: false
+            };
+          }
+        };
+        if (port.withConnection) return await port.withConnection(relay, auth, attempt);
+        return await attempt({
+          publish: value => port.publish(relay, value, auth),
+          query: (filter, completeOn) => port.query(relay, filter, auth, completeOn)
+        });
+      } catch (error) {
+        return {
+          relay,
+          receipt: { relay, ok: false, message: relayError(error) },
+          readback: { relay, found: false, event: null, observedAt: now },
+          confirmed: false
+        };
       } finally {
         relayKey.fill(0);
       }

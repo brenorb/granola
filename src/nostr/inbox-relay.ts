@@ -4,7 +4,8 @@ import type { NostrEvent } from "../order/events.js";
 import type {
   AuthHandler,
   InboxRelayCapabilities,
-  InboxRelayPort
+  InboxRelayPort,
+  InboxRelaySession
 } from "./inbox.js";
 
 export interface InboxRelayConnection {
@@ -134,13 +135,24 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     }
   }
 
-  async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
+  async withConnection<T>(
+    relay: string,
+    auth: AuthHandler,
+    action: (session: InboxRelaySession) => Promise<T>
+  ): Promise<T> {
     const connection = await this.open(relay, auth);
     try {
-      return await connection.publish(event);
+      return await action({
+        publish: event => connection.publish(event),
+        query: (filter, completeOn) => this.queryConnection(connection, filter, completeOn)
+      });
     } finally {
       connection.close();
     }
+  }
+
+  async publish(relay: string, event: NostrEvent, auth: AuthHandler): Promise<string> {
+    return this.withConnection(relay, auth, connection => connection.publish(event));
   }
 
   async query(
@@ -149,7 +161,14 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     auth: AuthHandler,
     completeOn?: (event: NostrEvent) => boolean
   ): Promise<NostrEvent[]> {
-    const connection = await this.open(relay, auth);
+    return this.withConnection(relay, auth, connection => connection.query(filter, completeOn));
+  }
+
+  private async queryConnection(
+    connection: InboxRelayConnection,
+    filter: Record<string, unknown>,
+    completeOn?: (event: NostrEvent) => boolean
+  ): Promise<NostrEvent[]> {
     return await new Promise<NostrEvent[]>((resolve, reject) => {
       const events: NostrEvent[] = [];
       let settled = false;
@@ -159,25 +178,28 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
         settled = true;
         clearTimeout(timeout);
         subscription?.close("granola query complete");
-        connection.close();
         result();
       };
       const timeout = setTimeout(() => finish(() => reject(new Error("Inbox relay query timed out"))), this.queryTimeoutMs);
-      subscription = connection.subscribe([filter], {
-        onevent: (event) => {
-          if (settled) return;
-          const candidate = structuredClone(event);
-          events.push(candidate);
-          try {
-            if (completeOn?.(candidate)) finish(() => resolve([candidate]));
-          } catch {
-            // Invalid candidates cannot end the query ahead of valid readback.
-          }
-        },
-        oneose: () => finish(() => resolve(events)),
-        onclose: (reason) => finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)))
-      });
-      if (settled) subscription.close("granola query complete");
+      try {
+        subscription = connection.subscribe([filter], {
+          onevent: (event) => {
+            if (settled) return;
+            const candidate = structuredClone(event);
+            events.push(candidate);
+            try {
+              if (completeOn?.(candidate)) finish(() => resolve([candidate]));
+            } catch {
+              // Invalid candidates cannot end the query ahead of valid readback.
+            }
+          },
+          oneose: () => finish(() => resolve(events)),
+          onclose: (reason) => finish(() => reject(new Error(`Inbox relay closed query: ${reason}`)))
+        });
+        if (settled) subscription.close("granola query complete");
+      } catch (error) {
+        finish(() => reject(error));
+      }
     });
   }
 

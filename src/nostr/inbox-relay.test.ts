@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { finalizeEvent, getPublicKey, verifyEvent, type EventTemplate } from "nostr-tools";
 
 import type { NostrEvent } from "../order/events.js";
-import { createNip42AuthEvent } from "./inbox.js";
+import { createInboxList, createNip42AuthEvent, publishInboxList } from "./inbox.js";
 import { NostrToolsInboxRelayPort, type InboxRelayConnection } from "./inbox-relay.js";
 
 const key = (last: number): Uint8Array => {
@@ -56,6 +56,60 @@ class FakeConnection implements InboxRelayConnection {
 }
 
 describe("nostr-tools inbox relay port", () => {
+  it("publishes and validates exact readback on one authenticated connection, isolated per operation", async () => {
+    const connections: FakeConnection[] = [];
+    const connect = vi.fn(async () => {
+      const connection = new FakeConnection();
+      vi.spyOn(connection, "close");
+      connection.subscribe = (_filters, callbacks) => {
+        queueMicrotask(() => {
+          const published = connection.published[0]!;
+          callbacks.onevent({ ...published, content: "tampered" });
+          callbacks.onevent(published);
+        });
+        return { close: vi.fn() };
+      };
+      connections.push(connection);
+      return connection;
+    });
+    const port = new NostrToolsInboxRelayPort(connect,
+      async () => new Response(JSON.stringify({ supported_nips: [17, 40, 42], limitation: { auth_required: true } })));
+    for (const signer of [protocolKey, key(3)]) {
+      const list = createInboxList([relayUrl], signer, now);
+      const relays = ["wss://one.example", "wss://two.example", "wss://three.example"];
+      const result = await publishInboxList(list, relays, signer, port, now, 3);
+      expect(result.confirmed).toEqual(expect.arrayContaining(relays));
+      expect(result.readback[0]?.event?.id).toBe(list.id);
+    }
+    expect(connect).toHaveBeenCalledTimes(6);
+    expect(connections.map(c => c.authPubkeys)).toEqual([
+      ...Array.from({ length: 3 }, () => [protocolPubkey]),
+      ...Array.from({ length: 3 }, () => [getPublicKey(key(3))])
+    ]);
+    for (const connection of connections) expect(connection.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["timeout", "disconnect", "subscribe throws", "publish fails"])("closes scoped connections on %s", async failure => {
+    const connection = new FakeConnection();
+    const close = vi.spyOn(connection, "close");
+    connection.subscribe = (_filters, callbacks) => {
+      if (failure === "subscribe throws") throw new Error("subscribe failed");
+      if (failure === "disconnect") queueMicrotask(() => callbacks.onclose("disconnected"));
+      return { close: vi.fn() };
+    };
+    if (failure === "publish fails") connection.publish = async () => { throw new Error("publish failed"); };
+    const port = new NostrToolsInboxRelayPort(async () => connection,
+      async () => new Response(JSON.stringify({ supported_nips: [], limitation: {} })), 10);
+    const list = createInboxList([relayUrl], protocolKey, now);
+    await expect(port.withConnection(relayUrl,
+      async challenge => createNip42AuthEvent(relayUrl, challenge, protocolKey, now),
+      async session => {
+        await session.publish(list);
+        return session.query({ ids: [list.id] });
+      })).rejects.toThrow();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("finishes verified exact readback before EOSE and closes a synchronous subscription", async () => {
     const candidate = event();
     const subscriptionClose = vi.fn();
