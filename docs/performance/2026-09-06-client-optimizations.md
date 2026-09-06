@@ -57,3 +57,58 @@ integration tests exercise sell, buy and one-mint settlement flows.
 
 TypeScript passed. Full suite: 413 passed, 7 skipped. Native Chrome storage checks
 passed, including cross-tab reset, stale-write rejection and non-exportability.
+
+## Deployed measurements
+
+Runtime commits `0d5b00e`, `4de4618`, `8361d67` shipped in
+[Pages run 34049387899](https://github.com/brenorb/granola/actions/runs/34049387899).
+A clean HEAD snapshot built `index-C40Ig8Uc.js`; both live wallets loaded that exact
+asset. The unrelated SDK/documentation work in the checkout was not included.
+
+The same Chrome/CDP profiling runner exercised three real Testnut UI swaps against
+the deployed site, with reloads between samples. No Refresh Swaps/manual recovery.
+The baseline below is the **already metadata-optimized** version from the wallet
+boundaries report, not the older 81–84-metadata-request version.
+
+| Measurement | Previous sell / buy / sell | Updated sell / buy / sell |
+| --- | --- | --- |
+| Both wallets Filled | 24.277 / 31.723 / 24.987 s | 20.351 / 22.018 / 23.262 s |
+| New relay connections | 20 / 21 / 20 | 16 / 16 / 16 |
+| Relay handshake interval union | 5.541 / 6.480 / 5.969 s | 4.351 / 4.523 / 4.471 s |
+| IndexedDB transactions, both wallets | 641 / 634 / 646 | 375 / 367 / 381 |
+| IndexedDB transaction interval union | 1.009 / 1.246 / 1.835 s | 0.289 / 0.382 / 0.524 s |
+| Web Lock acquisitions | 421 / 423 / 432 | 160 / 158 / 165 |
+| Metadata HTTP requests | 12 / 12 / 12 | 12 / 12 / 12 |
+| Proof-state POST requests | 10 / 10 / 11 | 10 / 10 / 12 |
+| Actual mint swaps / restore checks per run | 4 / 4 | 4 / 4 |
+
+Median duration fell from **24.987 s to 22.018 s**: **2.968 s / 11.9% lower**.
+IndexedDB transaction counts fell 41.5% on average. CPU improvement was modest;
+JavaScript estimates per wallet were 0.618–1.092 s after the change. The main gain
+comes from less I/O and overlapping discovery, not removing cryptographic checks.
+The three message-staging actions now took 19–36 ms each, versus roughly one second
+or more when each awaited discovery serially. The discovery itself still happens.
+
+There were four successful proof WS waits in run 1; run 2 had three successes and
+one unavailable result; run 3 had two successes and four unavailable results.
+Fallback HTTP completed settlement safely. These remote/transport variations mean
+three sequential samples cannot establish a guaranteed speedup or tail latency.
+Intervals overlap and are not additive contributions to total duration.
+
+Both wallets retained three Filled sessions before reload and expected balances
+after reload: A with 9,934 SAT + USD 0.03, B with 60 SAT + USD 99.97. Funding used
+only the fake-token buttons in isolated browser profiles. Safe local timing artifacts
+are `work/profiling-boundaries/capture-after.json` and `summary-after.json`.
+
+A separate manual sell swap in the in-app browser completed in **20.212 s**, with
+all four proof WS waits receiving SPENT. Both Filled states and the balances
+(9,978 SAT + USD 0.01; 20 SAT + USD 99.99) persisted after reload. The UI reported
+three public relay acknowledgements. Profiles: `client-maker-0906` and
+`client-taker-0906`; public relays: nos.lol, relay.primal.net, offchain.pub; private
+inbox: auth.nostr1.com. These are aggregate UI ACK counts, not per-relay receipts.
+
+The manual reverse-direction buy swap completed in **20.660 s**, also with all four
+proof WS waits receiving SPENT and three public publication ACKs. Public order event:
+`bc6f3bc1bbf17d6aeae48bb729af79ca0548b906cf2a446e2b542d675461c62f`.
+After the two manual swaps, reload preserved 9,956 SAT + USD 0.02 in A and
+40 SAT + USD 99.98 in B. Both manual sessions reached Filled on both sides.
