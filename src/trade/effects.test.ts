@@ -554,7 +554,7 @@ async function takerAwaitingFillVerification(): Promise<{
 }
 
 describe("GranolaCoordinatorEffects", () => {
-  it.each(["reuse", "expired", "failed", "different session", "different identity"])(
+  it.each(["reuse", "expired", "expired while awaiting", "failed", "different session", "different identity"])(
     "prefetches inbox without blocking the registration checkpoint and handles %s",
     async scenario => {
       const { effects, nostr } = harness();
@@ -586,12 +586,43 @@ describe("GranolaCoordinatorEffects", () => {
       if (scenario === "different identity") registered.privateState.nostrPrivateKey = "08".repeat(32);
       const input = externalInput({ kind: "stage_reserve_propose" }, registered);
       if (scenario === "expired") input.now += 11;
-      await expect(effects.performExternal(input)).rejects.toThrow("discovery complete");
+      const clock = scenario === "expired while awaiting"
+        ? vi.spyOn(performance, "now").mockReturnValueOnce(0).mockReturnValue(11_000)
+        : null;
+      try {
+        await expect(effects.performExternal(input)).rejects.toThrow("discovery complete");
+      } finally { clock?.mockRestore(); }
       expect(nostr.discoverInbox).toHaveBeenCalledTimes(scenario === "reuse" ? 1 : 2);
       await expect(effects.performExternal(input)).rejects.toThrow("discovery complete");
       expect(nostr.discoverInbox).toHaveBeenCalledTimes(scenario === "reuse" ? 2 : 3);
     }
   );
+
+  it.each([
+    ["maker", "awaiting_reserve_accept", "prepare_base_lock"],
+    ["maker", "awaiting_base_lock", "prepare_base_lock"],
+    ["taker", "awaiting_quote_lock", "prepare_quote_lock"]
+  ] as const)("starts %s discovery in %s before mint preparation without awaiting it", async (role, phase, kind) => {
+    const { effects, nostr, cashu, wallet, reservations } = harness();
+    const current = baseSession();
+    current.role = role;
+    current.privateState.transcript.choreography.phase = phase;
+    nostr.discoverInbox.mockImplementation(() => new Promise(() => {}));
+    const funded = walletState();
+    if (role === "taker") {
+      funded.pockets[0]!.mintUrl = current.terms.quoteMint;
+      funded.pockets[0]!.unit = current.terms.quoteUnit;
+    }
+    wallet.load.mockResolvedValue(funded);
+    reservations.load.mockResolvedValue({ version: 1, revision: 0, reservations: [] });
+    cashu.prepareOutgoingLock.mockImplementation(async () => {
+      expect(nostr.discoverInbox).toHaveBeenCalledTimes(1);
+      return preparedOperation();
+    });
+    const prepared = await effects.performExternal(externalInput({ kind }, current));
+    expect(prepared.privateState.cashuOperation?.status).toBe("prepared");
+    expect(wallet.save).not.toHaveBeenCalled();
+  });
 
   it("classifies every planner action at an explicit I/O boundary", () => {
     const { effects } = harness();
@@ -874,11 +905,14 @@ describe("GranolaCoordinatorEffects", () => {
   it("reserves the persisted Cashu inputs before executing the exact prepared artifact on retry", async () => {
     const {
       effects,
+      nostr,
       cashu,
       wallet,
       reservations,
       withWalletLock
     } = harness();
+    // A stalled relay must not delay the completed financial checkpoint or wallet reconciliation.
+    nostr.discoverInbox.mockImplementation(() => new Promise(() => {}));
     const prepared = baseSession();
     prepared.privateState.cashuOperation = {
       operationId: "11111111-1111-4111-8111-111111111114",
@@ -957,6 +991,7 @@ describe("GranolaCoordinatorEffects", () => {
       externalInput({ kind: "execute_cashu_operation" }, reserved)
     );
 
+    expect(nostr.discoverInbox).toHaveBeenCalledTimes(1);
     expect(cashu.completeOutgoingLock).toHaveBeenCalledTimes(2);
     for (const [artifact, expected] of cashu.completeOutgoingLock.mock.calls) {
       expect(artifact).toEqual(reserved.privateState.cashuOperation!.artifact);

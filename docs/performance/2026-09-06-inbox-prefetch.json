@@ -1,0 +1,269 @@
+{
+  "baselineAsset": "index-DR0O-JUR.js",
+  "candidateAsset": "index-Bo3I8QwM.js",
+  "baselineOrigin": "https://brenorb.com/granola/",
+  "candidateOrigin": "http://127.0.0.1:5181/",
+  "browsingSeconds": 20,
+  "runs": {
+    "before": [
+      {
+        "run": 1,
+        "direction": "sell",
+        "durationMs": 14226.8,
+        "messagePreparationMs": {
+          "stage_reserve_accept": 41.4,
+          "stage_reserve_propose": 17.2,
+          "stage_quote_lock": 18.7
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "OPTIONS restore": 4,
+          "POST restore": 4,
+          "OPTIONS swap": 4,
+          "POST swap": 4,
+          "POST checkstate": 10,
+          "OPTIONS checkstate": 10
+        },
+        "exchanges": {
+          "nostr_query:10050": 6,
+          "nostr_challenge": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:30078": 6,
+          "nostr_query:1059": 2,
+          "mint_subscribe": 4
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 9832.91,
+          "mintWsHandshake": 1002.08,
+          "relayWsHandshake": 2152.59,
+          "mintWsResponse": 945.78,
+          "relayWsResponse": 3307.67
+        },
+        "allNetworkUnionMs": 13001.11
+      },
+      {
+        "run": 2,
+        "direction": "buy",
+        "durationMs": 13771.6,
+        "messagePreparationMs": {
+          "stage_reserve_propose": 19.4,
+          "stage_quote_lock": 40.7,
+          "stage_reserve_accept": 33.9
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "POST checkstate": 10,
+          "OPTIONS checkstate": 10,
+          "OPTIONS restore": 4,
+          "POST restore": 4,
+          "POST swap": 4,
+          "OPTIONS swap": 4
+        },
+        "exchanges": {
+          "nostr_query:30078": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:10050": 6,
+          "nostr_query:1059": 2,
+          "nostr_challenge": 6,
+          "mint_subscribe": 4
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 9680.34,
+          "mintWsHandshake": 993.85,
+          "relayWsHandshake": 2174.92,
+          "mintWsResponse": 2001.51,
+          "relayWsResponse": 3218.38
+        },
+        "allNetworkUnionMs": 12703.82
+      },
+      {
+        "run": 3,
+        "direction": "sell",
+        "durationMs": 14119.7,
+        "messagePreparationMs": {
+          "stage_reserve_accept": 38.6,
+          "stage_reserve_propose": 29.3,
+          "stage_quote_lock": 22.6
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "POST restore": 4,
+          "OPTIONS restore": 4,
+          "POST swap": 4,
+          "OPTIONS swap": 4,
+          "POST checkstate": 11,
+          "OPTIONS checkstate": 11
+        },
+        "exchanges": {
+          "nostr_query:10050": 6,
+          "nostr_challenge": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:30078": 6,
+          "nostr_query:1059": 2,
+          "mint_subscribe": 2
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 9142.03,
+          "mintWsHandshake": 557.73,
+          "relayWsHandshake": 2337.91,
+          "mintWsResponse": 709.54,
+          "relayWsResponse": 3383.9
+        },
+        "allNetworkUnionMs": 12547.59
+      }
+    ],
+    "after": [
+      {
+        "run": 1,
+        "direction": "sell",
+        "durationMs": 14930.4,
+        "messagePreparationMs": {
+          "stage_reserve_accept": 36,
+          "stage_reserve_propose": 17.6,
+          "stage_quote_lock": 18.8
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "POST restore": 4,
+          "OPTIONS restore": 4,
+          "OPTIONS swap": 4,
+          "POST swap": 4,
+          "POST checkstate": 10,
+          "OPTIONS checkstate": 10
+        },
+        "exchanges": {
+          "nostr_query:10050": 6,
+          "nostr_challenge": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:30078": 6,
+          "nostr_query:1059": 2,
+          "mint_subscribe": 4
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 10412.13,
+          "mintWsHandshake": 1076.58,
+          "relayWsHandshake": 2812.82,
+          "mintWsResponse": 956.8,
+          "relayWsResponse": 3315.61
+        },
+        "allNetworkUnionMs": 13836.2
+      },
+      {
+        "run": 2,
+        "direction": "buy",
+        "durationMs": 13897.5,
+        "messagePreparationMs": {
+          "stage_reserve_propose": 17.3,
+          "stage_quote_lock": 33.1,
+          "stage_reserve_accept": 34.6
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "POST checkstate": 10,
+          "OPTIONS checkstate": 10,
+          "OPTIONS restore": 4,
+          "POST restore": 4,
+          "OPTIONS swap": 4,
+          "POST swap": 4
+        },
+        "exchanges": {
+          "nostr_query:30078": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:10050": 6,
+          "nostr_query:1059": 2,
+          "nostr_challenge": 6,
+          "mint_subscribe": 4
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 9211.02,
+          "mintWsHandshake": 1103.03,
+          "relayWsHandshake": 2539.77,
+          "mintWsResponse": 2006.95,
+          "relayWsResponse": 3185.12
+        },
+        "allNetworkUnionMs": 12764.34
+      },
+      {
+        "run": 3,
+        "direction": "sell",
+        "durationMs": 13555.5,
+        "messagePreparationMs": {
+          "stage_reserve_accept": 37.6,
+          "stage_reserve_propose": 27.5,
+          "stage_quote_lock": 30.5
+        },
+        "requests": {
+          "GET info": 4,
+          "GET keysets": 4,
+          "GET keys": 4,
+          "POST restore": 4,
+          "OPTIONS restore": 4,
+          "POST swap": 4,
+          "OPTIONS swap": 4,
+          "POST checkstate": 11,
+          "OPTIONS checkstate": 11
+        },
+        "exchanges": {
+          "nostr_query:10050": 6,
+          "nostr_challenge": 6,
+          "nostr_publish": 11,
+          "nostr_auth": 5,
+          "nostr_query:30078": 6,
+          "nostr_query:1059": 2,
+          "mint_subscribe": 2
+        },
+        "connections": {
+          "failed": 4,
+          "warm": 9
+        },
+        "networkUnionMs": {
+          "http": 9081.07,
+          "mintWsHandshake": 496.46,
+          "relayWsHandshake": 1973.58,
+          "mintWsResponse": 459.89,
+          "relayWsResponse": 2963.69
+        },
+        "allNetworkUnionMs": 12053.16
+      }
+    ]
+  },
+  "afterReloadBalances": [
+    "SAT BALANCE\n9,934 sat\nUSD BALANCE\n0.03 USD",
+    "SAT BALANCE\n60 sat\nUSD BALANCE\n99.97 USD"
+  ]
+}

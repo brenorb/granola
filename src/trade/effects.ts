@@ -951,9 +951,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
   ): Promise<TradeSession> {
     const inbox = session.privateState.inbox;
     if (!inbox.event) throw new Error("Inbox registration is not checkpointed");
-    if (session.role === "taker" && session.privateState.transcript.choreography.phase === "awaiting_reserve_propose") {
-      this.prefetchInbox(session, "reserve_propose", now);
-    }
+    this.prefetchNextInbox(session, now);
     const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
     try {
       const result = await this.nostr.publishRegistration(inbox.event, key);
@@ -989,11 +987,14 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const cacheKey = this.inboxPrefetchKey(session, type);
     const prefetched = this.inboxPrefetch.get(cacheKey);
     this.inboxPrefetch.delete(cacheKey);
+    const discoveryStarted = performance.now();
     let discovered = prefetched && now < prefetched.expiresAt
       ? await prefetched.result
       : null;
+    const discoveryNow = now + (performance.now() - discoveryStarted) / 1_000;
+    if (prefetched && discoveryNow >= prefetched.expiresAt) discovered = null;
     if (discovered) {
-      try { if (discovered.event) validateInboxList(discovered.event, recipient, now); }
+      try { if (discovered.event) validateInboxList(discovered.event, recipient, Math.floor(discoveryNow)); }
       catch { discovered = null; }
     }
     discovered ??= await this.discoverOutgoingInbox(session, type);
@@ -1110,6 +1111,19 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       return await this.nostr.discoverInbox(this.outgoingRecipient(session, type), key, responseRelays);
     }
     finally { key.fill(0); }
+  }
+
+  private prefetchNextInbox(session: TradeSession, now: number): void {
+    const phase = session.privateState.transcript.choreography.phase;
+    if (session.role === "taker" && phase === "awaiting_reserve_propose") {
+      this.prefetchInbox(session, "reserve_propose", now);
+    } else if (session.role === "maker" && phase === "awaiting_reserve_accept") {
+      this.prefetchInbox(session, "reserve_accept", now);
+    } else if (session.role === "maker" && phase === "awaiting_base_lock") {
+      this.prefetchInbox(session, "base_lock", now);
+    } else if (session.role === "taker" && phase === "awaiting_quote_lock") {
+      this.prefetchInbox(session, "quote_lock", now);
+    }
   }
 
   private prefetchInbox(session: TradeSession, type: AtomicSwapMessageType, now: number): void {
@@ -1615,6 +1629,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const slot = action.includes("base") ? "base" : "quote";
     const leg = slotLeg(session, slot);
     const expected = expectedLock(session, slot);
+    if (action.endsWith("_lock")) this.prefetchNextInbox(session, now);
     return this.withWalletLock(async () => {
       const walletBefore = await this.wallet.load();
       const reservations = await this.reservations.load();
@@ -1714,14 +1729,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     let completed: CompletedLock | CompletedHtlcSpend;
     if (operation.kind === "outgoing-lock") {
-      const phase = session.privateState.transcript.choreography.phase;
-      if (session.role === "maker" && phase === "awaiting_reserve_accept") {
-        this.prefetchInbox(session, "reserve_accept", now);
-      } else if (session.role === "maker" && phase === "awaiting_base_lock") {
-        this.prefetchInbox(session, "base_lock", now);
-      } else if (session.role === "taker" && phase === "awaiting_quote_lock") {
-        this.prefetchInbox(session, "quote_lock", now);
-      }
+      // Restarted sessions may resume directly from the prepared mint checkpoint.
+      this.prefetchNextInbox(session, now);
       completed = await this.cashu.completeOutgoingLock(
         operation.artifact,
         operation.artifact.expected
