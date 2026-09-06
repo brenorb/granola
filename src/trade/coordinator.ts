@@ -78,7 +78,7 @@ interface ExternalSnapshot {
 }
 
 type InitialStep =
-  | { kind: "complete"; view: PublicTradeView }
+  | { kind: "complete"; view: PublicTradeView; session: TradeSession }
   | { kind: "external"; snapshot: ExternalSnapshot };
 
 async function sha256(value: string): Promise<string> {
@@ -447,7 +447,7 @@ export class TradeCoordinator {
         const now = this.now();
         const action = nextCoordinatorAction(current, now);
         if (action.kind === "none") {
-          return { kind: "complete", view: publicTradeView(current) };
+          return { kind: "complete", view: publicTradeView(current), session: current };
         }
         const execution = this.effects.classify(action, structuredClone(current));
         if (execution === "local") {
@@ -462,7 +462,7 @@ export class TradeCoordinator {
             assertCompleteResult(current, result);
             await this.repository.save(result, current.revision);
             succeeded = true;
-            return { kind: "complete", view: publicTradeView(result) };
+            return { kind: "complete", view: publicTradeView(result), session: result };
           } finally {
             this.recordProfile(action, execution, current, startedAt, succeeded);
           }
@@ -493,7 +493,7 @@ export class TradeCoordinator {
     );
 
     if (initial.kind === "complete") {
-      this.startAnnouncements(await this.requiredSession(sessionId));
+      this.startAnnouncements(initial.session);
       return initial.view;
     }
     this.startAnnouncements(initial.snapshot.session);
@@ -509,10 +509,10 @@ export class TradeCoordinator {
       });
       assertCompleteResult(snapshot.session, result);
 
-      const view = await this.runSessionExclusive(sessionId, async () => {
+      const completed = await this.runSessionExclusive(sessionId, async () => {
         const current = await this.requiredSession(sessionId);
         if (canonicalJson(current) === canonicalJson(result)) {
-          return publicTradeView(current);
+          return { view: publicTradeView(current), session: current };
         }
         if (settlementSnapshot(current) !== settlementSnapshot(snapshot.session)) {
           throw new Error(
@@ -544,11 +544,11 @@ export class TradeCoordinator {
         merged.revision = current.revision + 1;
         merged.updatedAt = Math.max(result.updatedAt, current.updatedAt);
         await this.repository.save(merged, current.revision);
-        return publicTradeView(merged);
+        return { view: publicTradeView(merged), session: merged };
       });
       succeeded = true;
-      this.startAnnouncements(await this.requiredSession(sessionId));
-      return view;
+      this.startAnnouncements(completed.session);
+      return completed.view;
     } finally {
       this.recordProfile(
         snapshot.action,
@@ -585,29 +585,31 @@ export class TradeCoordinator {
             : { kind: snapshot.pendingOrderPublication?.status === "acknowledged" ? "commit_order_publication" : "publish_order_projection" };
           const startedAt = performance.now();
           let succeeded = false;
+          let current: TradeSession | undefined;
           try {
             const result = await this.effects.performExternal({ action: effectAction, session: snapshot, now: this.now(),
               revision: snapshot.revision, fingerprint: await externalFingerprint(effectAction, snapshot) });
-            await this.runSessionExclusive(session.sessionId, async () => {
+            current = await this.runSessionExclusive(session.sessionId, async () => {
               const current = await this.requiredSession(session.sessionId);
               const next = structuredClone(current);
               if (registration) {
-                if (current.privateState.inbox.event?.id !== id || current.privateState.inbox.status === "registered") return;
+                if (current.privateState.inbox.event?.id !== id || current.privateState.inbox.status === "registered") return current;
                 if (result.privateState.inbox.event?.id !== id) throw new Error("Announcement artifact changed");
                 next.privateState.inbox = structuredClone(result.privateState.inbox);
               } else {
-                if (current.pendingOrderPublication?.projection.id !== id || current.pendingOrderPublication.status === "committed") return;
-                if (result.pendingOrderPublication?.projection.id !== id) return;
+                if (current.pendingOrderPublication?.projection.id !== id || current.pendingOrderPublication.status === "committed") return current;
+                if (result.pendingOrderPublication?.projection.id !== id) return current;
                 next.pendingOrderPublication = structuredClone(result.pendingOrderPublication);
               }
               next.revision = current.revision + 1;
               next.updatedAt = Math.max(current.updatedAt, result.updatedAt, this.now());
               await this.repository.save(next, current.revision);
+              return next;
             });
             succeeded = true;
           } catch { /* The exact pending artifact stays durable for retry/restart. */ }
           finally { this.recordProfile(effectAction, "external", snapshot, startedAt, succeeded); }
-          const current = await this.requiredSession(session.sessionId);
+          if (current === undefined) current = await this.requiredSession(session.sessionId);
           if (registration ? current.privateState.inbox.status === "registered"
             : current.pendingOrderPublication?.projection.id !== id || current.pendingOrderPublication.status === "committed") return;
           await new Promise<void>(resolve => {
