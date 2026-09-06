@@ -33,3 +33,27 @@ continue using their existing publish/query methods.
 ACK and exact validated readback requirements, signature checks and quorum behavior
 are preserved. Tests cover two distinct signing identities, tampered candidates,
 synchronous delivery and every cleanup path.
+
+## Inbox discovery overlap
+
+The taker starts recipient inbox discovery during its own registration. Outgoing
+Cashu lock execution starts discovery for the next lock/acceptance message. These
+read-only requests never delay saving the independent registration/Cashu result.
+Message creation consumes the hint once, or performs normal discovery if absent,
+failed, invalid or started more than ten coordinator-clock seconds ago.
+
+Hints are bounded to 32 entries and scoped by session, actual AUTH public key,
+recipient and message type. Only public inbox data is retained; discovery key copies
+are cleared when the request settles. Cached events are validated again before use.
+Discovery still observes all configured relays and chooses the newest valid list;
+there is no first-response-wins change. Send-time relay capability evidence checks,
+financial checkpoints and message ordering remain intact.
+
+Regression tests cover non-blocking discovery, single consumption, expiration,
+failed discovery, session isolation and signing-identity isolation. Existing two-party
+integration tests exercise sell, buy and one-mint settlement flows.
+
+## Pre-deployment validation
+
+TypeScript passed. Full suite: 413 passed, 7 skipped. Native Chrome storage checks
+passed, including cross-tab reset, stale-write rejection and non-exportability.

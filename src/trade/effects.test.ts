@@ -9,6 +9,7 @@ import type {
 } from "../cashu/trade-client.js";
 import type { WalletState } from "../core/wallet.js";
 import type { NostrTradeTransport } from "../nostr/trade-transport.js";
+import { createInboxList } from "../nostr/inbox.js";
 import {
   createProjectionTemplate,
   parseProjectionEvent,
@@ -401,6 +402,8 @@ interface Harness {
     loadLatestPublishedProjection: ReturnType<typeof vi.fn>;
   };
   nostr: {
+    discoverInbox: ReturnType<typeof vi.fn>;
+    publishRegistration: ReturnType<typeof vi.fn>;
     send: ReturnType<typeof vi.fn>;
     read: ReturnType<typeof vi.fn>;
   };
@@ -551,6 +554,45 @@ async function takerAwaitingFillVerification(): Promise<{
 }
 
 describe("GranolaCoordinatorEffects", () => {
+  it.each(["reuse", "expired", "failed", "different session", "different identity"])(
+    "prefetches inbox without blocking the registration checkpoint and handles %s",
+    async scenario => {
+      const { effects, nostr } = harness();
+      const current = baseSession();
+      current.role = "taker";
+      current.terms.baseKeyset = "0011223344556677";
+      current.terms.quoteKeyset = "0077665544332211";
+      current.privateState.transcript.choreography.phase = "awaiting_reserve_propose";
+      current.evidence.makerPubkey = getPublicKey(ORDER_SIGNING_KEY);
+      const list = createInboxList(INBOX_RELAYS, ORDER_SIGNING_KEY, NOW);
+      const discovered = { event: list, eventId: list.id, relays: [...INBOX_RELAYS] };
+      let resolveDiscovery!: (value: typeof discovered) => void;
+      let rejectDiscovery!: (error: Error) => void;
+      nostr.discoverInbox.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolveDiscovery = resolve;
+        rejectDiscovery = reject;
+      })).mockResolvedValue(discovered);
+      nostr.publishRegistration.mockResolvedValue({
+        event: current.privateState.inbox.event, receipts: [], readback: []
+      });
+      const registered = await effects.performExternal(externalInput({ kind: "publish_inbox_registration" }, current));
+      expect(registered.privateState.inbox.status).toBe("registered");
+      expect(nostr.discoverInbox).toHaveBeenCalledTimes(1);
+      if (scenario === "failed") rejectDiscovery(new Error("relay unavailable"));
+      else resolveDiscovery(discovered);
+      // Stop after discovery; the full integration tests exercise message creation and settlement.
+      effects["outgoingBody"] = async () => { throw new Error("discovery complete"); };
+      if (scenario === "different session") registered.sessionId = "99".repeat(32);
+      if (scenario === "different identity") registered.privateState.nostrPrivateKey = "08".repeat(32);
+      const input = externalInput({ kind: "stage_reserve_propose" }, registered);
+      if (scenario === "expired") input.now += 11;
+      await expect(effects.performExternal(input)).rejects.toThrow("discovery complete");
+      expect(nostr.discoverInbox).toHaveBeenCalledTimes(scenario === "reuse" ? 1 : 2);
+      await expect(effects.performExternal(input)).rejects.toThrow("discovery complete");
+      expect(nostr.discoverInbox).toHaveBeenCalledTimes(scenario === "reuse" ? 2 : 3);
+    }
+  );
+
   it("classifies every planner action at an explicit I/O boundary", () => {
     const { effects } = harness();
     const local = [

@@ -27,6 +27,7 @@ import type {
   DiscoveredTradeInbox,
   NostrTradeTransport
 } from "../nostr/trade-transport.js";
+import { validateInboxList } from "../nostr/inbox.js";
 import type { NostrEvent } from "../order/events.js";
 import type { PublishedOrderProjection } from "../order/service.js";
 import type {
@@ -511,6 +512,11 @@ function cashuResult(
 }
 
 export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
+  // Public inbox hints only; never retain bearer material or reuse across identities.
+  private readonly inboxPrefetch = new Map<string, {
+    expiresAt: number;
+    result: Promise<DiscoveredTradeInbox | null>;
+  }>();
   private readonly orderApi: GranolaCoordinatorEffectsOptions["orderApi"];
   private readonly orderOutbox: GranolaCoordinatorEffectsOptions["orderOutbox"];
   private readonly orderReader: CoordinatorOrderReadPort;
@@ -933,6 +939,9 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
   ): Promise<TradeSession> {
     const inbox = session.privateState.inbox;
     if (!inbox.event) throw new Error("Inbox registration is not checkpointed");
+    if (session.role === "taker" && session.privateState.transcript.choreography.phase === "awaiting_reserve_propose") {
+      this.prefetchInbox(session, "reserve_propose", now);
+    }
     const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
     try {
       const result = await this.nostr.publishRegistration(inbox.event, key);
@@ -965,16 +974,17 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       throw new Error("An exact outgoing envelope is already checkpointed");
     }
     const recipient = this.outgoingRecipient(session, type);
-    const requesterKey = bytes(
-      session.privateState.nostrPrivateKey,
-      "Trade Nostr private key"
-    );
-    let discovered: DiscoveredTradeInbox;
-    try {
-      discovered = await this.nostr.discoverInbox(recipient, requesterKey);
-    } finally {
-      requesterKey.fill(0);
+    const cacheKey = this.inboxPrefetchKey(session, type);
+    const prefetched = this.inboxPrefetch.get(cacheKey);
+    this.inboxPrefetch.delete(cacheKey);
+    let discovered = prefetched && now < prefetched.expiresAt
+      ? await prefetched.result
+      : null;
+    if (discovered) {
+      try { validateInboxList(discovered.event, recipient, now); }
+      catch { discovered = null; }
     }
+    discovered ??= await this.discoverOutgoingInbox(session, type);
     const terms = granolaTerms(session);
     const hash = await termsHash(terms);
     const body = await this.outgoingBody(session, type, now);
@@ -1066,6 +1076,36 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       next.privateState.htlcHash = session.privateState.htlcHash;
     }
     return next;
+  }
+
+  private inboxPrefetchKey(session: TradeSession, type: AtomicSwapMessageType): string {
+    const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
+    try {
+      return `${session.sessionId}:${getPublicKey(key)}:${this.outgoingRecipient(session, type)}:${type}`;
+    } finally { key.fill(0); }
+  }
+
+  private async discoverOutgoingInbox(
+    session: TradeSession,
+    type: AtomicSwapMessageType
+  ): Promise<DiscoveredTradeInbox> {
+    const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
+    try { return await this.nostr.discoverInbox(this.outgoingRecipient(session, type), key); }
+    finally { key.fill(0); }
+  }
+
+  private prefetchInbox(session: TradeSession, type: AtomicSwapMessageType, now: number): void {
+    for (const [key, entry] of this.inboxPrefetch) {
+      if (now >= entry.expiresAt) this.inboxPrefetch.delete(key);
+    }
+    const key = this.inboxPrefetchKey(session, type);
+    if (this.inboxPrefetch.has(key)) return;
+    // ponytail: at most 32 short-lived hints; eviction falls back to normal discovery.
+    if (this.inboxPrefetch.size >= 32) this.inboxPrefetch.delete(this.inboxPrefetch.keys().next().value!);
+    this.inboxPrefetch.set(key, {
+      expiresAt: now + 10,
+      result: this.discoverOutgoingInbox(session, type).catch(() => null)
+    });
   }
 
   private outgoingRecipient(
@@ -1635,6 +1675,14 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     let completed: CompletedLock | CompletedHtlcSpend;
     if (operation.kind === "outgoing-lock") {
+      const phase = session.privateState.transcript.choreography.phase;
+      if (session.role === "maker" && phase === "awaiting_reserve_accept") {
+        this.prefetchInbox(session, "reserve_accept", now);
+      } else if (session.role === "maker" && phase === "awaiting_base_lock") {
+        this.prefetchInbox(session, "base_lock", now);
+      } else if (session.role === "taker" && phase === "awaiting_quote_lock") {
+        this.prefetchInbox(session, "quote_lock", now);
+      }
       completed = await this.cashu.completeOutgoingLock(
         operation.artifact,
         operation.artifact.expected
