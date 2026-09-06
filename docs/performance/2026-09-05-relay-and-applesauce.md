@@ -1,5 +1,10 @@
 # Relay fix and Applesauce review — 2026-09-05
 
+Follow-up: [manual Testnut validation on September 6](2026-09-06-manual-testnut-validation.md)
+completed both swap directions with recovery, but exposed a reproducible
+automatic-settlement interruption. The earlier locked-Mac blocker is resolved;
+this is not an unattended E2E all-clear.
+
 ## Branch decision
 
 Bring `e6acd2f` (first valid inbox confirmation), with its redundant post-loop
