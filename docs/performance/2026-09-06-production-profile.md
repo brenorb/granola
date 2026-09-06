@@ -1,5 +1,9 @@
 # Granola production profile — 2026-09-06
 
+Follow-up: [mint metadata reuse and proof subscriptions](2026-09-06-mint-optimization.md)
+are now deployed, with a new three-run live comparison. The measurements below
+are the baseline before those changes.
+
 ## Scope and method
 
 Profiled real 20 SAT / USD 0.01 Testnut swaps through the browser UI, using the
