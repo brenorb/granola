@@ -55,14 +55,58 @@ describe("encrypted private storage", () => {
     expect((key as CryptoKey).extractable).toBe(false);
   });
 
+  it("stores native bytes and reads envelopes persisted as legacy number arrays", async () => {
+    const raw = new MemoryStorageDriver();
+    const encrypted = new EncryptedStorageDriver(raw, "binary-test");
+    const value = { revision: 7, state: "private" };
+
+    await encrypted.set("session", value);
+    const stored = await raw.get("binary-test.data.session") as {
+      version: number;
+      iv: Uint8Array;
+      ciphertext: Uint8Array;
+    };
+    expect(ArrayBuffer.isView(stored.iv)).toBe(true);
+    expect(Object.prototype.toString.call(stored.iv)).toBe("[object Uint8Array]");
+    expect(ArrayBuffer.isView(stored.ciphertext)).toBe(true);
+    expect(Object.prototype.toString.call(stored.ciphertext)).toBe("[object Uint8Array]");
+
+    await raw.set("binary-test.data.session", {
+      version: stored.version,
+      iv: [...stored.iv],
+      ciphertext: [...stored.ciphertext]
+    });
+    await expect(encrypted.get("session")).resolves.toEqual(value);
+  });
+
+  it("rejects malformed binary envelopes before decryption", async () => {
+    const raw = new MemoryStorageDriver();
+    const encrypted = new EncryptedStorageDriver(raw, "binary-test");
+    const key = "binary-test.data.session";
+
+    await raw.set(key, {
+      version: 1,
+      iv: new Uint16Array(6),
+      ciphertext: new Uint8Array(17)
+    });
+    await expect(encrypted.get("session")).rejects.toThrow(/IV is corrupt/);
+
+    await raw.set(key, {
+      version: 1,
+      iv: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      ciphertext: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 256]
+    });
+    await expect(encrypted.get("session")).rejects.toThrow(/ciphertext is corrupt/);
+  });
+
   it("fails closed when ciphertext or associated storage key is changed", async () => {
     const raw = new MemoryStorageDriver();
     const encrypted = new EncryptedStorageDriver(raw, "trade-test");
     await encrypted.set("session", { value: "private" });
     const envelope = await raw.get("trade-test.data.session") as {
       version: number;
-      iv: number[];
-      ciphertext: number[];
+      iv: Uint8Array;
+      ciphertext: Uint8Array;
     };
     envelope.ciphertext[0] = (envelope.ciphertext[0] ?? 0) ^ 1;
     await raw.set("trade-test.data.session", envelope);

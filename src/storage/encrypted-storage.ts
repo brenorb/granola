@@ -2,8 +2,8 @@ import type { StorageDriver } from "./wallet-repository.js";
 
 interface EncryptedEnvelope {
   version: 1;
-  iv: number[];
-  ciphertext: number[];
+  iv: Uint8Array<ArrayBuffer>;
+  ciphertext: Uint8Array<ArrayBuffer>;
 }
 
 export type StorageExclusiveRunner = <T>(action: () => Promise<T>) => Promise<T>;
@@ -16,6 +16,16 @@ function bytes(
   expectedLength: number | null,
   label: string
 ): Uint8Array<ArrayBuffer> {
+  if (
+    ArrayBuffer.isView(value) &&
+    Object.prototype.toString.call(value) === "[object Uint8Array]"
+  ) {
+    const typed = value as Uint8Array<ArrayBuffer>;
+    if (expectedLength !== null && typed.byteLength !== expectedLength) {
+      throw new Error(`Encrypted storage ${label} is corrupt`);
+    }
+    return new Uint8Array(typed);
+  }
   if (
     !Array.isArray(value) ||
     (expectedLength !== null && value.length !== expectedLength) ||
@@ -128,8 +138,8 @@ export class EncryptedStorageDriver implements StorageDriver {
     }, await this.encryptionKey(), plaintext);
     const envelope: EncryptedEnvelope = {
       version: 1,
-      iv: [...iv],
-      ciphertext: [...new Uint8Array(ciphertext)]
+      iv,
+      ciphertext: new Uint8Array(ciphertext)
     };
     await this.storage.set(this.dataStorageKey(key), envelope);
   }
