@@ -155,6 +155,8 @@ function session(): TradeSession {
 }
 
 class MemorySessionRepository implements CoordinatorSessionRepository {
+  getCalls = 0;
+
   readonly save = vi.fn(async (
     next: TradeSession,
     expectedRevision: number | null
@@ -182,6 +184,7 @@ class MemorySessionRepository implements CoordinatorSessionRepository {
   }
 
   async get(sessionId: string): Promise<TradeSession | undefined> {
+    this.getCalls += 1;
     return this.value?.sessionId === sessionId ? clone(this.value) : undefined;
   }
 }
@@ -327,6 +330,46 @@ describe("durable trade coordinator shell", () => {
     expect(applyLocal).toHaveBeenCalledTimes(1);
     expect(repository.save).toHaveBeenCalledTimes(1);
     expect(performExternal).not.toHaveBeenCalled();
+  });
+
+  it("reuses the committed local session when starting announcements", async () => {
+    const current = session();
+    current.privateState.inbox = {
+      status: "unregistered",
+      quorum: 1,
+      event: null,
+      discoveryRelays: [],
+      inboxRelays: [],
+      receipts: [],
+      readbacks: [],
+      stagedAt: null,
+      acknowledgedAt: null,
+      registeredAt: null
+    };
+    const repository = new MemorySessionRepository(current);
+    const coordinator = new TradeCoordinator({
+      repository,
+      effects: port(),
+      now: () => 1_800_000_100
+    });
+
+    await coordinator.advance(current.sessionId);
+
+    expect(repository.getCalls).toBe(1);
+  });
+
+  it("reuses the committed external session after a durable merge", async () => {
+    const current = stagedInbox();
+    const repository = new MemorySessionRepository(current);
+    const coordinator = new TradeCoordinator({
+      repository,
+      effects: port({ classify: () => "external" }),
+      now: () => 1_800_000_100
+    });
+
+    await coordinator.advance(current.sessionId);
+
+    expect(repository.getCalls).toBe(2);
   });
 
   it("reports safe action timing without exposing session state", async () => {
