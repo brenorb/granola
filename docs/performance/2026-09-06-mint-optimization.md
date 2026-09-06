@@ -38,7 +38,15 @@ states, duplicate/foreign updates, unsupported mints, disconnects, connection
 failure, timeout and cleanup after a late connection. Existing incoming-lock
 and spent-witness tests still apply after the wakeup.
 
-The deployment and live measurements will be recorded below after publishing.
+Full suite: 398 passed, 7 skipped. TypeScript and clean production build passed.
+Pages deployed `677e75b` successfully. The first real sell swap completed in
+26.02 seconds, with 12 metadata requests (previously 81–84), but 20 proof checks.
+The opt-in trace exposed immediate WebSocket failures: the page CSP allowed
+mint HTTPS but omitted mint WSS origins. This was a Granola integration defect,
+not a mint failure. The follow-up pairs those exact origins and adds a shell
+regression test. Successful fallback does not count as WebSocket validation.
+
+Final deployment and live subscription results follow after revalidation.
 
 ## Attribution
 

@@ -1,5 +1,9 @@
 # Granola agent notes
 
+- Keep configured mint HTTPS and WSS origins paired in the page CSP. Validate
+  new transports under the deployed CSP, including a successful subscription
+  notification; a successful HTTP fallback alone does not validate WebSockets.
+
 - Settlements may use one mint or two. A cross-mint test requires distinct mint
   URLs and keysets. Every participating mint must advertise and correctly
   implement NUT-07 and NUT-14, including retrieval of the spent proof's

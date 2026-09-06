@@ -1,6 +1,7 @@
 import { CheckStateEnum, hashToCurve, type Proof, type ProofState, type Wallet } from "@cashu/cashu-ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitForProofsSpent } from "./proof-subscription.js";
+import html from "../../index.html?raw";
 
 function harness(supported = true) {
   const proofs = [{ secret: "synthetic-ws-one" }, { secret: "synthetic-ws-two" }] as Proof[];
@@ -27,6 +28,15 @@ function harness(supported = true) {
 }
 
 describe("proof-state subscription wakeup", () => {
+  it("permits both configured test mint WebSockets under the production CSP", () => {
+    const shell = new DOMParser().parseFromString(html, "text/html");
+    const policy = shell.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute("content")!;
+    const connect = policy.split(";").find(part => part.trim().startsWith("connect-src "))!.trim().split(/\s+/);
+    for (const mint of ["testnut.cashu.space", "nofee.testnut.cashu.space"]) {
+      expect(connect).toContain(`https://${mint}`);
+      expect(connect).toContain(`wss://${mint}`);
+    }
+  });
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
