@@ -1,3 +1,4 @@
+import { withSharedLock } from "../core/lock.js";
 import { createOrderResponse } from "../trade/order-response.js";
 import type { VerifiedInitialReserveProposal } from "../trade/messages.js";
 import {
@@ -173,6 +174,8 @@ export async function createBrowserTradeRuntime(
     repository: sessions,
     effects,
     now,
+    runAdvanceExclusive: (sessionId, action) =>
+      withSharedLock(`granola-trade-${input.profile}-${sessionId}-advance`, action),
     runSessionExclusive: (sessionId, action) =>
       withTradeSessionLock(input.profile, sessionId, action),
     ...(input.profileAction ? { profileAction: input.profileAction } : {})

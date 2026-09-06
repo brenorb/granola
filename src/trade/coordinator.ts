@@ -53,6 +53,7 @@ export interface TradeCoordinatorOptions {
   effects: CoordinatorEffectPort;
   now?: () => number;
   runSessionExclusive?: RunCoordinatorSessionExclusive;
+  runAdvanceExclusive?: RunCoordinatorSessionExclusive;
   profileAction?: (profile: CoordinatorActionProfile) => void;
 }
 
@@ -398,6 +399,7 @@ export class TradeCoordinator {
   private readonly effects: CoordinatorEffectPort;
   private readonly now: () => number;
   private readonly runSessionExclusive: RunCoordinatorSessionExclusive;
+  private readonly runAdvanceExclusive: RunCoordinatorSessionExclusive;
   private readonly profileAction: ((profile: CoordinatorActionProfile) => void) | undefined;
   private readonly inFlight = new Map<string, Promise<PublicTradeView>>();
   private readonly announcements = new Map<string, Promise<void>>();
@@ -408,6 +410,7 @@ export class TradeCoordinator {
     this.now = options.now ?? (() => Math.floor(Date.now() / 1_000));
     this.runSessionExclusive =
       options.runSessionExclusive ?? createSessionExclusiveRunner();
+    this.runAdvanceExclusive = options.runAdvanceExclusive ?? createSessionExclusiveRunner();
     this.profileAction = options.profileAction;
   }
 
@@ -427,7 +430,7 @@ export class TradeCoordinator {
     if (running !== undefined) return running;
     const pending = (async (): Promise<PublicTradeView> => {
       try {
-        return await this.advanceOnce(sessionId);
+        return await this.runAdvanceExclusive(sessionId, () => this.advanceOnce(sessionId));
       } finally {
         this.inFlight.delete(sessionId);
       }

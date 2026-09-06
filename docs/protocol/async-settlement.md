@@ -67,3 +67,14 @@ resumes unacknowledged replies; ACK cannot acknowledge a different wrapper. Thes
 messages contain no bearer material. The order's signed public head can remain
 open while the separate authenticated availability says `preparing`; the local
 reservation is the exclusivity mechanism, not the timelock or public timestamp.
+
+## Multiple open tabs
+
+A real four-page Testnut validation found that competing maker tabs could both run
+an external action, then one would correctly reject a stale result but stop refreshing
+its UI. Browser runtimes now use one native Web Lock per profile/session for the
+whole coordinator action, separate from the short journal-write lock. A queued tab
+loads the current checkpoint before executing the next action. Announcements remain
+parallel; a closed/crashed tab releases its native lock. This is local coordination,
+not distributed reservation consensus. Independent wallet instances still rely on
+mint rejection of copied proofs and exact-output recovery.

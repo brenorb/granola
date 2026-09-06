@@ -428,6 +428,34 @@ describe("durable trade coordinator shell", () => {
     expect(repository.save).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes complete actions across coordinators while leaving journal writes available", async () => {
+    const current = stagedInbox();
+    const repository = new MemorySessionRepository(current);
+    const ownership = trackingSessionLock();
+    const journal = trackingSessionLock();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const performExternal = vi.fn(async ({ session: before, now }) => {
+      expect(ownership.isHeld()).toBe(true);
+      expect(journal.isHeld()).toBe(false);
+      started();
+      await gate;
+      return acknowledgeInbox(before, now);
+    });
+    const make = () => new TradeCoordinator({ repository, now: () => 1_800_000_100,
+      runAdvanceExclusive: ownership.run, runSessionExclusive: journal.run,
+      effects: port({ classify: action => action.kind === "publish_inbox_registration" ? "external" : "local", performExternal }) });
+    const first = make().advance(current.sessionId);
+    await ready;
+    const second = make().advance(current.sessionId);
+    release();
+    const results = await Promise.all([first, second]);
+    expect(results.map(result => result.revision)).toEqual([1, 2]);
+    expect(performExternal).toHaveBeenCalledOnce();
+  });
+
   it("converges when another retry has already saved the exact external result", async () => {
     const current = stagedInbox();
     const repository = new MemorySessionRepository(current);
