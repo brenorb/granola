@@ -1,0 +1,249 @@
+{
+  "browser": "151.0.7922.176",
+  "externalRequests": 0,
+  "firstUse": [
+    {
+      "variant": "isolated",
+      "elapsedMs": 16.5
+    },
+    {
+      "variant": "shared",
+      "elapsedMs": 16.30000001192093
+    },
+    {
+      "variant": "isolated",
+      "elapsedMs": 16.700000047683716
+    },
+    {
+      "variant": "shared",
+      "elapsedMs": 16.099999964237213
+    },
+    {
+      "variant": "isolated",
+      "elapsedMs": 16.100000023841858
+    },
+    {
+      "variant": "shared",
+      "elapsedMs": 16.80000001192093
+    },
+    {
+      "variant": "isolated",
+      "elapsedMs": 16.600000023841858
+    },
+    {
+      "variant": "shared",
+      "elapsedMs": 16.19999998807907
+    },
+    {
+      "variant": "isolated",
+      "elapsedMs": 16.399999976158142
+    },
+    {
+      "variant": "shared",
+      "elapsedMs": 15.900000035762787
+    }
+  ],
+  "offline": true,
+  "operationsPerSample": 10,
+  "rounds": [
+    {
+      "isolated": {
+        "samples": 200,
+        "medianMs": 0.2800000011920929,
+        "p95Ms": 0.3,
+        "meanMs": 0.2786000001132487
+      },
+      "reuseInMemory": {
+        "samples": 200,
+        "medianMs": 0.2699999988079071,
+        "p95Ms": 0.2900000035762787,
+        "meanMs": 0.2700499998927115
+      },
+      "pairedSavingMs": {
+        "samples": 200,
+        "medianMs": 0.010000002384185802,
+        "p95Ms": 0.030000007152557406,
+        "meanMs": 0.008550000220537184
+      }
+    },
+    {
+      "isolated": {
+        "samples": 200,
+        "medianMs": 0.27999999523162844,
+        "p95Ms": 0.3,
+        "meanMs": 0.2782499999403952
+      },
+      "reuseInMemory": {
+        "samples": 200,
+        "medianMs": 0.2699999988079071,
+        "p95Ms": 0.2899999976158142,
+        "meanMs": 0.26920000004768363
+      },
+      "pairedSavingMs": {
+        "samples": 200,
+        "medianMs": 0.009999996423721291,
+        "p95Ms": 0.03999999761581419,
+        "meanMs": 0.009049999892711639
+      }
+    },
+    {
+      "isolated": {
+        "samples": 200,
+        "medianMs": 0.2800000011920929,
+        "p95Ms": 0.3,
+        "meanMs": 0.2775999999642373
+      },
+      "reuseInMemory": {
+        "samples": 200,
+        "medianMs": 0.2699999988079071,
+        "p95Ms": 0.2800000011920929,
+        "meanMs": 0.26770000001788136
+      },
+      "pairedSavingMs": {
+        "samples": 200,
+        "medianMs": 0.010000002384185802,
+        "p95Ms": 0.03999999761581419,
+        "meanMs": 0.009899999946355818
+      }
+    },
+    {
+      "isolated": {
+        "samples": 200,
+        "medianMs": 0.2700000047683716,
+        "p95Ms": 0.3,
+        "meanMs": 0.276949999898672
+      },
+      "reuseInMemory": {
+        "samples": 200,
+        "medianMs": 0.2699999988079071,
+        "p95Ms": 0.2900000035762787,
+        "meanMs": 0.2701000000238419
+      },
+      "pairedSavingMs": {
+        "samples": 200,
+        "medianMs": 0.009999990463256836,
+        "p95Ms": 0.0400000035762787,
+        "meanMs": 0.0068499998748302445
+      }
+    },
+    {
+      "isolated": {
+        "samples": 200,
+        "medianMs": 0.27999999523162844,
+        "p95Ms": 0.3,
+        "meanMs": 0.2781499999463555
+      },
+      "reuseInMemory": {
+        "samples": 200,
+        "medianMs": 0.2699999988079071,
+        "p95Ms": 0.2900000035762787,
+        "meanMs": 0.2683000000715258
+      },
+      "pairedSavingMs": {
+        "samples": 200,
+        "medianMs": 0.009999996423721291,
+        "p95Ms": 0.0400000035762787,
+        "meanMs": 0.009849999874830248
+      }
+    }
+  ],
+  "access": [
+    {
+      "storedOrders": 1,
+      "readAndValidate": {
+        "samples": 100,
+        "medianMs": 0.30000001192092896,
+        "p95Ms": 0.40000003576278687,
+        "meanMs": 0.28400000035762785
+      },
+      "isolated": {
+        "samples": 100,
+        "medianMs": 0.30000001192092896,
+        "p95Ms": 0.40000003576278687,
+        "meanMs": 0.29000000178813934
+      },
+      "reuseWithOrderRead": {
+        "samples": 100,
+        "medianMs": 0.5,
+        "p95Ms": 0.699999988079071,
+        "meanMs": 0.5459999978542328
+      },
+      "pairedSavingMs": {
+        "samples": 100,
+        "medianMs": -0.20000004768371582,
+        "p95Ms": -0.09999996423721313,
+        "meanMs": -0.25599999606609347
+      }
+    },
+    {
+      "storedOrders": 10,
+      "readAndValidate": {
+        "samples": 100,
+        "medianMs": 1,
+        "p95Ms": 1.199999988079071,
+        "meanMs": 0.9940000021457672
+      },
+      "isolated": {
+        "samples": 100,
+        "medianMs": 0.30000001192092896,
+        "p95Ms": 0.3999999761581421,
+        "meanMs": 0.2869999992847443
+      },
+      "reuseWithOrderRead": {
+        "samples": 100,
+        "medianMs": 1.2000000476837158,
+        "p95Ms": 1.4000000357627869,
+        "meanMs": 1.24799999833107
+      },
+      "pairedSavingMs": {
+        "samples": 100,
+        "medianMs": -0.9000000953674316,
+        "p95Ms": -0.7999999523162842,
+        "meanMs": -0.9609999990463257
+      }
+    },
+    {
+      "storedOrders": 100,
+      "readAndValidate": {
+        "samples": 100,
+        "medianMs": 7.900000035762787,
+        "p95Ms": 8.300000011920929,
+        "meanMs": 7.971999998688698
+      },
+      "isolated": {
+        "samples": 100,
+        "medianMs": 0.30000001192092896,
+        "p95Ms": 0.40000003576278687,
+        "meanMs": 0.31800000309944154
+      },
+      "reuseWithOrderRead": {
+        "samples": 100,
+        "medianMs": 8.399999976158142,
+        "p95Ms": 8.699999988079071,
+        "meanMs": 8.443999998569488
+      },
+      "pairedSavingMs": {
+        "samples": 100,
+        "medianMs": -8.099999964237213,
+        "p95Ms": -7.800000011920929,
+        "meanMs": -8.125999995470046
+      }
+    }
+  ],
+  "primitives": {
+    "randomAndHex": {
+      "samples": 100,
+      "medianMs": 0.003999999761581421,
+      "p95Ms": 0.006000000238418579,
+      "meanMs": 0.0033200000047683724,
+      "operationsPerBatch": 50
+    },
+    "nostrPublicDerivation": {
+      "samples": 100,
+      "medianMs": 0.07200000047683716,
+      "p95Ms": 0.07800000071525574,
+      "meanMs": 0.07273999999761592,
+      "operationsPerBatch": 50
+    }
+  }
+}
