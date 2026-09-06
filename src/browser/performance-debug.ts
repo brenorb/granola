@@ -94,6 +94,7 @@ export function createPerformanceDebugTimeline(
         if (entry.entryType === "resource") {
           recordResource(entry as PerformanceResourceTiming);
         } else if (entry.entryType === "measure") {
+          if (entry.name === "granola:session-keys") append({ name: entry.name, startTime: entry.startTime, duration: entry.duration, detail: {} });
           recordProofWait(entry as PerformanceMeasure);
           recordRelayConnect(entry as PerformanceMeasure);
         }

@@ -183,6 +183,7 @@ interface LocalKeys {
 }
 
 function localKeys(entropy: SessionFactoryEntropy): LocalKeys {
+  const startedAt = performance.now();
   const nostrPrivateKey = entropy.privateKey("nostr");
   const cashuPrivateKey = entropy.privateKey("cashu");
   const refundPrivateKey = entropy.privateKey("refund");
@@ -202,6 +203,7 @@ function localKeys(entropy: SessionFactoryEntropy): LocalKeys {
   } catch {
     throw new Error("Session private key is not a valid secp256k1 scalar");
   }
+  try { performance.measure("granola:session-keys", { start: startedAt, end: performance.now() }); } catch { /* Diagnostics cannot prevent settlement. */ }
   const publicIdentities = [nostrPubkey, cashuPubkey.slice(2), refundPubkey.slice(2)];
   if (new Set(publicIdentities).size !== publicIdentities.length) {
     throw new Error("Nostr, Cashu settlement, and refund keys must be independent");

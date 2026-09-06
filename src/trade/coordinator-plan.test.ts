@@ -351,7 +351,7 @@ describe("atomic swap coordinator action planning", () => {
       .toBe("prepare_base_lock");
   });
 
-  it("registers the exact local inbox before any protocol message", () => {
+  it("stages the authenticated local route before sending without waiting for discovery", () => {
     const current = session("taker", "awaiting_reserve_propose");
     current.privateState.inbox = {
       status: "unregistered",
@@ -379,10 +379,10 @@ describe("atomic swap coordinator action planning", () => {
     current.privateState.inbox.inboxRelays = ["wss://auth.example"];
     current.privateState.inbox.stagedAt = 1_800_000_100;
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
-      .toBe("publish_inbox_registration");
+      .toBe("stage_reserve_propose");
     current.privateState.inbox.status = "acknowledged";
     expect(nextCoordinatorAction(current, 1_800_000_100).kind)
-      .toBe("verify_inbox_registration");
+      .toBe("stage_reserve_propose");
   });
 
   it("validates and commits one durable incoming message before new work", () => {

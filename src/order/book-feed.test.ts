@@ -17,7 +17,8 @@ it("updates a live book, retains cancellation against older events and closes", 
   });
   const open = finalizeEvent(await createProjectionTemplate(state, getPublicKey(key)), key);
   const another = finalizeEvent(await createProjectionTemplate({ ...state, order_id: crypto.randomUUID() }, getPublicKey(key)), key);
-  const canceled = finalizeEvent(await createProjectionTemplate(cancelOrder(state), getPublicKey(key), state.created_at + 1), key);
+  const canceled = finalizeEvent(await createProjectionTemplate(cancelOrder({ ...state, revision: "1" }), getPublicKey(key), state.created_at + 1), key);
+  const delayedOpen = finalizeEvent(await createProjectionTemplate({ ...state, revision: "1" }, getPublicKey(key), state.created_at + 2), key);
   key.fill(0);
   let callbacks!: SubscribeManyParams;
   const close = vi.fn();
@@ -38,6 +39,7 @@ it("updates a live book, retains cancellation against older events and closes", 
     callbacks.onevent!(canceled);
     await vi.waitFor(() => expect(books.at(-1)?.asks).toHaveLength(0));
     callbacks.onevent!(open);
+    callbacks.onevent!(delayedOpen);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(books.at(-1)?.asks).toHaveLength(0);
     callbacks.onevent!(another);

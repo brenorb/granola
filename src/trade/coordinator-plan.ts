@@ -2,6 +2,7 @@ import { slotLeg } from "./model.js";
 import type { TradeSession } from "./session.js";
 
 export type CoordinatorAction =
+  | { kind: "complete_settlement" }
   | { kind: "publish_order_projection" }
   | { kind: "commit_order_publication" }
   | { kind: "clear_order_publication" }
@@ -75,7 +76,7 @@ function independentlySpent(session: TradeSession, leg: "base" | "quote"): boole
   );
 }
 
-function bothLegsSpent(session: TradeSession): boolean {
+export function bothLegsSpent(session: TradeSession): boolean {
   return independentlySpent(session, "base") && independentlySpent(session, "quote");
 }
 
@@ -106,7 +107,15 @@ function exactCommittedRelease(session: TradeSession): boolean {
   return hasCommittedPublication(session, "release");
 }
 
+export function usesDirectRouting(session: TradeSession): boolean {
+  const choreography = session.privateState.transcript.choreography;
+  return choreography.takerResponseRelays !== undefined ||
+    (session.role === "taker" && choreography.phase === "awaiting_reserve_propose" &&
+      (session.privateState.outbox === null || session.privateState.outbox.message.body.response_relays !== undefined));
+}
+
 function terminal(session: TradeSession): boolean {
+  if (usesDirectRouting(session) && session.phase === "filled") return bothLegsSpent(session);
   if (session.privateState.transcript.choreography.phase === "settled") {
     const authoritativeFill = session.role === "maker"
       ? exactCommittedFill(session)
@@ -277,6 +286,7 @@ export function nextCoordinatorAction(
     if (!releasableRefund) return { kind: "clear_cashu_operation" };
     if (publication === null) return { kind: "stage_order_release" };
     if (publication.operation !== "release") {
+      if (usesDirectRouting(session) && publication.operation === "reserve") return { kind: "stage_order_release" };
       return publication.operation === "reserve" &&
         publication.status === "committed"
         ? { kind: "clear_order_publication" }
@@ -287,7 +297,8 @@ export function nextCoordinatorAction(
     }
   }
 
-  if (publication !== null && publication.status !== "committed") {
+  if (publication !== null && publication.status !== "committed" &&
+    (!usesDirectRouting(session) || publication.operation === "release")) {
     switch (publication.status) {
       case "staged":
         return { kind: "publish_order_projection" };
@@ -300,9 +311,11 @@ export function nextCoordinatorAction(
     case "unregistered":
       return { kind: "stage_inbox_registration" };
     case "staged":
-      return { kind: "publish_inbox_registration" };
+      if (!usesDirectRouting(session)) return { kind: "publish_inbox_registration" };
+      break;
     case "acknowledged":
-      return { kind: "verify_inbox_registration" };
+      if (!usesDirectRouting(session)) return { kind: "verify_inbox_registration" };
+      break;
     case "registered":
       break;
   }
@@ -345,7 +358,7 @@ export function nextCoordinatorAction(
   if (now >= session.plan.reservationExpiresAt) {
     return { kind: "enter_recovery" };
   }
-  if (publication?.status === "committed") {
+  if (publication?.status === "committed" && !usesDirectRouting(session)) {
     if (publication.operation === "reserve") {
       return { kind: "clear_order_publication" };
     }
@@ -457,6 +470,11 @@ export function nextCoordinatorAction(
           session.evidence.legs[offerLeg].claimOperationCommitment === null
         ) return { kind: "prepare_base_claim" };
         return { kind: "observe_base" };
+      }
+      if (usesDirectRouting(session)) {
+        return session.role === "maker" && session.fillProjectionId === null
+          ? { kind: "stage_order_fill" }
+          : { kind: "complete_settlement" };
       }
       return session.role === "maker"
         ? session.fillProjectionId === null

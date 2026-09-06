@@ -413,9 +413,7 @@ export class BrowserTradeController {
       const subscriptionKey = `maker-order-key:${orderId}`;
       await this.startSubscriptionOnce(subscriptionKey, () =>
         this.makerIdentity.useOrderSecretKey(orderId, async (secretKey) => {
-        const registration = this.transport.createRegistration(secretKey);
-        await this.transport.publishRegistration(registration, secretKey);
-        return this.startSubscription({
+        const subscription = await this.startSubscription({
           recipientPubkey: makerPubkey,
           recipientSecretKey: secretKey,
           inboxRelays: [this.inboxRelay],
@@ -448,6 +446,13 @@ export class BrowserTradeController {
             this.onMakerError
           )
         });
+        // The persisted order identity lets startup retry this replaceable announcement.
+        // Receiving is ready independently of public discovery.
+        void this.makerIdentity.useOrderSecretKey(orderId, async key => {
+          const registration = this.transport.createRegistration(key);
+          await this.transport.publishRegistration(registration, key);
+        }).catch(error => this.onMakerError(messageOf(error)));
+        return subscription;
         })
       );
     }));
@@ -472,7 +477,7 @@ export class BrowserTradeController {
       const session = await this.sessions.get(sessionId);
       if (
         session === undefined ||
-        session.privateState.inbox.status !== "registered"
+        session.privateState.inbox.status === "unregistered"
       ) return undefined;
       const secretKey = bytes(session.privateState.nostrPrivateKey);
       try {

@@ -116,8 +116,10 @@ function sessionEntropy(
 
 class MemoryOrderRelay implements OrderRelayPort {
   private readonly projections = new Map<string, NostrEvent>();
+  offline = false;
 
   async publish(event: NostrEvent) {
+    if (this.offline) throw new Error("Public relay disconnected");
     if (event.kind === 30078) {
       const identifier = event.tags.find((tag) => tag[0] === "d")?.[1];
       if (!identifier) throw new Error("Projection lacks its replaceable identifier");
@@ -148,6 +150,7 @@ class MemoryOrderRelay implements OrderRelayPort {
 class MemoryTradeTransport {
   private readonly registrations = new Map<string, NostrEvent>();
   private readonly wrappers = new Map<string, NostrEvent[]>();
+  offlineDiscovery = false;
   readonly calls = { registrations: 0, discoveries: 0, sends: 0, reads: 0 };
 
   createRegistration(protocolSecretKey: Uint8Array): NostrEvent {
@@ -159,6 +162,7 @@ class MemoryTradeTransport {
     _protocolSecretKey: Uint8Array
   ) {
     this.calls.registrations += 1;
+    if (this.offlineDiscovery) throw new Error("Discovery unavailable");
     await fakeRelayDelay();
     this.registrations.set(event.pubkey, structuredClone(event));
     return {
@@ -178,7 +182,8 @@ class MemoryTradeTransport {
     };
   }
 
-  async discoverInbox(authorPubkey: string): Promise<DiscoveredTradeInbox> {
+  async discoverInbox(authorPubkey: string, _key?: Uint8Array, routes?: string[]): Promise<DiscoveredTradeInbox> {
+    if (routes?.length) return { event: null, eventId: null, relays: routes };
     this.calls.discoveries += 1;
     await fakeRelayDelay();
     const event = this.registrations.get(authorPubkey);
@@ -445,7 +450,8 @@ describe("two-party coordinator happy path", () => {
   async function settleHappyPath(
     selectedMarket: ExactMarket,
     side: "buy" | "sell" = "sell",
-    pendingObservations = 0
+    pendingObservations = 0,
+    publicOffline = false
   ): Promise<void> {
     const makerOrderKey = secret(1);
     const makerPubkey = getPublicKey(makerOrderKey);
@@ -483,6 +489,8 @@ describe("two-party coordinator happy path", () => {
       transport.createRegistration(makerOrderKey),
       makerOrderKey
     );
+    orderRelay.offline = publicOffline;
+    transport.offlineDiscovery = publicOffline;
     const cashu = new MemoryCashuMint();
     cashu.pendingObservations = pendingObservations;
     const makerDriver = new MemoryStorageDriver();
@@ -678,17 +686,18 @@ describe("two-party coordinator happy path", () => {
     if (steps >= 200) {
       throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
     }
-    expect(actionTrace).toHaveLength(40 + pendingObservations);
+    expect(actionTrace).toHaveLength(36 + pendingObservations);
     expect(transport.calls.registrations).toBe(3);
-    expect(actionTrace.slice(0, 6)).toEqual([
+    expect(actionTrace.slice(0, 4)).toEqual([
       "taker:stage_inbox_registration",
-      "taker:publish_inbox_registration",
       "taker:stage_reserve_propose",
       "taker:deliver_outbox",
-      "maker:stage_inbox_registration",
-      "maker:publish_inbox_registration"
+      "maker:stage_inbox_registration"
     ]);
-    expect(actionTrace.at(-1)).toBe("taker:verify_order_fill");
+    expect(actionTrace).not.toContain("maker:publish_order_projection");
+    expect(actionTrace).not.toContain("taker:publish_inbox_registration");
+    expect(actionTrace).toContain("maker:complete_settlement");
+    expect(actionTrace.at(-1)).toBe("taker:complete_settlement");
     expect(actionTrace.some((action) =>
       action.includes("refund") || action.endsWith(":enter_recovery")
     )).toBe(false);
@@ -696,6 +705,21 @@ describe("two-party coordinator happy path", () => {
     const makerSession = (await makerSessions.get(SESSION_ID))!;
     const takerSession = (await takerSessions.get(SESSION_ID))!;
     const walletVisibleAt = performance.now();
+    if (publicOffline) {
+      expect(makerSession.pendingOrderPublication?.status).toBe("staged");
+      expect(makerSession.pendingOrderPublication?.operation).toBe("fill");
+      expect(makerSession.privateState.inbox.status).toBe("staged");
+      orderRelay.offline = false;
+      transport.offlineDiscovery = false;
+      // New coordinators resume only the durable announcements after both wallets settled.
+      const restartedMaker = new TradeCoordinator({ repository: makerSessions, effects: makerEffects, now: tick });
+      const restartedTaker = new TradeCoordinator({ repository: takerSessions, effects: takerEffects, now: tick });
+      await Promise.all([restartedMaker.list(), restartedTaker.list()]);
+      await expect.poll(async () => (await makerSessions.get(SESSION_ID))?.pendingOrderPublication?.status).toBe("committed");
+      await expect.poll(async () => (await takerSessions.get(SESSION_ID))?.privateState.inbox.status).toBe("registered");
+      expect((await makerSessions.get(SESSION_ID))?.phase).toBe("filled");
+    }
+
     expect(nextCoordinatorAction(makerSession, coordinatorTime))
       .toEqual({ kind: "none" });
     expect(nextCoordinatorAction(takerSession, coordinatorTime))
@@ -754,7 +778,7 @@ describe("two-party coordinator happy path", () => {
       }));
     }
 
-    expect(makerSession.pendingOrderPublication).toMatchObject({
+    expect((await makerSessions.get(SESSION_ID))!.pendingOrderPublication).toMatchObject({
       operation: "fill",
       status: "committed"
     });
@@ -800,6 +824,10 @@ describe("two-party coordinator happy path", () => {
       expect(publicJson).not.toContain(secretValue);
     }
   }
+
+  it("settles with public/discovery relays disconnected and resumes announcements after restart", async () => {
+    await settleHappyPath(TEST_MARKET, "sell", 0, true);
+  });
 
   it("settles the configured two-mint SAT/USD market one action at a time", async () => {
     await settleHappyPath(TEST_MARKET);

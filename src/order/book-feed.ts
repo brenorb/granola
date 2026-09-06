@@ -26,7 +26,8 @@ export async function watchOrderBook(
       try {
         const record = await parseProjectionEvent(event, verify);
         const previous = latest.get(record.address);
-        if (previous && (previous.event.created_at > event.created_at ||
+        if (previous && (BigInt(previous.record.state.revision) > BigInt(record.state.revision) ||
+          previous.event.created_at > event.created_at ||
           (previous.event.created_at === event.created_at && previous.event.id <= event.id))) continue;
         // ponytail: bounded book including tombstones; refresh/backfill replaces the feed.
         if (!previous && latest.size >= 2_000) {

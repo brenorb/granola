@@ -23,3 +23,28 @@ announcements are not reservation consensus, mint settlement evidence, or custod
 Validation: a regression blocks reserve publication, stages/persists its exact fill
 successor before releasing the network gate, recreates the outbox repository, then
 verifies that the delayed reserve ACK cannot regress or falsely acknowledge the fill.
+
+## Receiving and settling independently of announcements
+
+New sessions communicate the staged inbox route inside their authenticated proposal
+and acceptance. The receiver subscribes as soon as the receiving identity and route
+exist; the order receiver subscribes before launching its discovery announcement.
+Session inbox and reserve/fill artifacts are persisted first, then retried in the
+background by the existing coordinator. Listing recovered sessions restarts pending
+announcements, including for financially completed sessions. Legacy sessions without
+communicated routes retain their discovery gates. Refund/release gates remain intact.
+
+Only announcement receipt fields may change concurrently with financial checkpoints.
+The coordinator still rejects changed financial state, action identity, or wallet
+fingerprints. A delayed publisher cannot overwrite phase, proofs, or transcript.
+Both wallets complete only after independent validated SPENT observations with the
+required witness evidence for both legs. Public fill ACK is tracked separately.
+
+Tests exercise buy/sell, one/two mints, pending proof observations, and both wallets
+settling while public and discovery publication are disconnected. Recreated
+coordinators then publish their durable announcements without changing settlement.
+The live book also rejects a lower revision even if it arrives with a later timestamp.
+
+Session identities remain separate from order authority (ADR 0003). The safe timing
+`granola:session-keys` measures creation/derivation of the three independent session
+keys separately from registration; no key material is included in diagnostics.

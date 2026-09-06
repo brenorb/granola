@@ -1,3 +1,4 @@
+import { bothLegsSpent, usesDirectRouting } from "./coordinator-plan.js";
 import { slotLeg } from "./model.js";
 import {
   getPubKeyFromPrivKey,
@@ -589,6 +590,13 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
   async applyLocal(input: CoordinatorStepInput): Promise<TradeSession> {
     const { action, session, now } = input;
     switch (action.kind) {
+      case "complete_settlement": {
+        if (!bothLegsSpent(session)) throw new Error("Settlement completion requires independent spent evidence for both legs");
+        const next = bump(session, now);
+        next.phase = "filled";
+        next.privateState.transcript.choreography.phase = "settled";
+        return next;
+      }
       case "stage_inbox_registration": {
         const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
         try {
@@ -763,7 +771,8 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     action: "stage_order_reserve" | "stage_order_fill" | "stage_order_release",
     now: number
   ): Promise<TradeSession> {
-    if (session.pendingOrderPublication !== null) {
+    if (session.pendingOrderPublication !== null && !(usesDirectRouting(session) &&
+      session.pendingOrderPublication.operation === "reserve" && action !== "stage_order_reserve")) {
       throw new Error("Order publication is already checkpointed");
     }
     let progress: { orderId: string };
@@ -826,7 +835,9 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     }
     const entry = await this.requiredOrderEntry(progress.orderId);
     const next = bump(session, Math.max(now, entry.intent.createdAt));
-    next.pendingOrderPublication = exactPendingPublication(session, entry, now);
+    next.pendingOrderPublication = exactPendingPublication(
+      { ...session, pendingOrderPublication: null }, entry, now
+    );
     if (entry.intent.operation === "reserve") {
       const takerCommitment =
         (entry.intent.state.reservation as { taker_commitment?: string } | null)
@@ -921,7 +932,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     if (!pending || pending.status !== "committed") {
       throw new Error("Order publication is not committed");
     }
-    await this.orderApi.pruneCommittedOrderPublication(pending.orderId);
+    // Keep the latest durable local head available for successor staging.
     const next = bump(session, now);
     next.pendingOrderPublication = null;
     return next;

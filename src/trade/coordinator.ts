@@ -1,3 +1,4 @@
+import { usesDirectRouting } from "./coordinator-plan.js";
 import {
   nextCoordinatorAction,
   type CoordinatorAction
@@ -147,7 +148,7 @@ function externalArtifact(
         !outbox.rumor.id ||
         !outbox.seal.id ||
         !outbox.wrapper.id ||
-        !outbox.recipientInboxListId ||
+        (outbox.recipientInboxListId !== null && !outbox.recipientInboxListId) ||
         outbox.recipientRelays.length === 0
       ) checkpointError(action);
       return {
@@ -195,7 +196,7 @@ function externalArtifact(
       };
     case "poll_inbox":
       if (
-        inbox.status !== "registered" ||
+        (inbox.status === "unregistered" || (!usesDirectRouting(session) && inbox.status !== "registered")) ||
         inbox.event === null ||
         inbox.inboxRelays.length === 0
       ) checkpointError(action);
@@ -381,6 +382,17 @@ function createSessionExclusiveRunner(): RunCoordinatorSessionExclusive {
   };
 }
 
+// Only announcement receipts may advance concurrently with a financial checkpoint.
+function settlementSnapshot(session: TradeSession): string {
+  const value = structuredClone(session);
+  value.revision = 0;
+  value.updatedAt = 0;
+  Object.assign(value.privateState.inbox, { status: "staged", receipts: [], readbacks: [], acknowledgedAt: null, registeredAt: null });
+  if (value.pendingOrderPublication) Object.assign(value.pendingOrderPublication,
+    { status: "staged", receipts: [], acknowledgedAt: null, committedAt: null });
+  return canonicalJson(value);
+}
+
 export class TradeCoordinator {
   private readonly repository: CoordinatorSessionRepository;
   private readonly effects: CoordinatorEffectPort;
@@ -388,6 +400,7 @@ export class TradeCoordinator {
   private readonly runSessionExclusive: RunCoordinatorSessionExclusive;
   private readonly profileAction: ((profile: CoordinatorActionProfile) => void) | undefined;
   private readonly inFlight = new Map<string, Promise<PublicTradeView>>();
+  private readonly announcements = new Map<string, Promise<void>>();
 
   constructor(options: TradeCoordinatorOptions) {
     this.repository = options.repository;
@@ -399,7 +412,9 @@ export class TradeCoordinator {
   }
 
   async list(): Promise<PublicTradeView[]> {
-    return (await this.repository.list()).map(publicTradeView);
+    const sessions = await this.repository.list();
+    sessions.forEach(session => this.startAnnouncements(session));
+    return sessions.map(publicTradeView);
   }
 
   async get(sessionId: string): Promise<PublicTradeView | undefined> {
@@ -474,7 +489,11 @@ export class TradeCoordinator {
       }
     );
 
-    if (initial.kind === "complete") return initial.view;
+    if (initial.kind === "complete") {
+      this.startAnnouncements(await this.requiredSession(sessionId));
+      return initial.view;
+    }
+    this.startAnnouncements(initial.snapshot.session);
     const { snapshot } = initial;
     let succeeded = false;
     try {
@@ -492,7 +511,7 @@ export class TradeCoordinator {
         if (canonicalJson(current) === canonicalJson(result)) {
           return publicTradeView(current);
         }
-        if (canonicalJson(current) !== canonicalJson(snapshot.session)) {
+        if (settlementSnapshot(current) !== settlementSnapshot(snapshot.session)) {
           throw new Error(
             "Coordinator external result conflicts with conflicting concurrent state"
           );
@@ -503,7 +522,7 @@ export class TradeCoordinator {
         }
         const currentFingerprint = await externalFingerprint(
           currentAction,
-          current,
+          { ...current, revision: snapshot.revision },
           await this.effects.externalFingerprintMaterial?.(
             currentAction,
             structuredClone(current)
@@ -512,10 +531,20 @@ export class TradeCoordinator {
         if (currentFingerprint !== snapshot.fingerprint) {
           throw new Error("Coordinator external action fingerprint changed");
         }
-        await this.repository.save(result, snapshot.revision);
-        return publicTradeView(result);
+        const merged = structuredClone(result);
+        if (canonicalJson(result.privateState.inbox) === canonicalJson(snapshot.session.privateState.inbox)) {
+          merged.privateState.inbox = structuredClone(current.privateState.inbox);
+        }
+        if (canonicalJson(result.pendingOrderPublication) === canonicalJson(snapshot.session.pendingOrderPublication)) {
+          merged.pendingOrderPublication = structuredClone(current.pendingOrderPublication);
+        }
+        merged.revision = current.revision + 1;
+        merged.updatedAt = Math.max(result.updatedAt, current.updatedAt);
+        await this.repository.save(merged, current.revision);
+        return publicTradeView(merged);
       });
       succeeded = true;
+      this.startAnnouncements(await this.requiredSession(sessionId));
       return view;
     } finally {
       this.recordProfile(
@@ -525,6 +554,66 @@ export class TradeCoordinator {
         snapshot.profileStartedAt,
         succeeded
       );
+    }
+  }
+
+  private startAnnouncements(session: TradeSession): void {
+    if (!usesDirectRouting(session)) return;
+    const candidates: Array<{ action: CoordinatorAction; id: string }> = [];
+    const inbox = session.privateState.inbox;
+    if (inbox.event && (inbox.status === "staged" || inbox.status === "acknowledged")) {
+      candidates.push({ action: { kind: "publish_inbox_registration" }, id: inbox.event.id });
+    }
+    const publication = session.pendingOrderPublication;
+    if (publication && publication.status !== "committed" && publication.operation !== "release") {
+      candidates.push({ action: { kind: "publish_order_projection" }, id: publication.projection.id });
+    }
+    for (const { action, id } of candidates) {
+      const key = `${session.sessionId}:${id}`;
+      if (this.announcements.has(key)) continue;
+      const run = (async () => {
+        while (true) {
+          const snapshot = await this.requiredSession(session.sessionId);
+          const registration = action.kind === "publish_inbox_registration";
+          if (registration ? snapshot.privateState.inbox.event?.id !== id || snapshot.privateState.inbox.status === "registered"
+            : snapshot.pendingOrderPublication?.projection.id !== id || snapshot.pendingOrderPublication.status === "committed") return;
+          const effectAction: CoordinatorAction = registration
+            ? { kind: snapshot.privateState.inbox.status === "acknowledged" ? "verify_inbox_registration" : "publish_inbox_registration" }
+            : { kind: snapshot.pendingOrderPublication?.status === "acknowledged" ? "commit_order_publication" : "publish_order_projection" };
+          const startedAt = performance.now();
+          let succeeded = false;
+          try {
+            const result = await this.effects.performExternal({ action: effectAction, session: snapshot, now: this.now(),
+              revision: snapshot.revision, fingerprint: await externalFingerprint(effectAction, snapshot) });
+            await this.runSessionExclusive(session.sessionId, async () => {
+              const current = await this.requiredSession(session.sessionId);
+              const next = structuredClone(current);
+              if (registration) {
+                if (current.privateState.inbox.event?.id !== id || current.privateState.inbox.status === "registered") return;
+                if (result.privateState.inbox.event?.id !== id) throw new Error("Announcement artifact changed");
+                next.privateState.inbox = structuredClone(result.privateState.inbox);
+              } else {
+                if (current.pendingOrderPublication?.projection.id !== id || current.pendingOrderPublication.status === "committed") return;
+                if (result.pendingOrderPublication?.projection.id !== id) return;
+                next.pendingOrderPublication = structuredClone(result.pendingOrderPublication);
+              }
+              next.revision = current.revision + 1;
+              next.updatedAt = Math.max(current.updatedAt, result.updatedAt, this.now());
+              await this.repository.save(next, current.revision);
+            });
+            succeeded = true;
+          } catch { /* The exact pending artifact stays durable for retry/restart. */ }
+          finally { this.recordProfile(effectAction, "external", snapshot, startedAt, succeeded); }
+          const current = await this.requiredSession(session.sessionId);
+          if (registration ? current.privateState.inbox.status === "registered"
+            : current.pendingOrderPublication?.projection.id !== id || current.pendingOrderPublication.status === "committed") return;
+          await new Promise<void>(resolve => {
+            const timer = setTimeout(resolve, 5_000);
+            (timer as unknown as { unref?: () => void }).unref?.();
+          });
+        }
+      })().catch(() => undefined).finally(() => { this.announcements.delete(key); });
+      this.announcements.set(key, run);
     }
   }
 
