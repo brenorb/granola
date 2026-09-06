@@ -43,6 +43,15 @@ async function signed(
 }
 
 describe("order projection events", () => {
+  it("uses validated signed order routing hints and ignores malformed optional hints", async () => {
+    const projection = await signed();
+    projection.tags.push(["inbox", "wss://inbox.example"]);
+    expect((await parseProjectionEvent(projection, () => true)).inboxRelays).toEqual(["wss://inbox.example"]);
+    projection.tags.push(["inbox", "wss://inbox.example"]);
+    expect((await parseProjectionEvent(projection, () => true)).inboxRelays).toBeUndefined();
+    await expect(parseProjectionEvent(projection, () => false)).rejects.toThrow(/signature/i);
+  });
+
   it("publishes the complete v1 state in one parameterized replaceable event", async () => {
     const state = open();
     const projection = await createProjectionTemplate(state, maker);

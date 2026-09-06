@@ -174,13 +174,14 @@ export class NostrOrderService {
     private readonly signer: OrderSigner,
     private readonly relays: OrderRelayPort,
     private readonly verify: (event: NostrEvent) => boolean =
-      (event) => verifyEvent(event)
+      (event) => verifyEvent(event),
+    private readonly inboxRelays: readonly string[] = []
   ) {}
 
   async stage(state: OrderState): Promise<StagedOrderPublication> {
     const maker = await this.signer.publicKey(state.order_id);
     const projection = await this.signer.sign(
-      await createProjectionTemplate(state, maker),
+      await createProjectionTemplate(state, maker, state.created_at, this.inboxRelays),
       state.order_id
     );
     assertMaker(projection, maker);
@@ -208,7 +209,7 @@ export class NostrOrderService {
     }
     assertSuccessorState(previousRecord.state, operation, state, createdAt);
     const projection = await this.signer.sign(
-      await createProjectionTemplate(state, maker, createdAt),
+      await createProjectionTemplate(state, maker, createdAt, previousRecord.inboxRelays ?? this.inboxRelays),
       state.order_id
     );
     assertMaker(projection, maker);

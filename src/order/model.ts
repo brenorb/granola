@@ -125,6 +125,7 @@ export interface ExactMarket {
 }
 
 export interface OrderRecord {
+  inboxRelays?: string[];
   address: string;
   eventId: string;
   makerPubkey: string;

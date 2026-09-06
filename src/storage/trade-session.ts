@@ -302,7 +302,10 @@ function validateChoreography(value: unknown): void {
       "baseTokenCommitment",
       "baseValidationCommitment",
       "quoteTokenCommitment",
-      "quoteValidationCommitment"
+      "quoteValidationCommitment",
+      "makerOrderRelays",
+      "takerResponseRelays",
+      "makerResponseRelays"
     ],
     "Trade choreography"
   );
@@ -313,6 +316,9 @@ function validateChoreography(value: unknown): void {
     choreography.refundedLegs.some((leg) => leg !== "base" && leg !== "quote") ||
     new Set(choreography.refundedLegs).size !== choreography.refundedLegs.length
   ) throw new Error("Trade choreography is invalid");
+  for (const field of ["makerOrderRelays", "takerResponseRelays", "makerResponseRelays"]) {
+    if (choreography[field] !== undefined) validateRelayList(choreography[field], "Response relays", false);
+  }
   const participants = object(choreography.participants, "Trade participants");
   exactAllowedKeys(
     participants,
@@ -470,7 +476,7 @@ function validateOutbox(value: unknown): asserts value is TradeOutboxJournal {
   validateEvent(outbox.rumor, 14, "Trade rumor", false);
   validateEvent(outbox.seal, 13, "Trade seal");
   validateEvent(outbox.wrapper, 1059, "Trade wrapper");
-  if (typeof outbox.recipientInboxListId !== "string" || !HEX_32.test(outbox.recipientInboxListId)) {
+  if (outbox.recipientInboxListId !== null && (typeof outbox.recipientInboxListId !== "string" || !HEX_32.test(outbox.recipientInboxListId))) {
     throw new Error("Recipient inbox list ID is invalid");
   }
   const relays = validateRelayList(outbox.recipientRelays, "Recipient relays", false);
@@ -1714,6 +1720,13 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
     next.phase !== "frozen"
   ) throw new Error("Trade session phase skipped a happy-path checkpoint");
 
+  for (const field of ["makerOrderRelays", "takerResponseRelays", "makerResponseRelays"] as const) {
+    const previous = current.privateState.transcript.choreography[field];
+    if (previous !== undefined && canonicalJson(previous) !== canonicalJson(next.privateState.transcript.choreography[field])) {
+      throw new Error("Authenticated session response route changed");
+    }
+  }
+
   const previousInbox = current.privateState.inbox.status;
   const nextInbox = next.privateState.inbox.status;
   const inboxAdvance = INBOX_STATUS_RANK[nextInbox] - INBOX_STATUS_RANK[previousInbox];
@@ -1747,14 +1760,16 @@ function assertMonotonicUpdate(current: TradeSession, next: TradeSession): void 
   const currentOutbox = current.privateState.outbox;
   const nextOutbox = next.privateState.outbox;
   if (currentOutbox && nextOutbox) {
+    const discoveredFallback = currentOutbox.recipientInboxListId === null &&
+      nextOutbox.recipientInboxListId !== null && currentOutbox.status === "staged" &&
+      nextOutbox.status === "staged" && !currentOutbox.receipts.some(receipt => receipt.ok);
     if (
       canonicalJson(currentOutbox.message) !== canonicalJson(nextOutbox.message) ||
       canonicalJson(currentOutbox.rumor) !== canonicalJson(nextOutbox.rumor) ||
       canonicalJson(currentOutbox.seal) !== canonicalJson(nextOutbox.seal) ||
       canonicalJson(currentOutbox.wrapper) !== canonicalJson(nextOutbox.wrapper) ||
-      currentOutbox.recipientInboxListId !== nextOutbox.recipientInboxListId ||
-      canonicalJson(currentOutbox.recipientRelays) !==
-        canonicalJson(nextOutbox.recipientRelays) ||
+      (!discoveredFallback && (currentOutbox.recipientInboxListId !== nextOutbox.recipientInboxListId ||
+        canonicalJson(currentOutbox.recipientRelays) !== canonicalJson(nextOutbox.recipientRelays))) ||
       canonicalJson(currentOutbox.nextChoreography) !==
         canonicalJson(nextOutbox.nextChoreography) ||
       OUTBOX_STATUS_RANK[nextOutbox.status] < OUTBOX_STATUS_RANK[currentOutbox.status] ||

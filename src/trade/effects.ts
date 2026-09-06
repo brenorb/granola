@@ -981,7 +981,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       ? await prefetched.result
       : null;
     if (discovered) {
-      try { validateInboxList(discovered.event, recipient, now); }
+      try { if (discovered.event) validateInboxList(discovered.event, recipient, now); }
       catch { discovered = null; }
     }
     discovered ??= await this.discoverOutgoingInbox(session, type);
@@ -1090,7 +1090,13 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     type: AtomicSwapMessageType
   ): Promise<DiscoveredTradeInbox> {
     const key = bytes(session.privateState.nostrPrivateKey, "Trade Nostr private key");
-    try { return await this.nostr.discoverInbox(this.outgoingRecipient(session, type), key); }
+    try {
+      const choreography = session.privateState.transcript.choreography;
+      const responseRelays = session.role === "maker"
+        ? choreography.takerResponseRelays
+        : type === "reserve_propose" ? choreography.makerOrderRelays : choreography.makerResponseRelays;
+      return await this.nostr.discoverInbox(this.outgoingRecipient(session, type), key, responseRelays);
+    }
     finally { key.fill(0); }
   }
 
@@ -1133,6 +1139,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
       case "reserve_propose":
         return {
           schema,
+          response_relays: [...session.privateState.inbox.inboxRelays],
           taker_session_pubkey: localNostrPubkey(session),
           taker_cashu_pubkey: localCashuPubkey(session, "cashu"),
           taker_refund_pubkey: localCashuPubkey(session, "refund"),
@@ -1148,6 +1155,7 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
         }
         return {
           schema,
+          response_relays: [...session.privateState.inbox.inboxRelays],
           taker_session_pubkey: participant(session, "takerSessionPubkey"),
           maker_session_pubkey: localNostrPubkey(session),
           maker_cashu_pubkey: localCashuPubkey(session, "cashu"),
@@ -1259,11 +1267,26 @@ export class GranolaCoordinatorEffects implements CoordinatorEffectPort {
     const keyHex = outbox.message.type === "reserve_accept"
       ? null
       : session.privateState.nostrPrivateKey;
-    const send = async (key: Uint8Array) =>
-      this.nostr.send(outbox.wrapper, outbox.recipientRelays, key);
-    const receipts = keyHex === null
+    const send = async (key: Uint8Array) => {
+      try {
+        return { receipts: await this.nostr.send(outbox.wrapper, outbox.recipientRelays, key), fallback: null };
+      } catch (error) {
+        if (outbox.recipientInboxListId !== null) throw error;
+        const fallback = await this.nostr.discoverInbox(outbox.message.recipient_pubkey, key);
+        if (!fallback.event || !fallback.eventId) throw error;
+        return { receipts: null, fallback };
+      }
+    };
+    const result = keyHex === null
       ? await this.makerIdentity.useOrderSecretKey(orderId(session), send)
       : await this.withSessionKey(session, send);
+    if (result.fallback) {
+      const next = bump(session, now);
+      next.privateState.outbox!.recipientInboxListId = result.fallback.eventId;
+      next.privateState.outbox!.recipientRelays = [...result.fallback.relays];
+      return next; // Persist the new route before retrying the same encrypted wrapper.
+    }
+    const receipts = result.receipts!;
     const acknowledged = structuredClone(session);
     acknowledged.privateState.outbox = {
       ...structuredClone(outbox),

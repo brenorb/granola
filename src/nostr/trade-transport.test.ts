@@ -108,6 +108,21 @@ function finalizeGift(recipient: string): NostrEvent {
 }
 
 describe("Nostr trade transport", () => {
+  it("uses a directly authenticated response route without discovery and falls back for unsupported routes", async () => {
+    const port = new MemoryInboxPort();
+    const transport = new NostrTradeTransport(port, discovery, inboxes, () => now, probeEvidence());
+    const recipient = getPublicKey(key(1));
+    expect(await transport.discoverInbox(recipient, key(2), inboxes)).toEqual({
+      event: null, eventId: null, relays: inboxes
+    });
+    expect(port.queries).toHaveLength(0);
+    const list = transport.createRegistration(key(1));
+    await transport.publishRegistration(list, key(1));
+    port.queries.length = 0;
+    expect((await transport.discoverInbox(recipient, key(2), ["wss://unprobed.example"])).eventId).toBe(list.id);
+    expect(port.queries).toHaveLength(discovery.length);
+  });
+
   it("requires fresh recipient-only probe evidence before advertising or using inboxes", () => {
     const port = new MemoryInboxPort();
     const missing = new NostrTradeTransport(port, discovery, inboxes, () => now);

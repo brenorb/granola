@@ -22,6 +22,23 @@ This decision was checked against the Nostr specifications at commit
 are drafts, so Granola pins a versioned profile rather than treating their current
 text as immutable.
 
+## Amendment: directly communicated routes (2026-09-06)
+
+Proposal and acceptance bodies may include `response_relays`: one to three sorted,
+unique, canonical WSS URLs, covered by the encrypted message, sender authentication,
+session binding and transcript. The proposal binds the taker's receiving session
+key; the acceptance binds the maker's fresh receiving session key. These routes are
+persisted with the choreography and take precedence over separate kind 10050
+queries. An unsupported route falls back to validated signed-list discovery.
+A valid signed public order may include `inbox` tags for its order-key receiving
+route; malformed optional hints are ignored. Direct routes retain the same fresh
+recipient-only probe and send-time relay capability requirements.
+
+The per-reservation maker settlement key is retained. One order can receive multiple
+attempts/reservations; reusing its key would couple their retained ciphertext and
+key-erasure horizons. Removing discovery does not require merging identities.
+Existing messages without route fields continue to use signed-list discovery.
+
 ## Decision
 
 Use a strict Granola profile of [NIP-17]:
@@ -31,8 +48,8 @@ Use a strict Granola profile of [NIP-17]:
 - a sender-signed kind `13` NIP-59 seal;
 - a fresh random wrapper key for every recipient copy;
 - persistent kind `1059` gift wraps for offline delivery; and
-- recipient inbox relays discovered only through the recipient's signed kind
-  `10050` event.
+- recipient inbox relays communicated directly as above, with the recipient's
+  signed kind `10050` event as the discovery fallback.
 
 Do not offer a NIP-04 fallback. An unavailable NIP-17 inbox fails closed instead
 of silently downgrading privacy.
@@ -272,7 +289,8 @@ outer expiries remain live.
 
 ## Delivery and reservation semantics
 
-- Publish only to relays in the recipient's current kind `10050` list.
+- Publish only to a validated recipient route: directly authenticated for this
+  session/order, or selected from its current signed kind `10050` list.
 - Before network publication, persist the exact signed and encrypted kind `1059`
   wrapper plus its message, rumor, and seal IDs, expiry, target relays, and relay
   receipts. The session repository, not the delivery outbox, retains the

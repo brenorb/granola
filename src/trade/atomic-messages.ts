@@ -1,3 +1,4 @@
+import { normalizeInboxListRelays } from "../nostr/inbox.js";
 import {
   canonicalJson,
   termsHash,
@@ -284,12 +285,22 @@ async function sha256Text(value: string): Promise<string> {
     .join("");
 }
 
+function responseRelays(value: unknown): string[] | undefined {
+  const relays = (value as Record<string, unknown>)?.response_relays;
+  if (relays === undefined) return undefined;
+  if (!Array.isArray(relays) || relays.some(r => typeof r !== "string")) throw new Error("Response relays are invalid");
+  const normalized = normalizeInboxListRelays(relays as string[]);
+  if (canonicalJson(relays) !== canonicalJson(normalized)) throw new Error("Response relays must be canonical");
+  return normalized;
+}
+
 function reservePropose(value: unknown): ReserveProposeBody {
   const body = exactBody(value, [
     "taker_session_pubkey",
     "taker_cashu_pubkey",
     "taker_refund_pubkey",
-    "fill_amount"
+    "fill_amount",
+    ...(responseRelays(value) ? ["response_relays"] : [])
   ]);
   hex32(body.taker_session_pubkey, "Taker session public key");
   cashuPubkey(body.taker_cashu_pubkey, "Taker Cashu public key");
@@ -315,7 +326,8 @@ function reserveAccept(value: unknown): ReserveAcceptBody {
     "long_locktime",
     "taker_claim_cutoff",
     "reservation_expires_at",
-    "base_lock"
+    "base_lock",
+    ...(responseRelays(value) ? ["response_relays"] : [])
   ]);
   hex32(body.taker_session_pubkey, "Taker session public key");
   hex32(body.maker_session_pubkey, "Maker session public key");
@@ -597,6 +609,9 @@ export interface AtomicSwapChoreography {
   baseValidationCommitment?: string;
   quoteTokenCommitment?: string;
   quoteValidationCommitment?: string;
+  makerOrderRelays?: string[];
+  takerResponseRelays?: string[];
+  makerResponseRelays?: string[];
   refundedLegs: RefundLeg[];
 }
 
@@ -814,6 +829,7 @@ export async function advanceAtomicSwapChoreography(
     }
     return nextState(state, message, {
       phase: "awaiting_reserve_accept",
+      ...(responseRelays(body) ? { takerResponseRelays: responseRelays(body)! } : {}),
       sessionId: message.session_id,
       reservationId: message.reservation_id,
       orderAddress: message.order_address,
@@ -886,6 +902,7 @@ export async function advanceAtomicSwapChoreography(
     }
     return nextState(state, message, {
       phase: "awaiting_quote_lock",
+      ...(responseRelays(body) ? { makerResponseRelays: responseRelays(body)! } : {}),
       orderProjectionId: body.reserve_projection_id,
       orderRevision: body.reserve_revision,
       settlementHash: body.settlement_hash,

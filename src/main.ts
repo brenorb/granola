@@ -12,7 +12,7 @@ import { coalesceRefresh } from "./browser/refresh.js";
 import { watchOrderBook } from "./order/book-feed.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
-import { createBrowserTradeRuntime } from "./browser/trade-runtime.js";
+import { createBrowserTradeRuntime, TRADE_INBOX_RELAY } from "./browser/trade-runtime.js";
 import { CashuClient } from "./cashu/client.js";
 import {
   fiatPerBtcPrice,
@@ -87,7 +87,7 @@ const cashu = new CashuClient();
 const api = new GranolaApi(walletRepository, new QuoteRepository(driver), cashu);
 const makerIdentity = new MakerIdentity(driver, locked);
 const relayClient = new RelayClient();
-const orderService = new NostrOrderService(makerIdentity, relayClient);
+const orderService = new NostrOrderService(makerIdentity, relayClient, undefined, [TRADE_INBOX_RELAY]);
 const orderOutbox = new OrderOutboxRepository(driver, outboxLocked);
 const orderApi = new OrderApi(
   makerIdentity,

@@ -21,8 +21,8 @@ import {
 } from "./inbox.js";
 
 export interface DiscoveredTradeInbox {
-  event: NostrEvent;
-  eventId: string;
+  event: NostrEvent | null;
+  eventId: string | null;
   relays: string[];
 }
 
@@ -141,11 +141,17 @@ export class NostrTradeTransport {
 
   async discoverInbox(
     authorPubkey: string,
-    requesterSecretKey: Uint8Array
+    requesterSecretKey: Uint8Array,
+    responseRelays?: readonly string[]
   ): Promise<DiscoveredTradeInbox> {
     const keySnapshot = Uint8Array.from(requesterSecretKey);
     try {
       const now = this.now();
+      if (responseRelays) {
+        try {
+          return { event: null, eventId: null, relays: this.assertFreshProbeEvidence(responseRelays, now) };
+        } catch { /* Unsupported direct routes use signed inbox discovery. */ }
+      }
       const observations = await Promise.all(this.discoveryRelays.map(async (relay) => {
         try {
           const events = await this.port.query(relay, {

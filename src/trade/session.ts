@@ -86,7 +86,7 @@ export interface TradeOutboxJournal {
   rumor: UnsignedRumor;
   seal: SignedNostrEvent;
   wrapper: SignedNostrEvent;
-  recipientInboxListId: string;
+  recipientInboxListId: string | null;
   recipientRelays: string[];
   receipts: RelayReceipt[];
   nextChoreography: AtomicSwapChoreography;

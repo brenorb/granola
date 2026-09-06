@@ -375,7 +375,10 @@ export async function createTakerSession(
     plan: plan(input.order, input.clocks),
     keys,
     transcript: {
-      choreography: initialAtomicSwapChoreography(input.order.makerPubkey),
+      choreography: {
+        ...initialAtomicSwapChoreography(input.order.makerPubkey),
+        ...(input.order.inboxRelays ? { makerOrderRelays: [...input.order.inboxRelays] } : {})
+      },
       nextSequence: "0",
       lastRumorId: null,
       lastMessageId: null,

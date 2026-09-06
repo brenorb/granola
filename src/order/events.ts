@@ -1,3 +1,4 @@
+import { normalizeInboxListRelays } from "../nostr/inbox.js";
 import {
   createOrderState,
   eligibleMarketIds,
@@ -193,7 +194,8 @@ function parseCanonicalState(value: unknown): OrderState {
 export async function createProjectionTemplate(
   state: OrderState,
   makerPubkey: string,
-  createdAt: number = state.created_at
+  createdAt: number = state.created_at,
+  inboxRelays: readonly string[] = []
 ): Promise<UnsignedNostrEvent> {
   requireHex(makerPubkey, HEX_32, "Maker public key");
   if (
@@ -213,6 +215,7 @@ export async function createProjectionTemplate(
       ["v", "1"],
       ["s", state.status],
       ["side", state.side],
+      ...(inboxRelays.length ? normalizeInboxListRelays(inboxRelays).map(relay => ["inbox", relay]) : []),
       ...markets.map((market) => ["m", market]),
       ["expires_at", String(state.expires_at)],
       ["expiration", String(state.expires_at)]
@@ -280,7 +283,18 @@ export async function parseProjectionEvent(
   if (JSON.stringify(actualMarkets) !== JSON.stringify(expectedMarkets)) {
     throw new Error("Projection market index mismatch");
   }
+  let inboxRelays: string[] | undefined;
+  const hints = event.tags.filter(tag => tag[0] === "inbox");
+  if (hints.length) {
+    try {
+      if (hints.some(tag => tag.length !== 2)) throw new Error("Invalid inbox hint");
+      const urls = hints.map(tag => tag[1]!);
+      const canonical = normalizeInboxListRelays(urls);
+      if (canonicalJson(urls) === canonicalJson(canonical)) inboxRelays = canonical;
+    } catch { /* An invalid optional route uses separate signed inbox discovery. */ }
+  }
   return {
+    ...(inboxRelays ? { inboxRelays } : {}),
     address: orderAddress(event.pubkey, state.order_id),
     eventId: event.id,
     makerPubkey: event.pubkey,

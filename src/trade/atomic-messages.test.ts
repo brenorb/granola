@@ -289,6 +289,19 @@ describe("atomic swap message bodies", () => {
     expect(state.quoteTokenCommitment).toBe(quoteTokenCommitment);
   });
 
+
+  it("binds canonical response routes to the authenticated session and rejects unsafe routing", async () => {
+    const routes = ["wss://inbox.example"];
+    const proposal = await message("reserve_propose", 0, {}, { response_relays: routes });
+    const state = await advanceAtomicSwapChoreography(initialAtomicSwapChoreography(makerOrder), proposal);
+    expect(state.takerResponseRelays).toEqual(routes);
+    for (const response_relays of [[], ["http://inbox.example"], ["wss://user:password@inbox.example"],
+      ["wss://inbox.example?q=x"], ["wss://inbox.example", "wss://inbox.example"],
+      ["wss://a.example", "wss://b.example", "wss://c.example", "wss://d.example"]]) {
+      await expect(validateAtomicSwapMessage(await message("reserve_propose", 0, {}, { response_relays }))).rejects.toThrow();
+    }
+  });
+
   it.each([
     "reserve_propose",
     "reserve_accept",

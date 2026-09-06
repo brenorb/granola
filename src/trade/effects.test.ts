@@ -650,6 +650,18 @@ describe("GranolaCoordinatorEffects", () => {
     }
   });
 
+  it("checkpoints discovered fallback before retrying an unchanged direct-route wrapper", async () => {
+    const { effects, nostr } = harness();
+    const current = stagedDeliverySession();
+    current.privateState.outbox!.recipientInboxListId = null;
+    nostr.send.mockRejectedValueOnce(new Error("disconnected"));
+    nostr.discoverInbox.mockResolvedValue({ event: { id: "ab".repeat(32) }, eventId: "ab".repeat(32), relays: ["wss://fallback.example"] });
+    const next = await effects.performExternal(externalInput({ kind: "deliver_outbox" }, current));
+    expect(next.privateState.outbox).toMatchObject({ status: "staged", recipientInboxListId: "ab".repeat(32), recipientRelays: ["wss://fallback.example"] });
+    expect(next.privateState.outbox!.wrapper).toEqual(current.privateState.outbox!.wrapper);
+    expect(nostr.send).toHaveBeenCalledTimes(1);
+  });
+
   it("retries the exact persisted Nostr wrapper and commits its transcript", async () => {
     const { effects, nostr } = harness();
     const current = stagedDeliverySession();
