@@ -20,6 +20,7 @@ import {
   createHtlcMaterial,
   extractSpentPreimage,
   observeHtlc,
+  observeHtlcStates,
   prepareHtlcClaim,
   prepareHtlcLock,
   prepareHtlcRefund,
@@ -383,6 +384,28 @@ describe("strict HTLC lock validation", () => {
 });
 
 describe("claim observation and refund", () => {
+  it.each([CheckStateEnum.UNSPENT, CheckStateEnum.PENDING, CheckStateEnum.SPENT])(
+    "keeps a %s/PENDING batch in flight without releasing a witness", (other) => {
+      const material = createHtlcMaterial();
+      const proofs = [proof(material.hash, 1, 1), proof(material.hash, 1, 2)];
+      const states = [state(proofs[0]!, other), state(proofs[1]!, CheckStateEnum.PENDING)];
+      expect(observeHtlcStates(proofs, states, material.hash))
+        .toEqual({ status: "PENDING", proofCount: 2 });
+      expect(() => extractSpentPreimage(proofs, states, material.hash)).toThrow(/proof-not-spent|spent-witness/);
+      states[0]!.Y = "00";
+      expect(() => observeHtlcStates(proofs, states, material.hash)).toThrow(/proof-state-point/);
+    }
+  );
+
+  it("still rejects mixed settled/unspent proofs and spent proofs without witnesses", () => {
+    const material = createHtlcMaterial();
+    const proofs = [proof(material.hash, 1, 1), proof(material.hash, 1, 2)];
+    const states = [state(proofs[0]!, CheckStateEnum.UNSPENT), state(proofs[1]!, CheckStateEnum.SPENT)];
+    expect(() => observeHtlcStates(proofs, states, material.hash)).toThrow(/proof-not-spent/);
+    states[0]!.state = CheckStateEnum.SPENT;
+    expect(() => observeHtlcStates(proofs, states, material.hash)).toThrow(/spent-witness/);
+  });
+
   it("attaches a verified preimage, preserves it while signing, and obeys the claim cutoff", async () => {
     const material = createHtlcMaterial();
     const locked = [proof(material.hash, 2, 4)];

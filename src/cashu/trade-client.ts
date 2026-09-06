@@ -22,7 +22,7 @@ import {
   completeHtlcLock,
   completeHtlcRefund,
   deserializeSwapPreview,
-  extractSpentPreimage,
+  observeHtlcStates,
   prepareHtlcClaim,
   prepareHtlcLock,
   prepareHtlcRefund,
@@ -426,7 +426,7 @@ export class CashuTradeClient {
     expected: ExpectedHtlcLock,
     expectedCommitment: string
   ): Promise<
-    | { status: "UNSPENT"; proofCount: number }
+    | { status: "UNSPENT" | "PENDING"; proofCount: number }
     | { status: "SPENT"; proofCount: number; preimage: string }
   > {
     assertTrade(
@@ -436,14 +436,7 @@ export class CashuTradeClient {
     const opened = await this.openToken(token);
     const live = await this.dependencies.snapshot(opened.wallet, opened.proofs);
     this.validateStaticLock(opened, live, expected);
-    if (live.states.every((state) => state.state === CheckStateEnum.UNSPENT)) {
-      return { status: "UNSPENT", proofCount: opened.proofs.length };
-    }
-    return {
-      status: "SPENT",
-      proofCount: opened.proofs.length,
-      preimage: extractSpentPreimage(opened.proofs, live.states, expected.hash)
-    };
+    return observeHtlcStates(opened.proofs, live.states, expected.hash);
   }
 
   private async preparedSpend(

@@ -224,6 +224,7 @@ interface FakeLock {
 }
 
 class MemoryCashuMint {
+  pendingObservations = 0;
   private readonly locks = new Map<string, FakeLock>();
   private readonly claims = new Map<
     string,
@@ -344,6 +345,10 @@ class MemoryCashuMint {
     if (await sha256(token) !== expectedCommitment) {
       throw new Error("Token commitment differs");
     }
+    if (lock.spent && this.pendingObservations > 0) {
+      this.pendingObservations -= 1;
+      return { status: "PENDING" as const, proofCount: 1 };
+    }
     return lock.spent
       ? { status: "SPENT" as const, proofCount: 1, preimage: lock.preimage! }
       : { status: "UNSPENT" as const, proofCount: 1 };
@@ -439,7 +444,8 @@ function effectEntropy(seed: number) {
 describe("two-party coordinator happy path", () => {
   async function settleHappyPath(
     selectedMarket: ExactMarket,
-    side: "buy" | "sell" = "sell"
+    side: "buy" | "sell" = "sell",
+    pendingObservations = 0
   ): Promise<void> {
     const makerOrderKey = secret(1);
     const makerPubkey = getPublicKey(makerOrderKey);
@@ -478,6 +484,7 @@ describe("two-party coordinator happy path", () => {
       makerOrderKey
     );
     const cashu = new MemoryCashuMint();
+    cashu.pendingObservations = pendingObservations;
     const makerDriver = new MemoryStorageDriver();
     const takerDriver = new MemoryStorageDriver();
     const makerSessions = new TradeSessionRepository(makerDriver);
@@ -671,7 +678,7 @@ describe("two-party coordinator happy path", () => {
     if (steps >= 200) {
       throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
     }
-    expect(actionTrace).toHaveLength(40);
+    expect(actionTrace).toHaveLength(40 + pendingObservations);
     expect(transport.calls.registrations).toBe(3);
     expect(actionTrace.slice(0, 6)).toEqual([
       "taker:stage_inbox_registration",
@@ -800,6 +807,10 @@ describe("two-party coordinator happy path", () => {
 
   it("settles a buy-side order with the market legs reversed", async () => {
     await settleHappyPath(TEST_MARKET, "buy");
+  }, 60_000);
+
+  it.each(["buy", "sell"] as const)("settles %s after pending mint observations without manual recovery", async (side) => {
+    await settleHappyPath(TEST_MARKET, side, 3);
   }, 60_000);
 
   it("settles a one-mint market one action at a time", async () => {

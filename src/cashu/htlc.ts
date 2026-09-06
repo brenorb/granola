@@ -511,13 +511,25 @@ export async function observeHtlc(
   wallet: Wallet,
   proofs: Proof[],
   expectedHash: string
-): Promise<
-  | { status: "UNSPENT"; proofCount: number }
-  | { status: "SPENT"; proofCount: number; preimage: string }
-> {
+): Promise<HtlcObservation> {
+  return observeHtlcStates(proofs, await wallet.checkProofsStates(proofs), expectedHash);
+}
+
+export type HtlcObservation =
+  | { status: "UNSPENT" | "PENDING"; proofCount: number }
+  | { status: "SPENT"; proofCount: number; preimage: string };
+
+export function observeHtlcStates(
+  proofs: Proof[], states: ProofState[], expectedHash: string
+): HtlcObservation {
   assertInvariant(proofs.length > 0, "proofs-empty");
-  const states = await wallet.checkProofsStates(proofs);
   assertStateMapping(proofs, states);
+  assertInvariant(states.every(({ state }) =>
+    state === CheckStateEnum.UNSPENT || state === CheckStateEnum.PENDING || state === CheckStateEnum.SPENT
+  ), "proof-state-value");
+  if (states.some((item) => item.state === CheckStateEnum.PENDING)) {
+    return { status: "PENDING", proofCount: proofs.length };
+  }
   if (states.every((item) => item.state === CheckStateEnum.UNSPENT)) {
     return { status: "UNSPENT", proofCount: proofs.length };
   }
