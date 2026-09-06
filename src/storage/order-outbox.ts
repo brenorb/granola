@@ -310,7 +310,13 @@ export class OrderOutboxRepository implements OrderOutboxPort {
       const existing = entries.find((entry) => entry.intent.orderId === intent.orderId);
       if (existing) {
         if (same(existing.intent, intent)) return structuredClone(existing);
-        if (existing.status !== "committed") throw new OrderOutboxConflictError();
+        const supersedesReserve = existing.intent.operation === "reserve" &&
+          (intent.operation === "fill" || intent.operation === "release") &&
+          intent.expectedProjectionId === existing.publication.projection.id &&
+          intent.expectedRevision === existing.publication.state.revision &&
+          BigInt(intent.state.revision) === BigInt(existing.publication.state.revision) + 1n &&
+          intent.createdAt > existing.publication.projection.created_at;
+        if (existing.status !== "committed" && !supersedesReserve) throw new OrderOutboxConflictError();
       }
       const entry: OrderOutboxEntry = {
         schema: "granola/order-outbox/v3",
@@ -337,7 +343,12 @@ export class OrderOutboxRepository implements OrderOutboxPort {
           "Order projection disappeared before progress was saved"
         );
       }
-      const merged = mergeExact(entries[index]!, entry);
+      const current = entries[index]!;
+      if (current.publication.projection.id !== entry.publication.projection.id &&
+        BigInt(current.publication.state.revision) > BigInt(entry.publication.state.revision)) {
+        return structuredClone(current); // A delayed ACK cannot replace the newer durable head.
+      }
+      const merged = mergeExact(current, entry);
       entries[index] = merged;
       await this.write(entries);
       return structuredClone(merged);

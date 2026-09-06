@@ -227,7 +227,10 @@ export class OrderApi {
       existing.intent.expectedRevision !== binding.expectedRevision ||
       existing.intent.compatibility !== compatibility
     ) {
-      if (existing.status === "committed") return undefined;
+      if (existing.status === "committed" ||
+        (existing.intent.operation === "reserve" && ["fill", "release"].includes(operation) &&
+          existing.publication.projection.id === binding.expectedProjectionId &&
+          existing.publication.state.revision === binding.expectedRevision)) return undefined;
       throw new Error("Order projection intent conflicts with the durable outbox");
     }
     return existing;
@@ -236,10 +239,11 @@ export class OrderApi {
   private async loadMakerProjection(
     binding: CurrentProjectionBinding
   ): Promise<{ projection: NostrEvent; state: OrderState }> {
-    const projection = await this.orders.loadCurrentProjection(
-      binding.address,
-      binding.expectedProjectionId,
-      binding.expectedRevision
+    const local = (await this.outbox.list()).find(entry => entry.intent.address === binding.address);
+    if (local && (local.publication.projection.id !== binding.expectedProjectionId ||
+      local.publication.state.revision !== binding.expectedRevision)) throw new Error("Order projection revision is stale");
+    const projection = local?.publication.projection ?? await this.orders.loadCurrentProjection(
+      binding.address, binding.expectedProjectionId, binding.expectedRevision
     );
     const record = await parseProjectionEvent(projection, this.verify);
     if (record.address !== binding.address) {
@@ -255,7 +259,7 @@ export class OrderApi {
       throw new Error("Order projection revision is stale");
     }
     const pending = await this.outbox.load(record.state.order_id);
-    if (pending && pending.status !== "committed") {
+    if (pending && pending.status !== "committed" && pending.intent.operation !== "reserve") {
       throw new Error("Order has a pending projection; retry it first");
     }
     return { projection, state: record.state };
@@ -266,27 +270,13 @@ export class OrderApi {
     if (!initial || initial.status === "committed") {
       throw new Error("No pending projection exists for this order ID");
     }
-    return this.serializeSuccessor(initial.intent.address, async () => {
-      const current = await this.outbox.load(orderId);
-      if (!current || current.status === "committed") {
-        throw new Error("No pending projection exists for this order ID");
-      }
-      if (
-        current.publication.projection.id !==
-        initial.publication.projection.id
-      ) {
-        throw new Error("Pending projection changed while waiting to publish");
-      }
-      const advanced = await this.orders.publishNextStage(current);
-      const saved = await this.outbox.recordProgress(advanced);
-      if (
-        saved.status === "acknowledged" &&
-        ["filled", "canceled", "expired"].includes(saved.publication.state.status)
-      ) {
-        await this.identity.destroy?.(orderId);
-      }
-      return publicProgress(saved);
-    });
+    // Network I/O must not hold the successor queue while mint settlement advances.
+    const advanced = await this.orders.publishNextStage(initial);
+    const saved = await this.outbox.recordProgress(advanced);
+    if (saved.status === "acknowledged" && ["filled", "canceled", "expired"].includes(saved.publication.state.status)) {
+      await this.identity.destroy?.(orderId);
+    }
+    return publicProgress(saved);
   }
 
   async loadAcknowledgedOrderPublication(

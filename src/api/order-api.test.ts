@@ -145,6 +145,34 @@ describe("OrderApi projections", () => {
     ]);
   });
 
+  it("persists a fill while reserve publication is blocked and ignores its delayed ACK after restart", async () => {
+    const { api, relay, outbox, driver } = harness();
+    const created = await api.publishOrder(createInput);
+    relay.orderEvents = [relay.published[0]!];
+    const address = `30078:${MAKER}:granola:order:v1:${ORDER_ID}`;
+    const reserve = await api.ensureReserveStaged({ address, expectedProjectionId: created.projectionId,
+      expectedRevision: "0", reservationId: RESERVATION_ID, amount: "100", expiresAt: 1_700_000_600,
+      proposalEventId: "c".repeat(64), takerCommitment: "d".repeat(64) });
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const publish = relay.publish.bind(relay);
+    relay.publish = async event => { entered(); await gate; return publish(event); };
+    const pending = api.publishNextStage(ORDER_ID);
+    await started;
+    const fill = await api.ensureFillStaged({ address, expectedProjectionId: reserve.projectionId,
+      expectedRevision: reserve.revision, reservationId: RESERVATION_ID, amount: "100",
+      evidence: { settlement_hash: "e".repeat(64), base_token_commitment: "f".repeat(64), quote_token_commitment: "a".repeat(64) } });
+    const restarted = new OrderOutboxRepository(driver, undefined, () => true);
+    expect((await restarted.load(ORDER_ID))?.publication.projection.id).toBe(fill.projectionId);
+    release();
+    await pending;
+    expect((await outbox.load(ORDER_ID))?.status).toBe("staged");
+    expect((await outbox.load(ORDER_ID))?.publication.projection.id).toBe(fill.projectionId);
+    expect((await api.publishNextStage(ORDER_ID)).projectionId).toBe(fill.projectionId);
+  });
+
   it("reserves by replacing the exact projection and advancing revision", async () => {
     const { api, relay, outbox } = harness();
     const created = await api.publishOrder(createInput);

@@ -247,15 +247,12 @@ export class NostrOrderService {
   ): Promise<void> {
     const current = await this.currentProjection(projection.address);
     if (current?.event.id === entry.publication.projection.id) return;
-    if (entry.intent.expectedProjectionId === null) {
-      if (current) throw new Error("Order address is already published");
-      return;
-    }
-    if (
-      !current ||
-      current.event.id !== entry.intent.expectedProjectionId ||
-      current.record.state.revision !== entry.intent.expectedRevision
-    ) {
+    // A projection is a complete snapshot. A durable successor may overtake an
+    // unpublished reserve, but cannot overwrite a newer/equivocating public head.
+    if (current && ((current.record.state.revision === entry.intent.expectedRevision &&
+      current.event.id !== entry.intent.expectedProjectionId) ||
+      BigInt(current.record.state.revision) >= BigInt(projection.state.revision) ||
+      current.event.created_at >= entry.publication.projection.created_at)) {
       throw new Error("Staged order projection is stale");
     }
   }
