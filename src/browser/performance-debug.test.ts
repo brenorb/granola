@@ -15,6 +15,21 @@ function clock() {
 }
 
 describe("performance debug timeline", () => {
+  it("identifies metadata requests without exposing keyset IDs or query strings", () => {
+    const timeline = createPerformanceDebugTimeline(document, clock(), false);
+    for (const path of ["info", "keysets", "keys/private-keyset?secret=value"]) {
+      timeline.recordResource({ name: `https://mint.example/v1/${path}`,
+        entryType: "resource", initiatorType: "fetch", startTime: 0, duration: 1,
+        requestStart: 0, responseStart: 1, responseEnd: 1 } as PerformanceResourceTiming);
+    }
+    const output = document.querySelector("#granola-performance")!.textContent!;
+    expect(JSON.parse(output).entries.map((entry: { detail: { operation: string } }) => entry.detail.operation))
+      .toEqual(["cashu_info", "cashu_keysets", "cashu_keys"]);
+    expect(output).not.toContain("private-keyset");
+    expect(output).not.toContain("secret=value");
+    document.querySelector("#granola-performance")!.remove();
+  });
+
   it("exposes secret-free browser evidence without rendering UI", () => {
     const timeline = createPerformanceDebugTimeline(document, clock(), false);
     timeline.mark("granola:take-order-click");

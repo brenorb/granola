@@ -19,6 +19,9 @@ interface DebugPayload {
 type DebugPerformance = Pick<Performance, "timeOrigin" | "mark" | "measure">;
 
 function resourceOperation(pathname: string): string {
+  if (pathname === "/v1/info") return "cashu_info";
+  if (pathname === "/v1/keysets") return "cashu_keysets";
+  if (/^\/v1\/keys(?:\/|$)/.test(pathname)) return "cashu_keys";
   if (/\/v1\/(mint|melt)\/quote\//.test(pathname)) return "cashu_quote";
   if (/\/v1\/mint\//.test(pathname)) return "cashu_mint";
   if (/\/v1\/melt\//.test(pathname)) return "cashu_melt";

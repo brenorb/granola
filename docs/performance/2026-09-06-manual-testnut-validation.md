@@ -1,5 +1,10 @@
 # Manual Testnut validation — 2026-09-06
 
+Follow-up: the confirmed pending-state classification bug was fixed in `122083a`.
+See the [investigation and evidence limits](2026-09-06-pending-state-fix.md) and
+[production profiling results](2026-09-06-production-profile.md). The observations
+below describe the earlier revision.
+
 Tested the pushed `b043b6259775e46e15faa92d171ea0c51d70eb0f` source in a clean
 checkout served locally on port 5180. Compared its tracked source, index and
 package manifest against HEAD: no differences. Browser actions used the real
