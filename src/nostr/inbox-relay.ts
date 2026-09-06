@@ -1,5 +1,6 @@
 import { Relay, type EventTemplate } from "nostr-tools";
 
+import { normalizePublicRelay } from "./relay.js";
 import type { NostrEvent } from "../order/events.js";
 import type {
   AuthHandler,
@@ -9,6 +10,7 @@ import type {
 } from "./inbox.js";
 
 export interface InboxRelayConnection {
+  readonly connected?: boolean;
   onauth: ((template: EventTemplate) => Promise<NostrEvent>) | undefined;
   auth(signer: (template: EventTemplate) => Promise<NostrEvent>): Promise<string>;
   publish(event: NostrEvent): Promise<string>;
@@ -62,6 +64,12 @@ const defaultFactory: InboxRelayFactory = async (relay) =>
 
 export class NostrToolsInboxRelayPort implements InboxRelayPort {
   private readonly infoCache = new Map<string, InboxRelayCapabilities>();
+  private readonly warmConnectionsByRelay = new Map<string, Array<{
+    result: Promise<InboxRelayConnection | null>;
+    connection?: InboxRelayConnection | null;
+  }>>();
+  private warmTimer: ReturnType<typeof setInterval> | undefined;
+  private disposed = false;
 
   constructor(
     private readonly connect: InboxRelayFactory = defaultFactory,
@@ -71,6 +79,76 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
   ) {
     if (!Number.isSafeInteger(queryTimeoutMs) || queryTimeoutMs < 1) {
       throw new Error("Inbox relay query timeout is invalid");
+    }
+  }
+
+  warmConnections(relays: readonly string[]): void {
+    if (this.disposed) return;
+    const urls = [...new Set(relays.map(normalizePublicRelay))].filter(url => url.startsWith("wss://"));
+    if (new Set([...this.warmConnectionsByRelay.keys(), ...urls]).size > 5) {
+      throw new Error("Relay warmup supports at most five configured relays");
+    }
+    for (const relay of urls) {
+      if (!this.warmConnectionsByRelay.has(relay)) this.warmConnectionsByRelay.set(relay, []);
+      this.replenish(relay);
+      void this.info(relay).catch(() => undefined);
+    }
+    this.warmTimer ??= setInterval(() => {
+      for (const relay of this.warmConnectionsByRelay.keys()) this.replenish(relay);
+    }, 30_000);
+  }
+
+  private replenish(relay: string): void {
+    const slots = this.warmConnectionsByRelay.get(relay);
+    if (!slots || this.disposed) return;
+    for (let i = slots.length - 1; i >= 0; i--) {
+      if (slots[i]!.connection === null || slots[i]!.connection?.connected === false) slots.splice(i, 1);
+    }
+    // ponytail: two unauthenticated spares per configured relay; never return an authenticated socket.
+    while (slots.length < 2) {
+      const slot: (typeof slots)[number] = { result: Promise.resolve(null) };
+      slot.result = Promise.resolve().then(() => this.connect(relay)).then(connection => {
+        if (this.disposed) { connection.close(); return null; }
+        slot.connection = connection;
+        return connection;
+      }, () => { slot.connection = null; return null; });
+      slots.push(slot);
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    clearInterval(this.warmTimer);
+    for (const slots of this.warmConnectionsByRelay.values()) {
+      for (const slot of slots) slot.connection?.close();
+    }
+    this.warmConnectionsByRelay.clear();
+  }
+
+  private async takeConnection(relay: string, fresh = false): Promise<{
+    connection: InboxRelayConnection;
+    warmed: boolean;
+  }> {
+    const start = performance.now();
+    let outcome = "cold";
+    try {
+      if (this.disposed) throw new Error("Inbox relay port is disposed");
+      const slot = fresh ? undefined : this.warmConnectionsByRelay.get(relay)?.shift();
+      if (slot) outcome = slot.connection && slot.connection.connected !== false ? "warm" : "warming";
+      this.replenish(relay);
+      let connection = slot ? await slot.result : null;
+      if (this.disposed) { connection?.close(); throw new Error("Inbox relay port is disposed"); }
+      if (connection?.connected === false) { connection.close(); connection = null; }
+      if (!connection) { outcome = "cold"; connection = await this.connect(relay); }
+      if (this.disposed) { connection.close(); throw new Error("Inbox relay port is disposed"); }
+      return { connection, warmed: outcome !== "cold" };
+    } catch (error) {
+      outcome = "failed";
+      throw error;
+    } finally {
+      try {
+        performance.measure("granola:relay-connect", { start, end: performance.now(), detail: { outcome } });
+      } catch { /* Diagnostics must never change settlement. */ }
     }
   }
 
@@ -101,8 +179,8 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     return structuredClone(capabilities);
   }
 
-  private async open(relay: string, auth: AuthHandler): Promise<InboxRelayConnection> {
-    const connection = await this.connect(relay);
+  private async open(relay: string, auth: AuthHandler, fresh = false): Promise<InboxRelayConnection> {
+    const { connection, warmed } = await this.takeConnection(relay, fresh);
     let challengeSeen: (() => void) | undefined;
     const challengeReady = new Promise<void>((resolve) => {
       challengeSeen = resolve;
@@ -114,10 +192,16 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
     };
     connection.onauth = signer;
     try {
-      if ((await this.info(relay)).authRequired) {
+      const authRequired = (await this.info(relay)).authRequired;
+      if (authRequired || warmed) {
         try {
           await connection.auth(signer);
-        } catch {
+        } catch (error) {
+          if (!authRequired) {
+            // nostr-tools retains challenges received before the AUTH handler is installed.
+            if (error instanceof Error && error.message === "can't perform auth, no challenge was received") return connection;
+            throw error;
+          }
           await Promise.race([
             challengeReady,
             new Promise<never>((_resolve, reject) => setTimeout(
@@ -131,6 +215,8 @@ export class NostrToolsInboxRelayPort implements InboxRelayPort {
       return connection;
     } catch (error) {
       connection.close();
+      // A warm socket may carry an expired AUTH challenge. Retry once before any publication.
+      if (warmed && !fresh) return this.open(relay, auth, true);
       throw error;
     }
   }

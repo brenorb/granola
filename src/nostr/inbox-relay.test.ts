@@ -21,6 +21,7 @@ function event(): NostrEvent {
 }
 
 class FakeConnection implements InboxRelayConnection {
+  connected = true;
   onauth: ((template: EventTemplate) => Promise<NostrEvent>) | undefined;
   published: NostrEvent[] = [];
   authPubkeys: string[] = [];
@@ -56,6 +57,121 @@ class FakeConnection implements InboxRelayConnection {
 }
 
 describe("nostr-tools inbox relay port", () => {
+  it.each([false, true])("handles a cached optional AUTH challenge (present=%s) without waiting for a new challenge", async present => {
+    const connections: FakeConnection[] = [];
+    const port = new NostrToolsInboxRelayPort(async () => {
+      const connection = new FakeConnection();
+      if (!present) connection.auth = async () => { throw new Error("can't perform auth, no challenge was received"); };
+      connections.push(connection);
+      return connection;
+    }, async () => new Response(JSON.stringify({ supported_nips: [42], limitation: {} })));
+    try {
+      port.warmConnections([relayUrl]);
+      await vi.waitFor(() => expect(connections).toHaveLength(2));
+      await expect(port.publish(relayUrl, event(), async challenge =>
+        createNip42AuthEvent(relayUrl, challenge, protocolKey, now))).resolves.toBe("stored");
+      expect(connections[0]!.authPubkeys).toEqual(present ? [protocolPubkey] : []);
+      expect(connections[0]!.published).toHaveLength(1);
+    } finally { port.dispose(); }
+  });
+
+  it("authenticates a challenge received during warmup and retries an expired challenge before publishing", async () => {
+    const stale = Object.assign(new FakeConnection(), { challenge: "old-challenge" });
+    stale.auth = async signer => {
+      await signer({ kind: 22242, created_at: now, tags: [["challenge", "old-challenge"]], content: "" });
+      throw new Error("expired challenge");
+    };
+    vi.spyOn(stale, "close");
+    const connections: FakeConnection[] = [];
+    const connect = vi.fn().mockResolvedValueOnce(stale).mockImplementation(async () => {
+      const connection = Object.assign(new FakeConnection(), { challenge: "current-challenge" });
+      connections.push(connection);
+      return connection;
+    });
+    const port = new NostrToolsInboxRelayPort(connect,
+      async () => new Response(JSON.stringify({ supported_nips: [42], limitation: { auth_required: true } })));
+    try {
+      port.warmConnections([relayUrl]);
+      await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+      await expect(port.publish(relayUrl, event(), async challenge =>
+        createNip42AuthEvent(relayUrl, challenge, protocolKey, now))).resolves.toBe("stored");
+      expect(stale.close).toHaveBeenCalledTimes(1);
+      expect(stale.published).toHaveLength(0);
+      const published = connections.filter(c => c.published.length > 0);
+      expect(published).toHaveLength(1);
+      expect(published[0]!.authPubkeys).toEqual([protocolPubkey]);
+    } finally { port.dispose(); }
+  });
+
+  it("warms without AUTH and leases each ready socket to only one identity without waiting for refill", async () => {
+    const connections = [new FakeConnection(), new FakeConnection()];
+    for (const connection of connections) vi.spyOn(connection, "close");
+    const pending: Array<(connection: InboxRelayConnection) => void> = [];
+    let next = 0;
+    const connect = vi.fn(async () => connections[next++] ?? await new Promise<InboxRelayConnection>(resolve => pending.push(resolve)));
+    const port = new NostrToolsInboxRelayPort(connect,
+      async () => new Response(JSON.stringify({ supported_nips: [42], limitation: { auth_required: true } })));
+    try {
+      port.warmConnections([relayUrl, relayUrl]);
+      await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+      expect(connections.every(c => c.authPubkeys.length === 0 && c.published.length === 0)).toBe(true);
+      for (const signer of [protocolKey, key(3)]) {
+        await expect(port.publish(relayUrl, event(), async challenge =>
+          createNip42AuthEvent(relayUrl, challenge, signer, now))).resolves.toBe("stored");
+      }
+      expect(connections.map(c => c.authPubkeys)).toEqual([[protocolPubkey], [getPublicKey(key(3))]]);
+      for (const connection of connections) expect(connection.close).toHaveBeenCalledTimes(1);
+      expect(pending).toHaveLength(2);
+    } finally { port.dispose(); }
+    const late = pending.map(resolve => {
+      const connection = new FakeConnection();
+      vi.spyOn(connection, "close");
+      resolve(connection);
+      return connection;
+    });
+    await vi.waitFor(() => late.forEach(c => expect(c.close).toHaveBeenCalledTimes(1)));
+  });
+
+  it.each(["failed", "closed"])("falls back when the warm connection %s before use", async failure => {
+    const stale = new FakeConnection();
+    const fallback = new FakeConnection();
+    const connect = vi.fn().mockImplementationOnce(async () => {
+      if (failure === "failed") throw new Error("offline");
+      return stale;
+    }).mockImplementation(async () => fallback);
+    const port = new NostrToolsInboxRelayPort(connect,
+      async () => new Response(JSON.stringify({ supported_nips: [], limitation: {} })));
+    try {
+      port.warmConnections([relayUrl]);
+      await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+      stale.connected = false;
+      await expect(port.publish(relayUrl, event(), async challenge =>
+        createNip42AuthEvent(relayUrl, challenge, protocolKey, now))).resolves.toBe("stored");
+      expect(stale.published).toHaveLength(0);
+      expect(fallback.published).toHaveLength(1);
+    } finally { port.dispose(); }
+  });
+
+  it("retries idle warmup at a bounded interval and stops on disposal", async () => {
+    vi.useFakeTimers();
+    const connect = vi.fn(async (): Promise<InboxRelayConnection> => { throw new Error("offline"); });
+    const port = new NostrToolsInboxRelayPort(connect,
+      async () => new Response(JSON.stringify({ supported_nips: [], limitation: {} })));
+    try {
+      port.warmConnections([relayUrl]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(connect).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(connect).toHaveBeenCalledTimes(4);
+      port.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(connect).toHaveBeenCalledTimes(4);
+      await expect(port.publish(relayUrl, event(), vi.fn())).rejects.toThrow(/disposed/);
+    } finally { port.dispose(); vi.useRealTimers(); }
+  });
+
   it("publishes and validates exact readback on one authenticated connection, isolated per operation", async () => {
     const connections: FakeConnection[] = [];
     const connect = vi.fn(async () => {

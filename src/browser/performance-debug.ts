@@ -81,6 +81,13 @@ export function createPerformanceDebugTimeline(
       detail: { outcome, updates, proofCount } });
   };
 
+  const recordRelayConnect = (entry: PerformanceMeasure): void => {
+    if (entry.name !== "granola:relay-connect") return;
+    const outcome = entry.detail?.outcome;
+    if (!["warm", "warming", "cold", "failed"].includes(outcome)) return;
+    append({ name: entry.name, startTime: entry.startTime, duration: entry.duration, detail: { outcome } });
+  };
+
   if (observeResources) {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
@@ -88,6 +95,7 @@ export function createPerformanceDebugTimeline(
           recordResource(entry as PerformanceResourceTiming);
         } else if (entry.entryType === "measure") {
           recordProofWait(entry as PerformanceMeasure);
+          recordRelayConnect(entry as PerformanceMeasure);
         }
       }
     });
@@ -130,6 +138,7 @@ export function createPerformanceDebugTimeline(
       append({ name, startTime: entry.startTime, duration: 0, detail });
     },
     recordResource,
-    recordProofWait
+    recordProofWait,
+    recordRelayConnect
   };
 }

@@ -127,6 +127,10 @@ export async function createBrowserTradeRuntime(
   const inboxRelay = input.inboxRelay ?? TRADE_INBOX_RELAY;
   const discoveryRelays = input.discoveryRelays ?? PUBLIC_RELAYS;
   const inboxPort = input.inboxPort ?? new NostrToolsInboxRelayPort();
+  if (inboxPort instanceof NostrToolsInboxRelayPort) {
+    inboxPort.warmConnections([...discoveryRelays, inboxRelay]);
+    window.addEventListener("pagehide", () => inboxPort.dispose(), { once: true });
+  }
   const probe = await probeTradeInboxRelay({
     relay: inboxRelay,
     port: inboxPort,

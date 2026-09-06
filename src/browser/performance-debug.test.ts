@@ -15,6 +15,17 @@ function clock() {
 }
 
 describe("performance debug timeline", () => {
+  it("records relay acquisition waits without identities or authentication details", () => {
+    const timeline = createPerformanceDebugTimeline(document, clock(), false);
+    timeline.recordRelayConnect({ name: "granola:relay-connect", startTime: 1, duration: 0.1,
+      detail: { outcome: "warm", auth: "must-not-appear", pubkey: "hidden" }
+    } as PerformanceMeasure);
+    const output = document.querySelector("#granola-performance")!.textContent!;
+    expect(JSON.parse(output).entries[0].detail).toEqual({ outcome: "warm" });
+    expect(output).not.toContain("must-not-appear");
+    expect(output).not.toContain("hidden");
+    document.querySelector("#granola-performance")!.remove();
+  });
   it("records proof subscription outcomes without witness or proof identifiers", () => {
     const timeline = createPerformanceDebugTimeline(document, clock(), false);
     timeline.recordProofWait({ name: "granola:proof-wait", startTime: 1, duration: 2,
