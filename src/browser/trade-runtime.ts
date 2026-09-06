@@ -128,7 +128,7 @@ export async function createBrowserTradeRuntime(
   const discoveryRelays = input.discoveryRelays ?? PUBLIC_RELAYS;
   const inboxPort = input.inboxPort ?? new NostrToolsInboxRelayPort();
   if (inboxPort instanceof NostrToolsInboxRelayPort) {
-    inboxPort.warmConnections([...discoveryRelays, inboxRelay]);
+    inboxPort.warmConnections([inboxRelay]);
     window.addEventListener("pagehide", () => inboxPort.dispose(), { once: true });
   }
   const probe = await probeTradeInboxRelay({
@@ -139,6 +139,8 @@ export async function createBrowserTradeRuntime(
       ? { generateSecretKey: input.generateSecretKey }
       : {})
   });
+  // Let the order-book sockets connect before adding spare sockets to those hosts.
+  if (inboxPort instanceof NostrToolsInboxRelayPort) inboxPort.warmConnections(discoveryRelays);
   const transport = new NostrTradeTransport(
     inboxPort,
     discoveryRelays,

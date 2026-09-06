@@ -4,7 +4,10 @@
 
 Page startup already initializes the trade runtime while loading the order book and
 existing sessions. The runtime now starts two unauthenticated WebSocket connections
-per configured WSS relay and loads its public NIP-11 capabilities in the background.
+to the private inbox relay and loads its public NIP-11 capabilities in the background.
+After the initial inbox probe, it prepares two connections per public discovery relay.
+This gives the public order-book connections a head start: opening all spare sockets
+at once competed with subscription startup in the real browser validation.
 The existing public order-book pool continues to reuse its own connections.
 
 The inbox adapter consumes each prepared connection once, authenticates it with the

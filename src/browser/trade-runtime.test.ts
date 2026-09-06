@@ -8,7 +8,7 @@ import type {
   InboxRelayCapabilities,
   InboxRelayPort
 } from "../nostr/inbox.js";
-import type { PersistentInboxSubscription } from "../nostr/inbox-relay.js";
+import { NostrToolsInboxRelayPort, type PersistentInboxSubscription } from "../nostr/inbox-relay.js";
 import type { TradeSubscriptionCallbacks } from "../nostr/trade-subscription.js";
 import type { NostrEvent } from "../order/events.js";
 import { NostrOrderService, type OrderRelayPort } from "../order/service.js";
@@ -111,6 +111,14 @@ describe("browser trade runtime", () => {
   });
 
   it("constructs one durable redacted coordinator for an isolated profile", async () => {
+    const probe = new ProbePort();
+    const port = new NostrToolsInboxRelayPort();
+    const warm = vi.spyOn(port, "warmConnections").mockImplementation((relays) => {
+      expect(probe.stored.length).toBe(relays.includes(relay) ? 0 : 2);
+    });
+    vi.spyOn(port, "info").mockImplementation(probe.info.bind(probe));
+    vi.spyOn(port, "publish").mockImplementation(probe.publish.bind(probe));
+    vi.spyOn(port, "query").mockImplementation(probe.query.bind(probe));
     const driver = new MemoryStorageDriver();
     const wallet = new WalletRepository(driver);
     const identity = new MakerIdentity(driver, async (action) => action(), () => key(9));
@@ -132,7 +140,7 @@ describe("browser trade runtime", () => {
       orderApi,
       orderService,
       orderOutbox,
-      inboxPort: new ProbePort(),
+      inboxPort: port,
       inboxRelay: relay,
       discoveryRelays: [
         "wss://one.example",
@@ -150,5 +158,9 @@ describe("browser trade runtime", () => {
     expect(runtime.inboxRelay).toBe(relay);
     expect(runtime.sessions).toBeDefined();
     expect(runtime.transport).toBeDefined();
+    expect(warm.mock.calls).toEqual([
+      [[relay]],
+      [["wss://one.example", "wss://two.example", "wss://three.example"]]
+    ]);
   });
 });
