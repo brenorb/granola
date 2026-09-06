@@ -32,6 +32,8 @@ function bytes(
  * already executing with this origin's privileges.
  */
 export class EncryptedStorageDriver implements StorageDriver {
+  private key: Promise<CryptoKey> | undefined;
+
   constructor(
     private readonly storage: StorageDriver,
     private readonly namespace: string,
@@ -40,6 +42,7 @@ export class EncryptedStorageDriver implements StorageDriver {
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(namespace)) {
       throw new Error("Encrypted storage namespace is invalid");
     }
+    storage.invalidationSignal?.addEventListener("abort", () => { this.key = undefined; }, { once: true });
   }
 
   private get keyStorageKey(): string {
@@ -52,7 +55,15 @@ export class EncryptedStorageDriver implements StorageDriver {
   }
 
   private async encryptionKey(): Promise<CryptoKey> {
-    return this.runExclusive(async () => {
+    this.storage.invalidationSignal?.throwIfAborted();
+    return this.key ??= this.loadEncryptionKey().catch(error => {
+      this.key = undefined;
+      throw error;
+    });
+  }
+
+  private async loadEncryptionKey(): Promise<CryptoKey> {
+    const key = await this.runExclusive(async () => {
       const existing = await this.storage.get(this.keyStorageKey);
       if (existing !== undefined && existing !== null) {
         if (
@@ -73,6 +84,8 @@ export class EncryptedStorageDriver implements StorageDriver {
       await this.storage.set(this.keyStorageKey, generated);
       return generated;
     });
+    this.storage.invalidationSignal?.throwIfAborted();
+    return key;
   }
 
   async get(key: string): Promise<unknown> {

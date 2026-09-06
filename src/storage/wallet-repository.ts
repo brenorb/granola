@@ -3,6 +3,7 @@ import { createEmptyWallet, type WalletState } from "../core/wallet.js";
 const WALLET_KEY = "granola.wallet.v1";
 
 export interface StorageDriver {
+  readonly invalidationSignal?: AbortSignal;
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<void>;
@@ -84,21 +85,45 @@ export class MemoryStorageDriver implements StorageDriver {
 }
 
 export class IndexedDbStorageDriver implements StorageDriver {
+  private database: Promise<IDBDatabase> | undefined;
+  private readonly invalidation = new AbortController();
+  readonly invalidationSignal = this.invalidation.signal;
+
+  private invalidate(): void {
+    this.invalidation.abort(new Error("Wallet database was invalidated; reload this profile"));
+    void this.database?.then(database => database.close(), () => undefined);
+    this.database = undefined;
+  }
+
   constructor(
     private readonly databaseName = "granola-wallet",
     private readonly storeName = "private-wallet"
   ) {}
 
   private open(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
+    this.invalidationSignal.throwIfAborted();
+    return this.database ??= new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.databaseName, 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains(this.storeName)) {
           request.result.createObjectStore(this.storeName);
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const database = request.result;
+        if (this.invalidationSignal.aborted) {
+          database.close();
+          reject(this.invalidationSignal.reason);
+          return;
+        }
+        database.onversionchange = () => this.invalidate();
+        database.onclose = () => this.invalidate();
+        resolve(database);
+      };
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+    }).catch(error => {
+      this.database = undefined;
+      throw error;
     });
   }
 
@@ -107,17 +132,15 @@ export class IndexedDbStorageDriver implements StorageDriver {
     operation: (store: IDBObjectStore) => IDBRequest<T>
   ): Promise<T> {
     const database = await this.open();
-    try {
-      return await new Promise<T>((resolve, reject) => {
-        const transaction = database.transaction(this.storeName, mode);
-        const request = operation(transaction.objectStore(this.storeName));
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-        transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB aborted"));
-      });
-    } finally {
-      database.close();
-    }
+    this.invalidationSignal.throwIfAborted();
+    return await new Promise<T>((resolve, reject) => {
+      const transaction = database.transaction(this.storeName, mode);
+      const request = operation(transaction.objectStore(this.storeName));
+      // Resolve only after commit: an IDB request can succeed before its transaction aborts.
+      transaction.oncomplete = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB aborted"));
+    });
   }
 
   async get(key: string): Promise<unknown> {
@@ -133,6 +156,7 @@ export class IndexedDbStorageDriver implements StorageDriver {
   }
 
   async resetDatabase(): Promise<void> {
+    this.invalidate();
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.deleteDatabase(this.databaseName);
       request.onsuccess = () => resolve();
