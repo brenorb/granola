@@ -4,7 +4,7 @@ import {
   getEncodedToken,
   getTokenMetadata,
   MintQuoteState,
-  Wallet,
+  type Wallet,
   type GetInfoResponse,
   type MintQuoteBolt11Response,
   type Proof
@@ -15,6 +15,7 @@ import {
   type StoredProof,
   type WalletPocket
 } from "../core/wallet.js";
+import { loadMintWallet } from "./mint-wallet.js";
 
 export interface Bolt11Capability {
   unit: string;
@@ -135,10 +136,8 @@ function capabilitiesFromInfo(
 }
 
 export class CashuClient {
-  private async wallet(mintUrl: string, unit = "sat"): Promise<Wallet> {
-    const wallet = new Wallet(normalizeMintUrl(mintUrl), { unit });
-    await wallet.loadMint();
-    return wallet;
+  private wallet(mintUrl: string, unit = "sat", refresh = false): Promise<Wallet> {
+    return loadMintWallet(mintUrl, unit, refresh);
   }
 
   async inspectMint(mintUrl: string): Promise<MintCapabilities> {
@@ -156,7 +155,7 @@ export class CashuClient {
     if (!/^[a-z][a-z0-9_-]{0,15}$/.test(unit)) {
       throw new Error("Trade mint unit is invalid");
     }
-    const wallet = await this.wallet(normalized, unit);
+    const wallet = await this.wallet(normalized, unit, true);
     const info = wallet.getMintInfo();
     for (const nut of [7, 10, 11, 14] as const) {
       if (!info.isSupported(nut).supported) {

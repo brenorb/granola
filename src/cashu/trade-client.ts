@@ -1,7 +1,7 @@
 import {
   Amount,
   CheckStateEnum,
-  Wallet,
+  type Wallet,
   deserializeProofs,
   getDataField,
   getTag,
@@ -17,6 +17,8 @@ import {
 
 import { normalizeMintUrl, type StoredProof, type WalletPocket } from "../core/wallet.js";
 import { CashuClient, type TokenSummary } from "./client.js";
+import { loadMintWallet } from "./mint-wallet.js";
+import { waitForProofsSpent } from "./proof-subscription.js";
 import {
   completeHtlcClaim,
   completeHtlcLock,
@@ -48,6 +50,7 @@ export interface CashuTradeDependencies {
   snapshot(wallet: Wallet, proofs: Proof[]): Promise<TradeMintSnapshot>;
   commitment(value: string): Promise<string>;
   recover(wallet: Wallet, preview: SwapPreview): Promise<SendResponse | undefined>;
+  waitForSpent?(wallet: Wallet, proofs: Proof[]): Promise<void>;
 }
 
 /** @internal Contains bearer proofs/blinding material. Persist encrypted; never return from a browser API. */
@@ -206,11 +209,8 @@ async function sha256Hex(value: string): Promise<string> {
 function defaultDependencies(): CashuTradeDependencies {
   const cashu = new CashuClient();
   return {
-    async wallet(mintUrl, unit) {
-      const wallet = new Wallet(normalizeMintUrl(mintUrl), { unit: unit.trim().toLowerCase() });
-      await wallet.loadMint();
-      return wallet;
-    },
+    wallet: loadMintWallet,
+    waitForSpent: waitForProofsSpent,
     inspectToken(token) {
       return cashu.inspectToken(token);
     },
@@ -225,7 +225,13 @@ function defaultDependencies(): CashuTradeDependencies {
       try {
         selected = wallet.keyChain.getKeyset(ids[0]);
       } catch {
-        throw new CashuTradeError("unknown-keyset");
+        const fresh = await loadMintWallet(wallet.mint.mintUrl, wallet.unit, true);
+        wallet.loadMintFromCache(fresh.getMintInfo().cache, fresh.keyChain.cache);
+        try {
+          selected = wallet.keyChain.getKeyset(ids[0]);
+        } catch {
+          throw new CashuTradeError("unknown-keyset");
+        }
       }
       const info = wallet.getMintInfo();
       return {
@@ -434,6 +440,7 @@ export class CashuTradeClient {
       "token-commitment"
     );
     const opened = await this.openToken(token);
+    await this.dependencies.waitForSpent?.(opened.wallet, opened.proofs);
     const live = await this.dependencies.snapshot(opened.wallet, opened.proofs);
     this.validateStaticLock(opened, live, expected);
     return observeHtlcStates(opened.proofs, live.states, expected.hash);

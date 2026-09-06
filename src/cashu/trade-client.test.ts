@@ -363,7 +363,8 @@ describe("incoming lock validation and settlement", () => {
 
   it("waits through an in-flight mint spend without exposing a preimage", async () => {
     const material = createHtlcMaterial();
-    const { client, locked, setSnapshot } = harness(material.hash);
+    const { client, locked, setSnapshot, dependencies } = harness(material.hash);
+    dependencies.waitForSpent = vi.fn(async () => undefined);
     const states = snapshot(locked).states;
     states[0] = { ...states[0]!, state: CheckStateEnum.PENDING };
     setSnapshot(snapshot(locked, states));
@@ -377,6 +378,7 @@ describe("incoming lock validation and settlement", () => {
     await expect(client.observeSpentInternal(
       "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
     )).resolves.toEqual({ status: "SPENT", proofCount: locked.length, preimage: material.preimage });
+    expect(dependencies.waitForSpent).toHaveBeenCalledTimes(2);
   });
 
   it("enforces NUT-12 DLEQ before exposing a spent witness", async () => {

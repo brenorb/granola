@@ -72,15 +72,27 @@ export function createPerformanceDebugTimeline(
     });
   };
 
+  const recordProofWait = (entry: PerformanceMeasure): void => {
+    if (entry.name !== "granola:proof-wait") return;
+    const { outcome, updates, proofCount } = entry.detail ?? {};
+    if (!["spent", "timeout", "unavailable"].includes(outcome) ||
+      !Number.isSafeInteger(updates) || !Number.isSafeInteger(proofCount)) return;
+    append({ name: entry.name, startTime: entry.startTime, duration: entry.duration,
+      detail: { outcome, updates, proofCount } });
+  };
+
   if (observeResources) {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         if (entry.entryType === "resource") {
           recordResource(entry as PerformanceResourceTiming);
+        } else if (entry.entryType === "measure") {
+          recordProofWait(entry as PerformanceMeasure);
         }
       }
     });
     observer.observe({ type: "resource", buffered: true });
+    observer.observe({ type: "measure", buffered: true });
   }
 
   return {
@@ -117,6 +129,7 @@ export function createPerformanceDebugTimeline(
       const entry = clock.mark(name, { detail });
       append({ name, startTime: entry.startTime, duration: 0, detail });
     },
-    recordResource
+    recordResource,
+    recordProofWait
   };
 }

@@ -27,8 +27,10 @@ const mocks = vi.hoisted(() => {
   const amount = (value: string) => FakeAmount.from(value);
   const wallet = {
     loadMint: vi.fn(),
+    loadMintFromCache: vi.fn(),
     getMintInfo: vi.fn(),
     keyChain: {
+      cache: { keysets: [], mintUrl: "https://mint.example" },
       getCheapestKeyset: vi.fn()
     },
     maxSpendableAfterFees: vi.fn(),
