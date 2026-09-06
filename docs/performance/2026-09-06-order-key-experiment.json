@@ -1,0 +1,148 @@
+{
+  "baseCommit": "ff5a823",
+  "baselineAsset": "index-Bo3I8QwM.js",
+  "candidateAsset": "index-BTzMJnIl.js",
+  "thresholdMs": 500,
+  "initialCompletedPairs": [
+    {
+      "isolatedMs": 13573.699951171875,
+      "sharedMs": 13878.800048828127
+    },
+    {
+      "isolatedMs": 13525.199951171873,
+      "sharedMs": 13642.800048828125
+    }
+  ],
+  "incompletePair": {
+    "isolatedMs": 13613.699951171873,
+    "sharedOutcome": "HTTP 429 during nofee Testnut POST swap; 120 s UI timeout",
+    "excludedFromLatencyComparison": true
+  },
+  "note": "Initial durations are captured console results; the first harness did not persist completed UI timelines before the final timeout. The repeat harness persists each run incrementally.",
+  "repeatRuns": [
+    {
+      "variant": "shared",
+      "asset": "./assets/index-BTzMJnIl.js",
+      "durationMs": 14275.6,
+      "requests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "OPTIONS restore": 4,
+        "POST restore": 4,
+        "POST swap": 4,
+        "OPTIONS swap": 4,
+        "POST checkstate": 10,
+        "OPTIONS checkstate": 10
+      },
+      "exchanges": {
+        "nostr_query:10050": 4,
+        "nostr_challenge": 5,
+        "nostr_query:30078": 6,
+        "nostr_publish": 9,
+        "nostr_auth": 4,
+        "mint_subscribe": 4,
+        "nostr_query:1059": 1
+      },
+      "connections": {
+        "warm": 6,
+        "failed": 2
+      },
+      "networkUnionMs": {
+        "http": 9737.9,
+        "mintWsHandshake": 986.52,
+        "relayWsHandshake": 1502.17,
+        "mintWsResponse": 1069.66,
+        "relayWsResponse": 2906.22
+      },
+      "allNetworkUnionMs": 12926.86,
+      "sessionKeysMs": [
+        {
+          "wallet": 0,
+          "duration": 13.5
+        },
+        {
+          "wallet": 1,
+          "duration": 17.099999964237213
+        }
+      ],
+      "filledWallets": [
+        1,
+        1
+      ]
+    },
+    {
+      "variant": "isolated",
+      "asset": "./assets/index-Bo3I8QwM.js",
+      "durationMs": 13847.2,
+      "requests": {
+        "GET info": 4,
+        "GET keysets": 4,
+        "GET keys": 4,
+        "POST restore": 4,
+        "OPTIONS restore": 4,
+        "OPTIONS swap": 4,
+        "POST swap": 4,
+        "OPTIONS checkstate": 10,
+        "POST checkstate": 10
+      },
+      "exchanges": {
+        "nostr_query:10050": 6,
+        "nostr_challenge": 6,
+        "nostr_publish": 11,
+        "nostr_auth": 5,
+        "nostr_query:30078": 6,
+        "nostr_query:1059": 2,
+        "mint_subscribe": 4
+      },
+      "connections": {
+        "warm": 9,
+        "failed": 4
+      },
+      "networkUnionMs": {
+        "http": 9450.83,
+        "mintWsHandshake": 1061.92,
+        "relayWsHandshake": 2302.71,
+        "mintWsResponse": 964.48,
+        "relayWsResponse": 3188.77
+      },
+      "allNetworkUnionMs": 12508.06,
+      "sessionKeysMs": [
+        {
+          "wallet": 0,
+          "duration": 1.699999988079071
+        },
+        {
+          "wallet": 1,
+          "duration": 1.800000011920929
+        }
+      ],
+      "filledWallets": [
+        1,
+        1
+      ]
+    }
+  ],
+  "conclusion": "Keep per-reservation keys on main; 500 ms gain not met in any completed pair.",
+  "manualUi": {
+    "asset": "index-BTzMJnIl.js",
+    "durationMs": 16215.39990234375,
+    "filledWallets": [
+      1,
+      1
+    ],
+    "spentWebsocketNotifications": 4,
+    "publicationAcks": 3,
+    "balances": {
+      "maker": {
+        "sat": 9978,
+        "usd": "0.01"
+      },
+      "taker": {
+        "sat": 20,
+        "usd": "99.99"
+      }
+    },
+    "reloadValidated": true
+  }
+}

@@ -325,6 +325,27 @@ describe("BrowserTradeController", () => {
     expect(subscriptions).toHaveLength(2);
   });
 
+  it("reuses the live order listener and restores a session listener after order-key removal", async () => {
+    const orderIds = ["11111111-1111-4111-8111-111111111111"];
+    const session = privateSession();
+    session.role = "maker";
+    session.orderAddress = `30078:${getPublicKey(makerKey)}:granola:order:v1:${orderIds[0]}`;
+    session.evidence.makerPubkey = getPublicKey(makerKey);
+    session.privateState.inbox.event!.pubkey = getPublicKey(makerKey);
+    session.privateState.nostrPrivateKey = Array.from(makerKey, b => b.toString(16).padStart(2, "0")).join("");
+    const { controller, subscriptions, stops } = setup({ session, makerOrderIds: orderIds });
+    await controller.enableMaker();
+    await controller["ensureSessionSubscription"](sessionId);
+    expect(subscriptions).toHaveLength(1);
+    orderIds.length = 0;
+    await controller.enableMaker();
+    await controller["ensureSessionSubscription"](sessionId);
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(subscriptions).toHaveLength(2);
+    expect(subscriptions[1]!.recipientPubkey).toBe(getPublicKey(makerKey));
+    controller.stop();
+  });
+
   it("opens a proposal from the live maker inbox and persists its maker session", async () => {
     const { controller, api, subscriptions } = setup();
     await controller.enableMaker();

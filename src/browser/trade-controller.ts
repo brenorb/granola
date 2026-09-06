@@ -424,6 +424,12 @@ export class BrowserTradeController {
           port: this.inboxPort,
           now: this.now,
           onEvent: async (event) => {
+            const shared = (await this.api.listTrades()).filter(session => session.role === "maker" &&
+              session.protocol.localNostrPubkey === makerPubkey && !["filled", "released", "frozen"].includes(session.phase));
+            if (shared.length) {
+              this.transport.bufferLiveEvent(makerPubkey, event);
+              for (const session of shared) this.signalSettlement(session.sessionId);
+            }
             try {
               const proposal = await this.makerIdentity.useOrderSecretKey(orderId,
                 (makerOrderSecretKey) => this.openProposal(
@@ -440,7 +446,7 @@ export class BrowserTradeController {
               this.onChange(trade);
               await this.startWinningMakerSettlement(trade.orderAddress);
             } catch (error) {
-              this.onMakerError(messageOf(error));
+              if (!shared.length) this.onMakerError(messageOf(error));
             }
           },
           onError: (error) => this.handleSubscriptionError(
@@ -485,6 +491,9 @@ export class BrowserTradeController {
         session === undefined ||
         session.privateState.inbox.status === "unregistered"
       ) return undefined;
+      const orderId = session.orderAddress.split(":").at(-1)!;
+      if (session.role === "maker" && this.sessionPubkey(session) === session.evidence.makerPubkey &&
+        this.subscriptions.has(`maker-order-key:${orderId}`)) return undefined;
       const secretKey = bytes(session.privateState.nostrPrivateKey);
       try {
         return await this.startSubscription({

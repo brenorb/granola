@@ -876,7 +876,6 @@ export async function advanceAtomicSwapChoreography(
       body.reserve_projection_id !== message.order_projection_id ||
       body.reserve_revision !== message.order_revision ||
       state.orderRevision === undefined || BigInt(body.reserve_revision) !== BigInt(state.orderRevision) + 1n ||
-      body.maker_session_pubkey === makerOrder ||
       body.maker_session_pubkey === takerSession
     ) {
       throw new Error("Reservation acceptance key handoff or projection is invalid");

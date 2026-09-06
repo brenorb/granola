@@ -233,6 +233,16 @@ describe("trade session factory", () => {
       .not.toContain(session.privateState.nostrPrivateKey);
   });
 
+  it("reuses only the exact order Nostr key in the experiment", async () => {
+    const input = { order: record(), proposal: await proposal(), market, clocks };
+    const session = await createMakerSession({ ...input, orderNostrPrivateKey: hexKey(9) }, entropy(3));
+    expect(session.privateState.nostrPrivateKey).toBe(hexKey(9));
+    expect(session.privateState.cashuPrivateKey).not.toBe(hexKey(9));
+    expect(session.privateState.refundPrivateKey).not.toBe(hexKey(9));
+    await expect(createMakerSession({ ...input, orderNostrPrivateKey: hexKey(8) }, entropy(3)))
+      .rejects.toThrow("Shared maker key must match the order authority");
+  });
+
   it("creates a maker session from the validated proposal with a durable transcript head and material", async () => {
     const opened = await proposal();
     const session = await createMakerSession({

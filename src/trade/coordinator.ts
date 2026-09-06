@@ -564,7 +564,9 @@ export class TradeCoordinator {
     if (!usesDirectRouting(session)) return;
     const candidates: Array<{ action: CoordinatorAction; id: string }> = [];
     const inbox = session.privateState.inbox;
-    if (inbox.event && (inbox.status === "staged" || inbox.status === "acknowledged")) {
+    const sharedOrderInbox = session.role === "maker" &&
+      session.privateState.transcript.choreography.participants.makerSessionPubkey === session.evidence.makerPubkey;
+    if (!sharedOrderInbox && inbox.event && (inbox.status === "staged" || inbox.status === "acknowledged")) {
       candidates.push({ action: { kind: "publish_inbox_registration" }, id: inbox.event.id });
     }
     const publication = session.pendingOrderPublication;

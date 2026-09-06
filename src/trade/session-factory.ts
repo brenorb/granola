@@ -57,6 +57,7 @@ export interface TakerSessionInput {
 }
 
 export interface MakerSessionInput {
+  orderNostrPrivateKey?: string;
   order: OrderRecord;
   proposal: VerifiedInitialReserveProposal;
   market: SessionMarketSelection;
@@ -182,9 +183,9 @@ interface LocalKeys {
   refundPubkey: string;
 }
 
-function localKeys(entropy: SessionFactoryEntropy): LocalKeys {
+function localKeys(entropy: SessionFactoryEntropy, orderNostrPrivateKey?: string): LocalKeys {
   const startedAt = performance.now();
-  const nostrPrivateKey = entropy.privateKey("nostr");
+  const nostrPrivateKey = orderNostrPrivateKey ?? entropy.privateKey("nostr");
   const cashuPrivateKey = entropy.privateKey("cashu");
   const refundPrivateKey = entropy.privateKey("refund");
   if (new Set([nostrPrivateKey, cashuPrivateKey, refundPrivateKey]).size !== 3) {
@@ -444,8 +445,10 @@ export async function createMakerSession(
     initialAtomicSwapChoreography(input.order.makerPubkey),
     message
   );
-  const keys = localKeys(entropy);
-  assertSeparatedFromOrderAuthority(keys, input.order.makerPubkey);
+  const keys = localKeys(entropy, input.orderNostrPrivateKey);
+  if (input.orderNostrPrivateKey) {
+    if (keys.nostrPubkey !== input.order.makerPubkey) throw new Error("Shared maker key must match the order authority");
+  } else assertSeparatedFromOrderAuthority(keys, input.order.makerPubkey);
   const makerIdentities = keyIdentities(keys);
   const takerIdentities = [
     proposalBody.taker_session_pubkey,

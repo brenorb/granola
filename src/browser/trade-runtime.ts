@@ -1,3 +1,4 @@
+import { createMakerSession, createTakerSession } from "../trade/session-factory.js";
 import { withSharedLock } from "../core/lock.js";
 import { createOrderResponse } from "../trade/order-response.js";
 import type { VerifiedInitialReserveProposal } from "../trade/messages.js";
@@ -226,6 +227,11 @@ export async function createBrowserTradeRuntime(
 
   return {
     api: new TradeApi({
+      sessionFactory: {
+        createTaker: createTakerSession,
+        createMaker: sessionInput => input.makerIdentity.useOrderSecretKey(sessionInput.order.state.order_id, key =>
+          createMakerSession({ ...sessionInput, orderNostrPrivateKey: Array.from(key, b => b.toString(16).padStart(2, "0")).join("") }))
+      },
       coordinator,
       orders: input.orderService,
       orderOutbox: input.orderOutbox,

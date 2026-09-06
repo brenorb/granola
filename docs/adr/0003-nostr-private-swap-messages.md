@@ -4,6 +4,18 @@
 - Date: 2026-07-23
 - Decision owners: Granola implementers
 
+## Branch experiment — 2026-09-06
+
+`perf/order-key-experiment` temporarily reuses the maker order Nostr key for
+settlement and shares its inbox listener/announcement. Cashu and refund keys remain
+independent. The acceptance still authenticates the exact order/session/terms, but
+this branch permits `maker_session_pubkey == maker_order_pubkey`; older clients
+reject that handoff. The key is copied into the encrypted session journal so order
+key deletion cannot break recovery. This extends the order key's retention across
+its reservations and gives up their cryptographic separation. Active messages still
+pass the exact session/transcript checks. This is a test-only branch, not a change
+to the main branch decision. Promotion requires at least 0.5 s measured improvement.
+
 ## Context
 
 Granola needs asynchronous private messages for reservation and atomic-settlement

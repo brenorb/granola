@@ -451,7 +451,8 @@ describe("two-party coordinator happy path", () => {
     selectedMarket: ExactMarket,
     side: "buy" | "sell" = "sell",
     pendingObservations = 0,
-    publicOffline = false
+    publicOffline = false,
+    sharedOrderKey = false
   ): Promise<void> {
     const makerOrderKey = secret(1);
     const makerPubkey = getPublicKey(makerOrderKey);
@@ -606,6 +607,7 @@ describe("two-party coordinator happy path", () => {
       { now: coordinatorTime }
     );
     await makerSessions.save(await createMakerSession({
+      ...(sharedOrderKey ? { orderNostrPrivateKey: hex(makerOrderKey) } : {}),
       order,
       proposal,
       market,
@@ -687,7 +689,7 @@ describe("two-party coordinator happy path", () => {
       throw new Error(`Happy path stalled: ${actionTrace.slice(-20).join(", ")}`);
     }
     expect(actionTrace).toHaveLength(36 + pendingObservations);
-    expect(transport.calls.registrations).toBe(3);
+    expect(transport.calls.registrations).toBe(sharedOrderKey ? 2 : 3);
     expect(actionTrace.slice(0, 4)).toEqual([
       "taker:stage_inbox_registration",
       "taker:stage_reserve_propose",
@@ -824,6 +826,10 @@ describe("two-party coordinator happy path", () => {
       expect(publicJson).not.toContain(secretValue);
     }
   }
+
+  it.each(["buy", "sell"] as const)("settles %s using the order identity with pending mint observations", async side => {
+    await settleHappyPath(TEST_MARKET, side, 3, false, true);
+  }, 60_000);
 
   it("settles with public/discovery relays disconnected and resumes announcements after restart", async () => {
     await settleHappyPath(TEST_MARKET, "sell", 0, true);
