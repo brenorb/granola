@@ -103,7 +103,8 @@ export class IndexedDbStorageDriver implements StorageDriver {
   private open(): Promise<IDBDatabase> {
     this.invalidationSignal.throwIfAborted();
     return this.database ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(this.databaseName, 1);
+      let blocked = false;
+      const request = indexedDB.open(this.databaseName, 2);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains(this.storeName)) {
           request.result.createObjectStore(this.storeName);
@@ -111,8 +112,9 @@ export class IndexedDbStorageDriver implements StorageDriver {
       };
       request.onsuccess = () => {
         const database = request.result;
-        if (this.invalidationSignal.aborted) {
+        if (blocked || this.invalidationSignal.aborted) {
           database.close();
+          if (blocked) return;
           reject(this.invalidationSignal.reason);
           return;
         }
@@ -121,6 +123,10 @@ export class IndexedDbStorageDriver implements StorageDriver {
         resolve(database);
       };
       request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+      request.onblocked = () => {
+        blocked = true;
+        reject(new Error("IndexedDB upgrade is blocked; close or reload other profile tabs"));
+      };
     }).catch(error => {
       this.database = undefined;
       throw error;
