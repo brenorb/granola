@@ -15,19 +15,21 @@ native representation.
 ## Rollout and rollback compatibility
 
 The envelope keeps `version: 1` for data compatibility, but an older build's
-reader only accepts `number[]`. If a new build writes a typed envelope while an
-older tab still uses the same profile, that tab fails closed when it reads the
-encrypted journal. The current IndexedDB driver opens database version `1` and
-its existing `versionchange` invalidation protects reset and upgrade events; it
-does not negotiate envelope formats between application builds.
+reader only accepts `number[]`. The driver now opens IndexedDB database version
+`2`. When a new tab upgrades an existing version-1 profile, the old tab receives
+`versionchange`, invalidates and closes; the upgrade then proceeds without
+deleting records. An old tab must be reloaded before it can continue using the
+profile. Opening the upgraded database with version `1` fails with
+`VersionError`, which prevents a number-array-only rollback from silently
+touching binary data. If another tab does not release its connection, the new
+open rejects with an instruction to close or reload the other profile tabs;
+records are not deleted.
 
-The smallest safe rollout is two releases: ship the reader that accepts both
-representations while it continues writing `number[]`, then enable the typed
-array writer after old builds are retired or reloaded. Once typed envelopes are
-written, rollback must land on the dual reader; a direct rollback to an old
-number-array-only build is incompatible with those records. An IndexedDB
-schema-version bump would provide a harder cutoff, but it would also require an
-upgrade and blocked-tab flow and is larger than this storage-only change.
+The version-2 cutover is the smallest safe rollout for the native writer. A
+rollback must use a dual reader that also opens database version `2`; a build
+that opens version `1` cannot roll back after the cutover. The browser benchmark
+below exercises this path with a legacy envelope, an open old connection,
+record preservation, binary rewrite/readback, and the version-1 rejection.
 
 ## Offline benchmark
 
@@ -59,6 +61,8 @@ needs a serial browser profile with the deployed app.
 
 For that profile, start the local Vite server and open
 `/scripts/storage-binary-browser-benchmark.html`. It uses two dedicated
-benchmark databases, the real `IndexedDbStorageDriver`, and alternating native
-and legacy operations. It performs no network requests and prints one JSON
-result in the page. The dedicated databases are reset before each run.
+benchmark databases, the real `IndexedDbStorageDriver`, alternating native and
+legacy operations, and a real version-1-to-version-2 cutover check. It performs
+no network requests and prints one JSON result in the page. The timing databases
+are reset before each run; the cutover database uses a fresh name and is not
+deleted after the check.
