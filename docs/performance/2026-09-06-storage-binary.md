@@ -66,3 +66,15 @@ legacy operations, and a real version-1-to-version-2 cutover check. It performs
 no network requests and prints one JSON result in the page. The timing databases
 are reset before each run; the cutover database uses a fresh name and is not
 deleted after the check.
+
+## Serialized Chrome / IndexedDB result
+
+Three isolated Chrome 151.0.7922.176 contexts ran the browser benchmark with
+zero external HTTP requests. Each used eight alternating warm samples and the
+synthetic 92,140-byte JSON payload above. Median legacy reads were 3.2–3.3 ms
+versus 0.4 ms for native bytes; writes were 3.7–3.9 ms versus 0.5–0.6 ms.
+These are per-operation measurements, not a promised swap-time reduction.
+
+All three real IndexedDB checks passed: version-1 connection invalidated,
+legacy data retained/readable, native bytes written/readable, and version-1
+rollback rejected. Raw aggregate results: [browser benchmark JSON](2026-09-06-storage-binary-browser.json).

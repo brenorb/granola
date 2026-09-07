@@ -1,0 +1,554 @@
+{
+  "comparison": "historical baseline; not randomized paired A/B",
+  "browsingSeconds": 20,
+  "versions": [
+    {
+      "commit": "ff5a823",
+      "asset": "index-Bo3I8QwM.js",
+      "runs": [
+        {
+          "run": 1,
+          "direction": "sell",
+          "elapsedMs": 14930.4,
+          "cpuWallets": [
+            {
+              "idle": 13824.34,
+              "dependency_js": 414.08,
+              "native_or_probe": 306.26,
+              "granola_js": 337.59,
+              "gc": 48.14
+            },
+            {
+              "granola_js": 261.49,
+              "idle": 13965.65,
+              "native_or_probe": 309.47,
+              "dependency_js": 359.08,
+              "gc": 34.71
+            }
+          ],
+          "local": {
+            "crypto_digest": {
+              "count": 409,
+              "sum": 5.8,
+              "union": 5.8
+            },
+            "lock_queue": {
+              "count": 189,
+              "sum": 208.1,
+              "union": 207.6
+            },
+            "idb": {
+              "count": 398,
+              "sum": 336.2,
+              "union": 282.1
+            },
+            "lock_held": {
+              "count": 189,
+              "sum": 19342.9,
+              "union": 12198.2
+            },
+            "crypto_encrypt": {
+              "count": 42,
+              "sum": 2.1,
+              "union": 2.1
+            },
+            "crypto_decrypt": {
+              "count": 239,
+              "sum": 6.8,
+              "union": 6.8
+            },
+            "longtask": {
+              "count": 2,
+              "sum": 136,
+              "union": 136
+            }
+          },
+          "networkUnionMs": {
+            "http": 10412.13,
+            "mintWsHandshake": 1076.58,
+            "relayWsHandshake": 2812.82,
+            "mintWsResponse": 956.8,
+            "relayWsResponse": 3315.61
+          },
+          "allNetworkUnionMs": 13836.2,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "POST restore": 4,
+            "OPTIONS restore": 4,
+            "OPTIONS swap": 4,
+            "POST swap": 4,
+            "POST checkstate": 10,
+            "OPTIONS checkstate": 10
+          },
+          "exchangeCounts": {
+            "nostr_query:10050": 6,
+            "nostr_challenge": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:30078": 6,
+            "nostr_query:1059": 2,
+            "mint_subscribe": 4
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        },
+        {
+          "run": 2,
+          "direction": "buy",
+          "elapsedMs": 13897.5,
+          "cpuWallets": [
+            {
+              "native_or_probe": 1597.2,
+              "idle": 11396.57,
+              "granola_js": 393.49,
+              "dependency_js": 446.77,
+              "gc": 63.47
+            },
+            {
+              "idle": 12666.08,
+              "native_or_probe": 278.59,
+              "gc": 54.24,
+              "dependency_js": 473.01,
+              "granola_js": 425.58
+            }
+          ],
+          "local": {
+            "idb": {
+              "count": 390,
+              "sum": 466.3,
+              "union": 413.8
+            },
+            "crypto_decrypt": {
+              "count": 243,
+              "sum": 9.5,
+              "union": 9.5
+            },
+            "crypto_digest": {
+              "count": 413,
+              "sum": 4.2,
+              "union": 4.2
+            },
+            "longtask": {
+              "count": 1,
+              "sum": 72,
+              "union": 72
+            },
+            "lock_queue": {
+              "count": 187,
+              "sum": 276.2,
+              "union": 276.2
+            },
+            "crypto_encrypt": {
+              "count": 42,
+              "sum": 1.3,
+              "union": 1.3
+            },
+            "lock_held": {
+              "count": 187,
+              "sum": 19221.8,
+              "union": 11797.3
+            }
+          },
+          "networkUnionMs": {
+            "http": 9211.02,
+            "mintWsHandshake": 1103.03,
+            "relayWsHandshake": 2539.77,
+            "mintWsResponse": 2006.95,
+            "relayWsResponse": 3185.12
+          },
+          "allNetworkUnionMs": 12764.34,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "POST checkstate": 10,
+            "OPTIONS checkstate": 10,
+            "OPTIONS restore": 4,
+            "POST restore": 4,
+            "OPTIONS swap": 4,
+            "POST swap": 4
+          },
+          "exchangeCounts": {
+            "nostr_query:30078": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:10050": 6,
+            "nostr_query:1059": 2,
+            "nostr_challenge": 6,
+            "mint_subscribe": 4
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        },
+        {
+          "run": 3,
+          "direction": "sell",
+          "elapsedMs": 13555.5,
+          "cpuWallets": [
+            {
+              "idle": 12169.15,
+              "native_or_probe": 318.88,
+              "dependency_js": 436.09,
+              "granola_js": 594.92,
+              "gc": 36.46
+            },
+            {
+              "native_or_probe": 375.84,
+              "idle": 12135.18,
+              "granola_js": 561,
+              "dependency_js": 430.05,
+              "gc": 53.43
+            }
+          ],
+          "local": {
+            "crypto_digest": {
+              "count": 420,
+              "sum": 4.8,
+              "union": 4.8
+            },
+            "lock_queue": {
+              "count": 191,
+              "sum": 343.2,
+              "union": 342.9
+            },
+            "idb": {
+              "count": 397,
+              "sum": 522.8,
+              "union": 465.2
+            },
+            "lock_held": {
+              "count": 191,
+              "sum": 18610.2,
+              "union": 11380.6
+            },
+            "crypto_decrypt": {
+              "count": 249,
+              "sum": 12.3,
+              "union": 12.3
+            },
+            "crypto_encrypt": {
+              "count": 43,
+              "sum": 1.9,
+              "union": 1.9
+            }
+          },
+          "networkUnionMs": {
+            "http": 9081.07,
+            "mintWsHandshake": 496.46,
+            "relayWsHandshake": 1973.58,
+            "mintWsResponse": 459.89,
+            "relayWsResponse": 2963.69
+          },
+          "allNetworkUnionMs": 12053.16,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "POST restore": 4,
+            "OPTIONS restore": 4,
+            "POST swap": 4,
+            "OPTIONS swap": 4,
+            "POST checkstate": 11,
+            "OPTIONS checkstate": 11
+          },
+          "exchangeCounts": {
+            "nostr_query:10050": 6,
+            "nostr_challenge": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:30078": 6,
+            "nostr_query:1059": 2,
+            "mint_subscribe": 2
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        }
+      ]
+    },
+    {
+      "commit": "0b96a42",
+      "asset": "index-Dxpkh-Z1.js",
+      "runs": [
+        {
+          "run": 1,
+          "direction": "sell",
+          "elapsedMs": 16538,
+          "cpuWallets": [
+            {
+              "idle": 15630.3,
+              "native_or_probe": 315.7,
+              "dependency_js": 396.72,
+              "gc": 27.86,
+              "granola_js": 167.42
+            },
+            {
+              "idle": 15656.08,
+              "native_or_probe": 295.37,
+              "dependency_js": 406.45,
+              "gc": 35.68,
+              "granola_js": 144.41
+            }
+          ],
+          "local": {
+            "crypto_digest": {
+              "count": 461,
+              "sum": 5.9,
+              "union": 5.9
+            },
+            "lock_queue": {
+              "count": 189,
+              "sum": 168.6,
+              "union": 168.3
+            },
+            "idb": {
+              "count": 358,
+              "sum": 229.6,
+              "union": 198.7
+            },
+            "lock_held": {
+              "count": 189,
+              "sum": 22973.7,
+              "union": 14129.8
+            },
+            "crypto_encrypt": {
+              "count": 42,
+              "sum": 1,
+              "union": 1
+            },
+            "crypto_decrypt": {
+              "count": 199,
+              "sum": 6.5,
+              "union": 6.5
+            },
+            "longtask": {
+              "count": 2,
+              "sum": 104,
+              "union": 104
+            }
+          },
+          "networkUnionMs": {
+            "http": 11505.93,
+            "mintWsHandshake": 1492.25,
+            "relayWsHandshake": 3105.04,
+            "mintWsResponse": 1222.59,
+            "relayWsResponse": 4453.86
+          },
+          "allNetworkUnionMs": 15755.13,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "OPTIONS restore": 4,
+            "POST restore": 4,
+            "POST swap": 4,
+            "OPTIONS swap": 4,
+            "POST checkstate": 10,
+            "OPTIONS checkstate": 10
+          },
+          "exchangeCounts": {
+            "nostr_query:10050": 6,
+            "nostr_challenge": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:30078": 6,
+            "nostr_query:1059": 2,
+            "mint_subscribe": 4
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        },
+        {
+          "run": 2,
+          "direction": "buy",
+          "elapsedMs": 16804.1,
+          "cpuWallets": [
+            {
+              "idle": 14364.28,
+              "native_or_probe": 1915.38,
+              "gc": 54.25,
+              "granola_js": 158.48,
+              "dependency_js": 311.71
+            },
+            {
+              "idle": 15847.19,
+              "native_or_probe": 313.76,
+              "dependency_js": 409.11,
+              "gc": 27.38,
+              "granola_js": 206.66
+            }
+          ],
+          "local": {
+            "idb": {
+              "count": 350,
+              "sum": 272.7,
+              "union": 229.8
+            },
+            "crypto_decrypt": {
+              "count": 203,
+              "sum": 8.4,
+              "union": 8.3
+            },
+            "crypto_digest": {
+              "count": 465,
+              "sum": 5.5,
+              "union": 5.5
+            },
+            "lock_queue": {
+              "count": 187,
+              "sum": 196.7,
+              "union": 192.2
+            },
+            "crypto_encrypt": {
+              "count": 42,
+              "sum": 1.3,
+              "union": 1.3
+            },
+            "lock_held": {
+              "count": 187,
+              "sum": 23436.8,
+              "union": 14322.2
+            }
+          },
+          "networkUnionMs": {
+            "http": 11205.85,
+            "mintWsHandshake": 1406.68,
+            "relayWsHandshake": 2914.33,
+            "mintWsResponse": 2238.33,
+            "relayWsResponse": 3568.1
+          },
+          "allNetworkUnionMs": 14966.78,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "POST checkstate": 10,
+            "OPTIONS checkstate": 10,
+            "OPTIONS restore": 4,
+            "POST restore": 4,
+            "POST swap": 4,
+            "OPTIONS swap": 4
+          },
+          "exchangeCounts": {
+            "nostr_query:30078": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:10050": 6,
+            "nostr_query:1059": 2,
+            "nostr_challenge": 6,
+            "mint_subscribe": 4
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        },
+        {
+          "run": 3,
+          "direction": "sell",
+          "elapsedMs": 13605.6,
+          "cpuWallets": [
+            {
+              "idle": 12464.4,
+              "native_or_probe": 350.16,
+              "dependency_js": 483.73,
+              "granola_js": 266.44,
+              "gc": 40.87
+            },
+            {
+              "idle": 12297.24,
+              "native_or_probe": 460.26,
+              "granola_js": 257.6,
+              "dependency_js": 528.09,
+              "gc": 62.41
+            }
+          ],
+          "local": {
+            "crypto_digest": {
+              "count": 472,
+              "sum": 5.7,
+              "union": 5.6
+            },
+            "lock_queue": {
+              "count": 191,
+              "sum": 285.4,
+              "union": 285.4
+            },
+            "idb": {
+              "count": 356,
+              "sum": 383.9,
+              "union": 337
+            },
+            "lock_held": {
+              "count": 191,
+              "sum": 17868,
+              "union": 11266.1
+            },
+            "crypto_decrypt": {
+              "count": 208,
+              "sum": 11.9,
+              "union": 11.9
+            },
+            "crypto_encrypt": {
+              "count": 43,
+              "sum": 2.3,
+              "union": 2.3
+            },
+            "longtask": {
+              "count": 2,
+              "sum": 133,
+              "union": 133
+            }
+          },
+          "networkUnionMs": {
+            "http": 9237.54,
+            "mintWsHandshake": 493.04,
+            "relayWsHandshake": 2367.59,
+            "mintWsResponse": 452.27,
+            "relayWsResponse": 3238.9
+          },
+          "allNetworkUnionMs": 12582.65,
+          "httpCounts": {
+            "GET info": 4,
+            "GET keysets": 4,
+            "GET keys": 4,
+            "POST restore": 4,
+            "OPTIONS restore": 4,
+            "OPTIONS swap": 4,
+            "POST swap": 4,
+            "POST checkstate": 11,
+            "OPTIONS checkstate": 11
+          },
+          "exchangeCounts": {
+            "nostr_query:10050": 6,
+            "nostr_challenge": 6,
+            "nostr_publish": 11,
+            "nostr_auth": 5,
+            "nostr_query:30078": 6,
+            "nostr_query:1059": 2,
+            "mint_subscribe": 2
+          },
+          "relayAcquisitions": {
+            "warm": 9,
+            "cold": 0,
+            "failed": 4
+          }
+        }
+      ]
+    }
+  ]
+}

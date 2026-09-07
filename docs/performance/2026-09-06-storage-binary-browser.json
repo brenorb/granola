@@ -1,0 +1,75 @@
+{
+  "browser": "151.0.7922.176",
+  "externalRequests": 0,
+  "runs": [
+    {
+      "benchmark": "encrypted-storage-binary-browser",
+      "payloadJsonBytes": 92140,
+      "rounds": 8,
+      "storage": "IndexedDbStorageDriver",
+      "operationsMs": {
+        "native": {
+          "set": 0.5,
+          "get": 0.4
+        },
+        "legacy": {
+          "set": 3.7,
+          "get": 3.2
+        }
+      },
+      "versionCutover": {
+        "oldTabInvalidated": true,
+        "legacyReadable": true,
+        "binaryWritten": true,
+        "binaryReadable": true,
+        "rollbackV1Rejected": true
+      }
+    },
+    {
+      "benchmark": "encrypted-storage-binary-browser",
+      "payloadJsonBytes": 92140,
+      "rounds": 8,
+      "storage": "IndexedDbStorageDriver",
+      "operationsMs": {
+        "native": {
+          "set": 0.5,
+          "get": 0.4
+        },
+        "legacy": {
+          "set": 3.9,
+          "get": 3.3
+        }
+      },
+      "versionCutover": {
+        "oldTabInvalidated": true,
+        "legacyReadable": true,
+        "binaryWritten": true,
+        "binaryReadable": true,
+        "rollbackV1Rejected": true
+      }
+    },
+    {
+      "benchmark": "encrypted-storage-binary-browser",
+      "payloadJsonBytes": 92140,
+      "rounds": 8,
+      "storage": "IndexedDbStorageDriver",
+      "operationsMs": {
+        "native": {
+          "set": 0.6,
+          "get": 0.4
+        },
+        "legacy": {
+          "set": 3.8,
+          "get": 3.3
+        }
+      },
+      "versionCutover": {
+        "oldTabInvalidated": true,
+        "legacyReadable": true,
+        "binaryWritten": true,
+        "binaryReadable": true,
+        "rollbackV1Rejected": true
+      }
+    }
+  ]
+}
