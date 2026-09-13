@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://granola.exchange/schema/order/v1",
+  "title": "Granola order projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "order_id", "revision", "created_at", "expires_at", "side", "base_unit", "quote_unit", "offered", "requested", "original_amount", "remaining_amount", "reserved_amount", "price_cents_per_btc", "minimum_fill_amount", "execution", "status", "reservation"],
+  "properties": {
+    "schema": {"const": "granola/order/v1"},
+    "order_id": {"type": "string", "format": "uuid"},
+    "revision": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "created_at": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "integer", "minimum": 0},
+    "side": {"enum": ["buy", "sell"]},
+    "base_unit": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+    "quote_unit": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+    "offered": {"$ref": "#/$defs/asset"},
+    "requested": {"type": "object", "additionalProperties": false, "required": ["unit", "acceptable_mints"], "properties": {"unit": {"type": "string"}, "acceptable_mints": {"type": "array", "minItems": 1, "items": {"type": "string", "format": "uri"}}}},
+    "original_amount": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "remaining_amount": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "reserved_amount": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "price_cents_per_btc": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "minimum_fill_amount": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "execution": {"enum": ["all_or_none", "partial"]},
+    "status": {"enum": ["open", "partially_filled", "reserved", "filled", "canceled", "expired"]},
+    "reservation": {"anyOf": [{"$ref": "#/$defs/reservation"}, {"type": "null"}]}
+  },
+  "$defs": {
+    "asset": {"type": "object", "additionalProperties": false, "required": ["unit", "mint"], "properties": {"unit": {"type": "string"}, "mint": {"type": "string", "format": "uri"}}},
+    "reservation": {"type": "object", "additionalProperties": false, "required": ["id", "amount", "accepted_at", "expires_at", "proposal_event_id", "taker_commitment"], "properties": {"id": {"type": "string", "format": "uuid"}, "amount": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "accepted_at": {"type": "integer", "minimum": 0}, "expires_at": {"type": "integer", "minimum": 0}, "proposal_event_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "taker_commitment": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+  }
+}

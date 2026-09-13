@@ -1,0 +1,12 @@
+{
+  "vector_id": "pricing-200sat-4950000",
+  "protocol_version": "1",
+  "kind": "positive",
+  "input": {
+    "base_amount": "200",
+    "price_cents_per_btc": "4950000"
+  },
+  "expected": {
+    "quote_amount": "9"
+  }
+}

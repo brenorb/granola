@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://granola.exchange/schema/dm/v1",
+  "title": "Granola private message v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "deployment", "type", "message_id", "session_id", "reservation_id", "order_address", "order_projection_id", "order_revision", "maker_order_pubkey", "author_pubkey", "recipient_pubkey", "sequence", "previous_message_id", "previous_transcript_hash", "sent_at", "expires_at", "terms_hash", "body"],
+  "properties": {
+    "schema": {"const": "granola/dm/v1"},
+    "deployment": {"const": "cashu-testnet-v1"},
+    "type": {"type": "string"},
+    "message_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reservation_id": {"type": "string", "format": "uuid"},
+    "order_address": {"type": "string"},
+    "order_projection_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "order_revision": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "maker_order_pubkey": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "author_pubkey": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "recipient_pubkey": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sequence": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+    "previous_message_id": {"anyOf": [{"type": "string", "format": "uuid"}, {"type": "null"}]},
+    "previous_transcript_hash": {"anyOf": [{"type": "string", "pattern": "^[0-9a-f]{64}$"}, {"type": "null"}]},
+    "sent_at": {"type": "integer", "minimum": 0},
+    "expires_at": {"type": "integer", "minimum": 0},
+    "terms_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "terms": {"type": "object"},
+    "body": {"type": "object"}
+  },
+  "allOf": [{"if": {"properties": {"type": {"enum": ["reserve_propose", "reserve_accept"]}}}, "then": {"required": ["terms"]}}, {"if": {"properties": {"type": {"not": {"enum": ["reserve_propose", "reserve_accept"]}}}}, "then": {"not": {"required": ["terms"]}}}]
+}

@@ -7,6 +7,9 @@ Granola adds no custodian or additional settlement party.
 
 > **Status:** testnet proof of concept. Use Testnut only; do not use real funds.
 
+The implementer-facing contract is the [protocol specification v0.1](docs/protocol%20spec%20v0.1.md).
+The ADRs remain background rationale.
+
 ## Protocol flow
 
 The same hash links both Cashu legs. One participant claims the first leg and
@@ -101,4 +104,6 @@ assumptions and failure boundaries.
 - [Browser agent API](docs/guides/agent-api.md)
 - [Testnet wallet notes](docs/guides/testnet-wallet.md)
 - [NIP-17 coordination latency report](docs/performance/nip17-latency.md)
+- [SDK boundary](docs/guides/sdk.md)
+- [Protocol specification v0.1](docs/protocol%20spec%20v0.1.md)
 - [Full documentation index](docs/README.md)

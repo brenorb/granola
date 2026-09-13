@@ -140,7 +140,7 @@ projection containing the complete current state. One acknowledgement from any
 configured public relay is sufficient. Its return value contains the
 projection ID, revision, and per-relay receipts, never key material.
 `getOrderBook()` verifies signatures and schema, selects the newest event at
-each address, and returns exact rational prices.
+each address, and returns canonical integer `price_cents_per_btc` values.
 
 Before making a relay request, the browser persists the already-signed
 projection in a private-profile outbox. If publication receives no

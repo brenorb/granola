@@ -2,7 +2,12 @@
 
 ## Protocol reference
 
+- [Protocol specification v0.1](protocol%20spec%20v0.1.md)
 - [Security invariants](protocol/security-invariants.md)
+
+## SDK
+
+- [SDK boundary and browser facade](guides/sdk.md)
 
 ## Testnet implementation
 
@@ -12,6 +17,9 @@
 - [NIP-17 coordination latency](performance/nip17-latency.md)
 
 ## Architecture decisions
+
+The ADRs are background rationale; the normative implementation contract is the
+[protocol specification v0.1](protocol%20spec%20v0.1.md).
 
 - [ADR 0001: Nostr events for the Granola order book](adr/0001-nostr-order-events.md)
 - [ADR 0002: Ephemeral per-order Nostr signing keys](adr/0002-maker-signing-identity.md)
