@@ -24,8 +24,9 @@ wording, not transport. Main already includes “Public orders. Private
 settlement.” and Testnut funding messages. Other hunks target older controls
 that main removed or redesigned. There is no separate performance fix to gain
 from merging that commit; any still-desired wording should be reapplied to the
-current UI individually. Preserve the branch because this commit remains
-unmerged in ancestry.
+current UI individually. The obsolete local branch was removed in the
+2026-09-17 worktree cleanup; unmerged ancestry alone is not a reason to retain
+a rejected implementation.
 
 ## What Applesauce actually does
 

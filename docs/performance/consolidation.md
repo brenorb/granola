@@ -69,3 +69,26 @@ Validation of this consolidation: 443 tests passed, seven skipped; typecheck,
 production build and `git diff --check` passed. The new regression covers the
 single-tag output and rejects missing, duplicated or mismatched expiration.
 No new live-network benchmark was run; performance numbers above are historical.
+
+## Worktree cleanup — 2026-09-17
+
+Reviewed every registered checkout and removed all 15 side registrations: 14
+existing directories moved to macOS Trash and one already-missing temporary
+relay-review checkout pruned. Only the main checkout remains. No side checkout
+had tracked edits; six contained an untracked symlink to main's dependencies.
+
+- `ephemeral`, `nip17-profile`, `local-performance`: already incorporated.
+- `journal-reads`, `storage-binary`, `nip17-subscription`: accepted changes
+  incorporated under other commits; old snapshots add nothing.
+- `nip17-before`, `nip17-discovery`, `nip17-quorum`, `nip17-routing`: completed
+  diagnostic experiments, superseded by the decisions above.
+- `nip17-pool`: reverted experiment with no net change.
+- `mint-prewarm`, `proof-observers`, `order-key-experiment`: rejected approaches;
+  conclusions retained above, experimental implementations discarded.
+
+Deleted the six local `perf/*` branches and the obsolete local
+`feat/order-state-badges` and `fix/first-valid-ack-readback` branches. The former's
+wakeup fix is patch-equivalent to main; the latter's useful inbox behavior was
+integrated as `14c4395`, while its old UI copy was rejected. Existing archive
+tags and remote refs were not changed. Trashed files remain recoverable, but
+their old worktree registrations have been removed.

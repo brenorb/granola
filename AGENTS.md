@@ -1,5 +1,10 @@
 # Granola agent notes
 
+- Treat old worktrees and experiment branches as historical drafts, not protocol
+  requirements. Keep only measured improvements that serve the current simple
+  three-message swap; accepted and rejected decisions are consolidated in
+  `docs/performance/consolidation.md`.
+
 - Keep configured mint HTTPS and WSS origins paired in the page CSP. Validate
   new transports under the deployed CSP, including a successful subscription
   notification; a successful HTTP fallback alone does not validate WebSockets.
