@@ -22,6 +22,9 @@
 
 The ADRs are background rationale; the normative implementation contract is the
 [protocol specification v0.1](protocol%20spec%20v0.1.md).
+Current-facing ADRs and guides were reviewed against main on 2026-09-17.
+Date-stamped performance and maintenance reports describe their recorded builds;
+use the consolidated performance decisions for their current disposition.
 
 - [ADR 0001: Nostr events for the Granola order book](adr/0001-nostr-order-events.md)
 - [ADR 0002: Ephemeral per-order Nostr signing keys](adr/0002-maker-signing-identity.md)

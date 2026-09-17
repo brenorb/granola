@@ -73,9 +73,11 @@ assumption, not a claim that the protocol removes mint risk.
 
 ## 3. Encoding rules
 
-1. JSON objects MUST use RFC 8785 JSON Canonicalization Scheme (JCS) before
-   hashing, signing, or encrypting. Unknown fields MUST be rejected in protocol
-   objects and message bodies.
+1. Private plaintext and hash/commitment inputs MUST use the protocol's canonical
+   JSON encoding. Public projection content is JSON for the exact order-state
+   schema; the current writer uses `JSON.stringify(state)`, not sorted JCS text.
+   Verify a Nostr event against its original content bytes, never a reserialized
+   copy. Unknown fields MUST be rejected in protocol objects and message bodies.
 2. JSON integers that can exceed JavaScript's safe integer range MUST be decimal
    strings. Amounts, prices, revisions, sequence numbers, IDs, and hashes use
    their specified string forms.
@@ -183,6 +185,11 @@ Concurrent reservations MUST be serialized so allocated amount never exceeds
 the order's remaining amount. A taker MUST provide the exact current projection
 ID and revision; stale projections fail closed.
 
+The order service selects the greatest validated revision, then greatest
+`created_at`, then lexicographically smallest event ID. The live feed additionally
+refuses an older timestamp. Relay replacement ordering alone MUST NOT allow a
+lower revision to replace a known higher revision.
+
 ### 4.2 Public data boundary
 
 Public events contain the complete current order projection, including terms,
@@ -239,7 +246,10 @@ The exact inner objects are:
   `expiration` tag.
 
 The wrapper MUST be size-limited before decryption. The current limit is 32 KiB
-for the encoded outer payload. A receiver MUST validate outer ID/signature/kind,
+for the encoded outer payload. Its `expiration` MUST exceed encrypted
+`expires_at` by a randomly selected whole-hour interval from 3,600 through
+86,400 seconds. The receiver MUST validate that difference as well as both
+deadlines. A receiver MUST validate outer ID/signature/kind,
 tags, expiration, recipient, seal ID/signature/kind/tags, rumor ID/kind/tags,
 seal-author equals rumor-author, and all recipient and signer relationships.
 The pinned `nostr-tools` unwrap helper is decryption only; its result is

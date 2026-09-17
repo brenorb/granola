@@ -56,8 +56,8 @@ appears:
 
 1. Press **Retry same signed projection** for this newest order.
 2. Wait for at least one relay acknowledgement.
-3. Press **Retry same signed projection** once more to commit the acknowledged
-   projection locally.
+3. Retry again only if the entry remains pending. Initial order creation commits
+   automatically after acknowledgement; other staged updates may need a commit retry.
 
 Do not submit a second order. Continue only when the pending entry disappears.
 Press **Refresh book** and find the row with all of these values:
@@ -169,4 +169,4 @@ preimages, witnesses, private keys, mint quote IDs, private NIP-17 event IDs,
 or raw encrypted messages.
 
 Compare your result with the
-[recorded real swap](../traces/2026-07-23-testnet-swap.md).
+[recorded real swaps](../performance/2026-09-06-direct-routing-profile.md).

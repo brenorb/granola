@@ -2,6 +2,7 @@
 
 - Status: accepted for the testnet prototype
 - Date: 2026-07-23
+- Updated: 2026-09-17
 - Depends on: [ADR 0001](0001-nostr-order-events.md), [ADR 0003](0003-nostr-private-swap-messages.md)
 
 ## Context
@@ -12,7 +13,7 @@ same issuer. A maker offering the base asset must not learn the requested
 quote asset without enabling the taker to claim the base asset. Either party
 also needs a bounded recovery path when its counterparty disappears.
 
-Cashu NUT-14 HTLC spending conditions bind a proof to a SHA-256 hash and can additionally require a receiver public key. A refund public key becomes usable after a locktime. NUT-07 reports proof state and, after a spend, its witness. Each selected test mint currently advertises NUT-07, NUT-11, NUT-12, and NUT-14, but the protocol verifies capabilities immediately before every trade.
+Cashu NUT-14 HTLC spending conditions bind a proof to a SHA-256 hash and can additionally require a receiver public key. A refund public key becomes usable after a locktime. NUT-07 reports proof state and, after a spend, its witness. The client checks each selected mint's required capabilities and active keysets during trade preflight; this document is not a live capability report.
 
 This is atomic only under explicit assumptions: each participating mint enforces the advertised NUTs honestly, retains the spend witness, has a sufficiently aligned clock, and remains reachable across the settlement and refund windows. It does not remove mint risk or guarantee unconditional fairness.
 
@@ -35,9 +36,10 @@ For a maker selling base for quote:
 5. Taker locks the quote proofs second. The quote leg uses the same hash, the maker's Cashu settlement key as receiver, the taker refund key, and the earlier deadline `T_short`.
 6. Maker validates that leg, then claims it with the preimage and maker settlement key before the maker claim cutoff.
 7. Taker observes every quote proof as `SPENT` through NUT-07, extracts one identical witness preimage, verifies its hash, and claims the base leg with that preimage and the taker settlement key.
-8. Maker verifies both legs as `SPENT` before replacing the order with its
-   public `filled` projection. The reservation remains public until fill or
-   confirmed recovery.
+8. Both participants verify both legs as `SPENT` before financial completion.
+   Maker stages the `filled` (or `partially_filled`) projection in the durable
+   outbox. With direct routes, reserve/fill publication runs asynchronously;
+   public visibility can lag the locally persisted reservation and settlement.
 
 The wire choreography names these positions `base_lock` and `quote_lock`, but
 they are protocol slots: `reserve_accept` embeds the maker offer with `T_long`,
@@ -59,9 +61,9 @@ For the testnet demonstration, after confirming each participating mint clock is
 
 Receiver spending remains possible after a NUT-14 locktime, so expiry creates a receiver/refunder race rather than revoking receiver authority. Implementations stop initiating claims at the cutoffs and enter recovery mode. They do not treat equality with a locktime as safe.
 
-New sessions use this 10/20/30-minute profile. Every accepted deadline is signed,
-validated as a complete profile, and persisted before either Cashu leg is
-created.
+New sessions use this 10/20/30-minute profile. Maker persists the plan before
+locking its offer. The signed acceptance carries that exact plan and lock;
+taker validates and persists both before creating its payment leg.
 
 ## Exact validation before funding the counter-leg
 
@@ -78,7 +80,12 @@ Fail closed unless all of the following hold:
 - deadlines are ordered and retain the required safety gap;
 - message, token, capability snapshot, and validation commitments agree with the canonical transcript.
 
-A `SPENT` state only discloses the preimage when every quote proof has a non-empty, well-formed witness containing the same preimage and that preimage hashes to the negotiated value. `PENDING`, a missing witness, mixed witnesses, or a hash mismatch is a terminal protocol error that enters recovery; it never authorizes a claim or public fill.
+A `SPENT` state supplies usable claim evidence only when every payment proof
+has a well-formed witness containing the same preimage and that preimage hashes
+to the negotiated value. `PENDING` is not spend evidence: while observing a
+previously submitted operation, the client waits and rechecks within the deadline.
+Missing, mixed or mismatched spend witnesses fail validation and cannot authorize
+a claim or public fill. Before funding, selected input proofs must be `UNSPENT`.
 
 ## Private message sequence
 
@@ -95,7 +102,8 @@ projection. No private verification, claim, or receipt messages are required.
 
 ## Recovery
 
-- Before either leg is locked: exchange a signed abort and release the reservation.
+- Before either leg is locked: release through the durable recovery path. There
+  is no supported `abort` message body; do not wait for an invented peer ACK.
 - After only the base leg is locked: maker waits for `T_long` and refunds it.
 - After both legs are locked but before maker claim: taker refunds quote after `T_short`; maker refunds base after `T_long`.
 - After maker claim: taker continues polling the quote witness and claims base before its cutoff. If the witness is unavailable or invalid, preserve the trace and enter terminal recovery rather than declaring success.
@@ -145,14 +153,19 @@ demonstration currently uses SAT at `https://testnut.cashu.space` and USD at
 
 ## Consequences
 
-The browser must add durable trade sessions, Cashu HTLC
+The browser implements durable trade sessions, Cashu HTLC
 creation/validation/claim/refund operations, strict NIP-17 transport, NUT-07
 witness polling, and public reserve/fill projections. The user- and
 agent-facing API exposes only high-level operations and redacted observations;
-it never returns bearer tokens, proofs, witnesses, preimages, private keys,
-quote IDs, or raw encrypted private messages.
+trade read methods never return bearer tokens, proofs, witnesses, preimages,
+private keys, mint quote IDs, or raw encrypted private messages. The wallet's
+explicit `createBackup()` method is the deliberate bearer-token exception.
 
-The public verification trace may include event IDs, relay acknowledgements, mints, units, keyset IDs, amounts, price, capability snapshots, deadlines, proof counts, fees, commitments, state sequences, settlement hash, and before/after aggregate balances. It omits raw proofs, curve points, bearer tokens, preimages, witnesses, private keys, and private NIP-17 event identifiers.
+Local redacted diagnostic reports may include public event IDs, relay outcomes,
+mint/keyset identities, amounts, deadlines, commitments and aggregate balances.
+They are not additional public Nostr events. Do not add receipt histories or
+settlement evidence to the public order book, and never include bearer material
+or private message bodies in diagnostics.
 
 ## Sources
 

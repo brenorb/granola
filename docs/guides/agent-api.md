@@ -24,6 +24,10 @@ role, and mutations sharing it are serialized with the Web Locks API.
 
 ## Methods
 
+These are individual API examples, not a script to execute from top to bottom.
+Cancellation requires an order owned by this wallet; taking requires a current
+counterparty order and sufficient funds. Inspect the book before either action.
+
 ```ts
 const state = await window.granola.getState();
 const mint = await window.granola.inspectMint("https://testnut.cashu.space");
@@ -89,7 +93,7 @@ bearer instruments. Do not log, paste, publish, or commit its return value.
 registration and keeps the NIP-17 subscriptions open for the life of the page.
 The human page calls it automatically on startup and after publishing an order;
 call it manually only to retry synchronization. `takeOrder()` accepts only a
-verified current sell projection for the configured SAT/USD issuer pair. Its
+verified current buy or sell projection for the configured SAT/USD issuer pair. Its
 lowercase UUIDv4 `requestId` is an idempotency key: reuse that exact ID,
 address, projection ID, revision, and fill amount if the caller did not receive
 the first result.
@@ -105,8 +109,9 @@ message bodies, or mint quote IDs.
 
 Agents should normally run `runUntilSettled(sessionId)` on the same shared page
 for each local session. It repeatedly invokes the same one-action coordinator,
-waits when the peer has not delivered the next private message, and stops only
-at `filled` or a terminal error. It does not merge or skip durable checkpoints.
+waits when the peer has not delivered the next private message, and returns at
+`filled`. It throws on a terminal error or its bounded action/peer-wait limit;
+the persisted session remains available for recovery. It does not skip durable checkpoints.
 Its result contains only session ID, final phase, and redacted
 revision/phase/role checkpoints.
 
@@ -149,15 +154,19 @@ acknowledgement,
 contains the public order ID, projection ID, revision, and receipts. Call
 `getPendingOrderPublications()` to inspect the outbox and
 `retryOrderPublication(orderId)` to retry that exact signed event. A retry never
-re-signs or creates another event ID. The outbox is cleared only after an
-acknowledged update is explicitly committed. The human UI exposes the same
+re-signs or creates another event ID. The publication is marked committed only
+after an acknowledged update is locally committed. Initial creation commits
+automatically on acknowledgement; other stages can be advanced by retry.
+The human UI exposes the same
 recovery action.
 
 The prototype market is issuer-specific: SAT from
 `https://testnut.cashu.space` against USD cents from
 `https://nofee.testnut.cashu.space`. `amount` is always base SAT. For a buy,
 the offered asset is USD; for a sell, it is SAT. The human form accepts USD/BTC
-and converts it to the exact cents/SAT ratio used by the agent API.
+and converts it to integer `priceCentsPerBtc` for the agent API. Settlement uses
+`quote_cents = (base_sats * price_cents_per_btc) / 100_000_000`, truncating the
+remainder and rejecting a zero-cent result.
 
 ## Fake mint behavior
 

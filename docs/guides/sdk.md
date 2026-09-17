@@ -1,15 +1,18 @@
 # SDK boundary
 
-The supported TypeScript entry point is `src/index.ts`. It exposes the
+The source-level TypeScript entry point is `src/index.ts`. It exposes the
 protocol-safe API and validators without exposing storage drivers, UI modules,
 or bearer material internals.
+
+There is no published `granola` package or configured package export yet. From
+a TypeScript file at the repository root, import the source entry point:
 
 ```ts
 import {
   GRANOLA_PROTOCOL_VERSION,
   quoteAmountForSettlement,
   validateAtomicSwapMessage
-} from "granola";
+} from "./src/index.ts";
 
 const quote = quoteAmountForSettlement("200", "4950000");
 // "9"

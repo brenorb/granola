@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-23
+- Updated: 2026-09-17
 
 ## Context
 
@@ -19,7 +20,8 @@ Each order is represented solely by one parameterized replaceable Nostr event:
 - one stable `d` tag: `granola:order:v1:<order-id>`;
 - the maker's order key as the event author;
 - the complete canonical `granola/order/v1` state in `content`; and
-- query tags for protocol version, side, status, market, and expiry.
+- query tags for protocol version, side, status and market, plus NIP-40
+  `expiration` matching the order body's deadline.
 
 Create, reserve, release, fill, cancel, and expire all sign a replacement at
 the same address. Each replacement increments the state's canonical decimal
@@ -56,20 +58,22 @@ terms and the mutable fields:
 - `status`;
 - `reservation`.
 
-No public event contains settlement commitments, private message IDs, Cashu
-tokens, proofs, preimages, or a predecessor event ID.
+Public reservation fields currently include the proposal seal ID and taker
+commitment. They do not include private message bodies, settlement evidence,
+Cashu tokens, proofs, preimages, or a predecessor order event ID.
 
 ## Replaceable-event selection
 
 Consumers group events by `(kind, pubkey, d)`. They verify the signature,
-canonical schema, address, market tags, exact rational price, and state
-invariants before considering an event. NIP-01 replacement ordering applies:
-greater `created_at` wins; equal timestamps use lexicographically smaller event
-ID.
+canonical schema, address, market tags, integer cents-per-BTC price, and state
+invariants before considering an event. The order service selects the greatest
+validated revision, then greatest `created_at`, then lexicographically smallest
+event ID. The live feed also refuses a lower revision or an older timestamp.
+Relay replacement ordering alone does not protect against revision regression.
 
 A private operation must name both the exact current projection event ID and
-its state revision. Before signing a successor, the maker loads the current
-replaceable event and rejects an ID or revision mismatch. A stale taker cannot
+its state revision. Before signing a successor, the maker uses its durable local
+head when available and rejects an ID or revision mismatch. A stale taker cannot
 reserve or fill a superseded order even if it retained a valid old event.
 
 ## State changes
@@ -98,6 +102,12 @@ The outbox then records `acknowledged` and retains the artifact until an
 explicit idempotent local commit. Failed and successful per-relay receipts are
 merged monotonically. Duplicate or forged receipts fail closed.
 
+Reserve/fill announcements run independently of financial settlement when
+authenticated direct routes are available. The outbox may replace a pending
+reserve with its signed fill/release successor; delayed receipts cannot regress
+that head. Restart resumes the exact latest artifact. See
+[asynchronous settlement](../protocol/async-settlement.md).
+
 The user interface exposes a single action, **Retry same signed projection**,
 for a pending order update.
 
@@ -114,9 +124,10 @@ Every `granola/dm/v1` message contains:
 ```
 
 The reserve acceptance body repeats the reserve projection ID and revision.
-The settlement acknowledgement body repeats the fill projection ID and
-revision. The duplicate binding is deliberate: envelope and typed body must
-agree before the choreography advances.
+Envelope and typed body must agree before the choreography advances. The current
+three-message flow ends private delivery at `quote_lock`; mint observations
+drive completion. The retained extended choreography also validates fill ID and
+revision when processing `settlement_ack`.
 
 ## Local evidence
 
@@ -127,7 +138,8 @@ and the projection IDs and revisions relevant to that session.
 
 ## Consequences
 
-- Public storage is bounded to the latest order state per address.
+- The protocol needs only the latest order state per address; it cannot
+  guarantee deletion of older copies retained by relays or observers.
 - Each logical order update needs one signature and one relay
   acknowledgement.
 - There is no public audit trail of reservations or fills.

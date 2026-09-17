@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-23
+- Updated: 2026-09-17
 
 ## Context
 
@@ -14,8 +15,9 @@ to a person's public identity.
 
 Granola generates one random secp256k1 key for each order ID. The key is stored
 in the profile's private IndexedDB store only while that order is active. Every
-projection update and the maker's `reserve_accept`/`reserve_reject` message is
-signed with that order's key. A new order always gets a new key.
+projection update, `reserve_accept`, and authenticated refusal `error` is
+signed with that order's key. `reserve_reject` is an unsupported historical
+message type. A new order always gets a new key.
 
 After a terminal projection (`filled`, `canceled`, or `expired`) has been
 persisted and acknowledged by at least one configured public relay, Granola
@@ -29,7 +31,9 @@ lifetimes; rotating a Nostr order key never changes Cashu keys.
 
 - Orders from one profile are unlinkable by Nostr author key.
 - Reloads retain authority for active orders through encrypted private storage.
-- Completing an order has a cryptographic erasure point for its Nostr key.
+- Acknowledging a terminal order removes its key from the active key store.
+  This is application-level deletion, not guaranteed erasure of browser storage,
+  backups, or copies already held in memory.
 - Losing the profile loses control of active orders; Cashu recovery remains a
   separate concern.
 - The browser threat boundary still includes the private IndexedDB store.

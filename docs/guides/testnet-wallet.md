@@ -2,14 +2,15 @@
 
 Granola’s browser wallet is a test harness, not a production wallet.
 
-- `https://testnut.cashu.space` is the default fake mint and advertises BOLT11
-  issuance for `sat` and `usd`.
+- `https://testnut.cashu.space` is the configured default fake mint. Granola
+  checks supported issuance methods and units at runtime.
 - `https://nofee.testnut.cashu.space` is the no-fee test alternative.
 - The public build rejects every other mint before network access; this fixed
   allowlist matches its Content Security Policy.
 - Tokens are unbacked and have no monetary value.
 - `eur` balances can be displayed and imported when a token uses that unit,
-  but neither configured faucet advertised EUR issuance during the live check.
+  but EUR funding is not offered by the current UI; importing a unit does not
+  establish that a configured mint currently supports issuing it.
 - A mint’s active keysets do not prove that a unit is mintable. Granola reads
   the NUT-04 method/unit list and its minimum/maximum amounts.
 - Browser data is local. Clearing site data destroys any proofs not copied into

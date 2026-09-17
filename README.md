@@ -26,7 +26,7 @@ sequenceDiagram
     Alice-->>Nostr: Generate new \n ephemeral PubKey
     Alice->>Nostr: Publish Order
 
-    Nostr->>Carol: Fetches 8338 events \n Sees order
+    Nostr->>Carol: Reads kind 30078 order projections
     Carol-->>Nostr: Generate new \n ephemeral PubKey
     Carol->>Alice: Sends DM \n with pay request \n via Nostr
     Alice->>Carol: Generates H\n sends HTLC_c to PubKey
@@ -52,7 +52,9 @@ operations to agents through `window.granola`.
 
 The page also verifies and displays a public, issuer-specific SAT/USD Nostr
 order book with an exchange-style best bid, best ask, and spread. Test makers
-can sign and publish exact-rational limit orders through the UI or agent API.
+can sign and publish limit orders priced in integer cents per BTC through the
+UI or agent API. Quote settlement truncates to whole cents without changing
+the requested SAT amount.
 
 ```bash
 npm ci

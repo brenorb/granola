@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated ADRs and guides to match the current runtime, shortened duplicate
+  transport/coordinator documentation, and corrected SDK/schema limitations.
 - Removed the redundant public order `expires_at` tag; the standard `expiration`
   tag remains bound to the signed body's deadline. This PoC wire change requires
   updating older readers that require both tags.
