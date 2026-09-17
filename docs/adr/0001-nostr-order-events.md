@@ -41,7 +41,6 @@ There is no compatibility mode or event-sequence fallback.
     ["s", "open"],
     ["side", "sell"],
     ["m", "<issuer-specific-market-id>"],
-    ["expires_at", "1802592000"],
     ["expiration", "1802592000"]
   ],
   "content": "{\"schema\":\"granola/order/v1\",...}"

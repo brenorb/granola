@@ -146,9 +146,17 @@ The event MUST contain exactly the protocol tags required by the implementation:
 ["s", "<status>"]
 ["side", "buy" | "sell"]
 ["m", "<eligible-market-id>"]  // one per eligible market, sorted
-["expires_at", "<order-expiry>"]
 ["expiration", "<order-expiry>"]
 ```
+
+The single `expiration` tag MUST equal the content's `expires_at`. It is the
+standard [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md)
+relay/client expiration hint. Clients MUST also enforce expiry locally;
+relay deletion is not guaranteed.
+
+An order MAY carry sorted, unique `inbox` tags with one to three normalized
+WSS URLs for its order-authority receiver. Valid signed hints avoid separate
+inbox discovery; malformed optional hints are ignored and discovery is used.
 
 The content is the canonical `granola/order/v1` state. It MUST include order
 ID, revision, creation and expiry times, side, units, offered and requested
@@ -177,14 +185,17 @@ ID and revision; stale projections fail closed.
 
 ### 4.2 Public data boundary
 
-Public events MAY contain order terms, status, amounts, commitments, timestamps,
-and redacted settlement evidence required to verify a fill. They MUST NOT contain
+Public events contain the complete current order projection, including terms,
+status, amounts, timestamps, and its reservation fields. Settlement evidence and
+receipt histories remain private; they MUST NOT be added to public events.
+Public events MUST NOT contain
 proofs, encoded Cashu tokens, preimages, witnesses, private keys, wallet
 backups, private message bodies, or unnecessary identity metadata.
 
-The order book is rendezvous data, not a transaction ledger. A public fill is
-authoritative only after both relevant mints independently report the required
-spends and the signed fill projection is verified.
+The order book is rendezvous data, not a transaction ledger. A maker MUST verify
+both legs' mint evidence before staging a fill projection. Each participant
+decides financial completion from independently verified mint evidence; a public
+fill announcement is not a substitute for that evidence.
 
 ## 5. Private message transport
 
@@ -193,15 +204,28 @@ gift-wrapped events. NIP-04 and custom unwrapped fallback are forbidden.
 
 ### 5.1 Inbox registration
 
-Before a peer sends a private message, the recipient MUST publish and read back
-a valid kind `10050` registration authored by the exact receiving key. It MUST
+Recipients MUST stage their receiving route and start an authenticated
+subscription as soon as the receiving identity exists. Proposal and acceptance
+bodies MAY carry `response_relays`: one to three sorted, unique, normalized WSS
+URLs authenticated by the message and bound to its session and transcript.
+The proposal supplies the taker's session route; acceptance supplies the maker's
+fresh session route. These routes, and valid signed order `inbox` hints, take
+precedence over discovery. Every selected relay MUST still pass the authenticated
+capability and recipient-only delivery probe.
+
+With a directly communicated route, kind `10050` publication/readback runs in
+parallel and MUST be durably retried. Receiving readiness does not require public
+discoverability. Without a supported direct route, sending MUST wait for a valid
+published and read-back kind `10050` registration authored by the exact receiving
+key. It MUST
 have empty content and one to three exact `relay` tags containing normalized
 `wss` URLs. The list is sorted and deduplicated. Each relay MUST pass the
 deployment's authenticated capability and recipient-only delivery probe.
 
 A registration MUST be fresh, with no more than 300 seconds of future skew and
 no more than seven days of age. Missing, stale, unsupported, unauthenticated,
-or unread-back inbox state fails closed. A kind `10050` ACK is transport
+or unread-back discovery state fails closed when discovery is required.
+A kind `10050` ACK is transport
 evidence only; it does not validate a private message.
 
 ### 5.2 Envelope
@@ -298,25 +322,32 @@ The default v1 choreography is:
 
 1. Taker validates the current public order and sends `reserve_propose` to the
    maker order key.
-2. Maker validates the proposal, preflights both mints, reserves the exact
-   amount in a new public projection, generates fresh session/Cashu/refund
+2. Maker validates the proposal, preflights both mints, durably reserves the exact
+   amount locally and stages its signed projection, generates fresh session/Cashu/refund
    keys and an HTLC preimage, locks the maker-offered leg, then sends
    `reserve_accept`.
-3. Taker validates the accepted projection, terms, deadline profile, keysets,
+   Public reserve and inbox announcements run in parallel with mint preparation
+   when direct routes are available. Acceptance MUST await the persisted mint result.
+3. Taker validates the accepted projection binding, terms, deadline profile, keysets,
    and embedded maker lock before funding the counter-leg. It sends
    `quote_lock`.
 4. Maker validates the quote lock and claims it with the preimage before its
-   claim cutoff. It sends `claim_notice` when the claim evidence is committed.
+   claim cutoff.
 5. Taker observes every quote proof through NUT-07, requires one identical
    witness preimage, verifies its SHA-256 hash, and claims the maker-offered
-   leg with its settlement key. It sends `fill_request` after both spends are
-   independently evidenced.
-6. Maker verifies both legs and publishes the signed `filled` projection. It
-   sends `settlement_ack` with the public fill projection and redacted
-   commitments.
+   leg with its settlement key.
+6. Each participant verifies both legs before completing financially. Maker
+   stages the signed `filled` (or `partially_filled`) projection. With direct
+   routing, publication proceeds through the durable outbox independently of
+   financial completion; failed announcements resume after restart.
 
-The registry also supports explicit `session_ack`, `base_lock`,
-`base_lock_ack`, and `quote_lock_ack` stages for a choreography that persists
+The default flow sends exactly three private messages: `reserve_propose`,
+`reserve_accept`, and `quote_lock`. Mint observations drive subsequent settlement;
+`claim_notice`, `fill_request`, and `settlement_ack` are not required by this flow.
+
+The registry also retains explicit `session_ack`, `base_lock`,
+`base_lock_ack`, `quote_lock_ack`, `claim_notice`, `fill_request`, and
+`settlement_ack` stages for a choreography that persists
 each acknowledgement separately. If that variant is selected, its exact
 predecessor and choreography state MUST be persisted and validated; a receiver
 MUST NOT accept an acknowledgement merely because it is well formed. The
@@ -360,13 +391,18 @@ is within 30 seconds of local time:
 
 ```text
 anchor                 = max(local, base-mint, quote-mint)
-short_locktime         = anchor + 4 days
+short_locktime         = anchor + 10 minutes
 maker_claim_cutoff     = short_locktime - 120 seconds
-long_locktime          = anchor + 7 days
+long_locktime          = anchor + 20 minutes
 taker_claim_cutoff     = long_locktime - 120 seconds
-reservation_expires_at = anchor + 8 days
+reservation_expires_at = anchor + 30 minutes
 refund guard           = 60 seconds after locktime
 ```
+
+These are the deadlines generated for new sessions. Existing persisted sessions
+retain their accepted deadlines; the validators also recognize the historical
+multi-day profile. Recovery MUST NOT rewrite an existing session to the shorter
+profile.
 
 The order expiry MUST cover the reservation recovery horizon. New claims MUST
 not start at or after the relevant cutoff. Refunds MUST wait for a post-locktime
@@ -429,6 +465,12 @@ Every implementation MUST preserve these invariants:
    stated mint and clock assumptions.
 
 ## 10. Versioning and compatibility
+
+PoC correction (2026-09-17): the redundant public `expires_at` tag was removed
+in place from v1. The signed content still carries `expires_at`, matched by the
+standard `expiration` tag. Older builds requiring both tags cannot read new
+projections and must be updated. This explicitly accepted testnet break does not
+add a compatibility mode; the versioning policy below applies to future revisions.
 
 The wire version is carried in order `v` tags, the `granola/order/v1` schema,
 the `granola/dm/v1` schema, the deployment field, and the `v1` domain

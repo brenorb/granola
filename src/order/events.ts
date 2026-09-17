@@ -217,7 +217,6 @@ export async function createProjectionTemplate(
       ["side", state.side],
       ...(inboxRelays.length ? normalizeInboxListRelays(inboxRelays).map(relay => ["inbox", relay]) : []),
       ...markets.map((market) => ["m", market]),
-      ["expires_at", String(state.expires_at)],
       ["expiration", String(state.expires_at)]
     ],
     content: JSON.stringify(state)
@@ -268,9 +267,6 @@ export async function parseProjectionEvent(
   }
   if (tagValues(event, "e").length !== 0) {
     throw new Error("Projection cannot reference a public predecessor");
-  }
-  if (oneTag(event, "expires_at") !== String(state.expires_at)) {
-    throw new Error("Projection expiry tag mismatch");
   }
   if (oneTag(event, "expiration") !== String(state.expires_at)) {
     throw new Error("Projection expiration tag mismatch");

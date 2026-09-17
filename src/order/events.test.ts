@@ -69,6 +69,25 @@ describe("order projection events", () => {
     expect(JSON.parse(projection.content)).not.toHaveProperty("head");
   });
 
+  it("uses one standard expiration tag bound to the signed order deadline", async () => {
+    const event = await signed();
+    expect(event.tags.filter(tag => tag[0] === "expiration")).toEqual([
+      ["expiration", String(open().expires_at)]
+    ]);
+    expect(event.tags.some(tag => tag[0] === "expires_at")).toBe(false);
+    await expect(parseProjectionEvent(event, () => true)).resolves.toMatchObject({ state: open() });
+
+    const withoutExpiration = event.tags.filter(tag => tag[0] !== "expiration");
+    for (const tags of [
+      withoutExpiration,
+      [...event.tags, ["expiration", String(open().expires_at)]],
+      [...withoutExpiration, ["expiration", String(open().expires_at + 1)]]
+    ]) {
+      await expect(parseProjectionEvent({ ...event, tags }, () => true))
+        .rejects.toThrow(/expiration/i);
+    }
+  });
+
   it("keeps the same d tag while event ID and revision change", async () => {
     const initial = await signed();
     const reservedState = reserveOrder(open(), {

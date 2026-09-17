@@ -79,7 +79,9 @@ financeiras nem alteradas as chaves por reserva.
 
 ## Publicação e compatibilidade
 
-Mudanças ficam na branch de integração; este relatório não afirma deploy.
+Atualização de consolidação: `e25a4ec` foi integrado em `main` e publicado em
+2026-09-06, conforme o encerramento da tarefa Audit Granola overengineering.
+O build publicado restaurou saldos e seis swaps concluídos após reload.
 O upgrade mantém registros existentes e solicita recarregamento de abas antigas.
 Após escrita binária, rollback precisa de leitor dual e IndexedDB v2; o build
 antigo v1 falha fechado com VersionError. Nenhum banco é apagado no upgrade.

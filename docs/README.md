@@ -15,6 +15,8 @@
 - [Browser agent API](guides/agent-api.md)
 - [Testnet wallet notes](guides/testnet-wallet.md)
 - [NIP-17 coordination latency](performance/nip17-latency.md)
+- [Consolidated performance decisions and experiment disposition](performance/consolidation.md)
+- [Asynchronous settlement and durable announcements](protocol/async-settlement.md)
 
 ## Architecture decisions
 
