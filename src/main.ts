@@ -10,7 +10,6 @@ import {
 } from "./browser/lock.js";
 import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
 import { coalesceRefresh } from "./browser/refresh.js";
-import { watchOrderBook } from "./order/book-feed.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { createBrowserTradeRuntime, TRADE_INBOX_RELAY } from "./browser/trade-runtime.js";
@@ -196,29 +195,25 @@ async function refresh(state?: GranolaState): Promise<GranolaState> {
   return next;
 }
 
-let bookFeed: { close(): void } | undefined;
+let hasOrderBook = false;
 const refreshOrderBook = coalesceRefresh(async () => {
-  bookFeed?.close();
+  if (!hasOrderBook) renderOrderBook(orderbook, { status: "loading" });
   try {
-    const identities = await orderApi.getMakerPublicKeys();
-    bookFeed = await watchOrderBook(relayClient, TEST_MARKET, (book) => renderOrderBook(
-      orderbook,
-      { status: "ready", book },
-      {
-        onTake: takeOrderFromBook,
-        onCancel: cancelOrderFromBook,
-        canCancel: (order) => identities.includes(order.makerPubkey)
-      }
-    ), (error) => renderOrderBook(orderbook, { status: "error", message: messageOf(error) }));
+    const [result, identities] = await Promise.all([
+      orderApi.getOrderBook(),
+      orderApi.getMakerPublicKeys()
+    ]);
+    renderOrderBook(orderbook, { status: "ready", book: result.book }, {
+      onTake: takeOrderFromBook,
+      onCancel: cancelOrderFromBook,
+      canCancel: (order) => identities.includes(order.makerPubkey)
+    });
+    hasOrderBook = true;
   } catch (error) {
-    renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
+    if (!hasOrderBook) renderOrderBook(orderbook, { status: "error", message: messageOf(error) });
     throw error;
   }
 });
-
-// Periodic full backfill also recovers relays unavailable during subscription startup.
-const bookBackfillTimer = setInterval(() => { void refreshOrderBook().catch(() => {}); }, 60_000);
-window.addEventListener("pagehide", () => { clearInterval(bookBackfillTimer); bookFeed?.close(); });
 
 function tradeController(): Promise<BrowserTradeController> {
   tradeControllerPromise ??= createBrowserTradeRuntime({

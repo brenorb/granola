@@ -5,6 +5,7 @@ import type { OrderOutboxEntry } from "../storage/order-outbox.js";
 import type { NostrEvent, UnsignedNostrEvent } from "./events.js";
 import {
   createOrderState,
+  cancelOrder,
   reserveOrder,
   type OrderState
 } from "./model.js";
@@ -235,4 +236,32 @@ describe("NostrOrderService", () => {
     expect(result.book.asks[0]?.eventId).toBe(later.id);
     expect(result.rejected).toBe(1);
   });
+  it("keeps verified snapshots through relay loss and accepts cancellation after reconnect", async () => {
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(new FakeSigner(), relay, () => true);
+    const market = { baseUnit: "sat", quoteUnit: "usd",
+      baseMint: "https://mint.example", quoteMint: "https://quote.example" };
+    const initial = await service.stage(open());
+    const canceled = await service.stage(cancelOrder(open()));
+    relay.marketEvents = [initial.projection];
+    expect((await service.loadBook(market, 1_700_000_100)).book.asks).toHaveLength(1);
+    relay.marketEvents = [];
+    expect((await service.loadBook(market, 1_700_000_100)).book.asks[0]?.eventId).toBe(initial.projection.id);
+    relay.marketEvents = [canceled.projection];
+    expect((await service.loadBook(market, 1_700_000_100)).book.asks).toHaveLength(0);
+    relay.marketEvents = [initial.projection];
+    expect((await service.loadBook(market, 1_700_000_100)).book.asks).toHaveLength(0);
+  });
+
+  it("expires retained orders even when a later query returns no events", async () => {
+    const relay = new FakeRelay();
+    const service = new NostrOrderService(new FakeSigner(), relay, () => true);
+    const market = { baseUnit: "sat", quoteUnit: "usd",
+      baseMint: "https://mint.example", quoteMint: "https://quote.example" };
+    relay.marketEvents = [(await service.stage(open())).projection];
+    expect((await service.loadBook(market, 1_700_000_100)).book.asks).toHaveLength(1);
+    relay.marketEvents = [];
+    expect((await service.loadBook(market, open().expires_at)).book.asks).toHaveLength(0);
+  });
+
 });

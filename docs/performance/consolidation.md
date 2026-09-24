@@ -92,3 +92,34 @@ wakeup fix is patch-equivalent to main; the latter's useful inbox behavior was
 integrated as `14c4395`, while its old UI copy was rejected. Existing archive
 tags and remote refs were not changed. Trashed files remain recoverable, but
 their old worktree registrations have been removed.
+
+## Order-book transport rollback — 2026-09-24
+
+The browser order book again calls `OrderApi.getOrderBook()` →
+`NostrOrderService.loadBook()` → `RelayClient.queryProjections()` using the
+existing nostr-tools SimplePool WebSockets, as before `b043b62`. Applesauce was
+never installed; that change adopted some of its design ideas.
+
+Removed the presentation-only streaming feed, its subscribeProjections adapter,
+and the 60-second close/reopen timer. The timer rebuilt an empty in-memory feed;
+connection-close callbacks replaced the entire visible book with an error.
+Snapshots now reuse the order service's existing validated latest projections,
+including cancellation tombstones. A refresh leaves the displayed book intact
+while pending or failed. Successful snapshots still filter expiry and validate
+signatures, market and replacement order. Refreshes happen on startup, explicit
+Refresh orders, and existing publish/cancel/settlement actions; unsolicited
+remote updates no longer stream into the page. Cached presentation never bypasses
+the existing action-time checks. No new persistent browser cache was added.
+
+Retained unrelated improvements: refresh coalescing, row/input preservation,
+and exact validated inbox readbacks. Financial messages and settlement transport
+are unchanged. Regression tests cover empty relay responses, recovery with a
+cancellation, delayed old events, and expiry of retained orders.
+
+Validation: 443 tests passed (7 skipped), production build/typecheck passed.
+A Chrome production-preview check with intercepted WebSocket relays verified
+retention after socket closure, no reset after 61 seconds, cancellation on
+reconnect/refresh, and no stale reopening. This is controlled browser/network
+validation, not a new live Testnut swap. Reproduce after starting `vite preview`
+on port 5182 with `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs npx tsx
+scripts/check-orderbook-reconnect.mjs`. The check publishes nothing externally.
