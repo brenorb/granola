@@ -14,6 +14,8 @@ export async function waitForProofsSpent(wallet: Wallet, proofs: Proof[]): Promi
   const startedAt = performance.now();
   let outcome: "spent" | "timeout" | "unavailable" = "timeout";
   let updates = 0;
+  const states = { UNSPENT: 0, PENDING: 0, SPENT: 0 };
+  let regressiveUpdates = 0;
   const abort = new AbortController();
   let cancel: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -23,8 +25,11 @@ export async function waitForProofsSpent(wallet: Wallet, proofs: Proof[]): Promi
       void wallet.on.proofStateUpdates(proofs, (update) => {
         if (!expected.has(update.Y)) return;
         updates += 1;
+        if (update.state in states) states[update.state] += 1;
         if (update.state === CheckStateEnum.SPENT) spent.add(update.Y);
-        else spent.delete(update.Y);
+        else if (spent.has(update.Y)) regressiveUpdates += 1;
+        // SPENT is terminal. Delayed PENDING/UNSPENT notifications must not
+        // erase a wakeup already seen; fresh NUT-07 still decides settlement.
         if (spent.size === expected.size) {
           outcome = "spent";
           resolve();
@@ -47,7 +52,7 @@ export async function waitForProofsSpent(wallet: Wallet, proofs: Proof[]): Promi
     }
     try {
       performance.measure("granola:proof-wait", {
-        start: startedAt, end: performance.now(), detail: { outcome, updates, proofCount: proofs.length }
+        start: startedAt, end: performance.now(), detail: { outcome, updates, states, regressiveUpdates, proofCount: proofs.length }
       });
     } catch {
       // Diagnostics must never change settlement behavior.

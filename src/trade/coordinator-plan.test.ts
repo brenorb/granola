@@ -29,7 +29,7 @@ function session(
       baseUnit: "sat",
       baseKeyset: "00deadbeefcafeee",
       baseAmount: "20",
-      quoteMint: "https://nofee.testnut.cashu.space",
+      quoteMint: "https://testnut.cashudevkit.org",
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "1",

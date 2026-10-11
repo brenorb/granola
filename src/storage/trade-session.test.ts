@@ -178,7 +178,7 @@ const session: TradeSession = {
     baseUnit: "sat",
     baseKeyset: "00deadbeefcafeee",
     baseAmount: "20",
-    quoteMint: "https://nofee.testnut.cashu.space",
+    quoteMint: "https://testnut.cashudevkit.org",
     quoteUnit: "usd",
     quoteKeyset: "00deadbeefcafeff",
     quoteAmount: "1",
@@ -387,7 +387,7 @@ async function revisionZeroTaker(id = "12".repeat(32)): Promise<TradeSession> {
     offered: { unit: "sat", mint: "https://testnut.cashu.space" },
     requested: {
       unit: "usd",
-      acceptableMints: ["https://nofee.testnut.cashu.space"]
+      acceptableMints: ["https://testnut.cashudevkit.org"]
     },
     amount: "20",
     priceCentsPerBtc: "5000000"

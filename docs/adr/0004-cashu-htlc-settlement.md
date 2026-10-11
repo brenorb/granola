@@ -149,7 +149,7 @@ It leaks settlement material more broadly than necessary and creates avoidable r
 This is a supported topology. It exercises atomic settlement and recovery
 without exercising the additional inter-mint failure boundary. The
 demonstration currently uses SAT at `https://testnut.cashu.space` and USD at
-`https://nofee.testnut.cashu.space`, which is the two-mint topology.
+`https://testnut.cashudevkit.org`, which is the two-mint topology.
 
 ## Consequences
 

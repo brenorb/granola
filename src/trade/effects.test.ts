@@ -74,7 +74,7 @@ async function publishedFill(): Promise<PublishedOrderProjection> {
     offered: { unit: "sat", mint: "https://testnut.cashu.space" },
     requested: {
       unit: "usd",
-      acceptableMints: ["https://nofee.testnut.cashu.space"]
+      acceptableMints: ["https://testnut.cashudevkit.org"]
     },
     amount: "20",
     priceCentsPerBtc: "5000000"
@@ -172,7 +172,7 @@ function baseSession(): TradeSession {
       baseUnit: "sat",
       baseKeyset: "base-keyset",
       baseAmount: "20",
-      quoteMint: "https://nofee.testnut.cashu.space",
+      quoteMint: "https://testnut.cashudevkit.org",
       quoteUnit: "usd",
       quoteKeyset: "quote-keyset",
       quoteAmount: "1",

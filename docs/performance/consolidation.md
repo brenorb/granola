@@ -1,5 +1,53 @@
 # Performance decisions consolidated in main
 
+## Relay-wait review and rejected observation races — 2026-10-11
+
+No additional runtime optimization accepted. First public ACK return with
+durable completion and continued replication was tested in 16 interleaved real
+swaps. Observed medians were 9.690 → 9.613 seconds across distinct mints and
+10.205 → 9.972 seconds with one mint; each topology had two faster and two slower
+matched pairs. Public reserve/fill fanout is already background work, and the
+current private transport has one verified inbox relay. These differences do
+not demonstrate a reproducible critical-path improvement, so the prototype was
+removed. Keep reconciliation for current-order, order-book and inbox-discovery
+queries; a fast stale projection must not hide a cancellation. Preserve the
+existing first ACK plus exact signed-readback quorum for inbox registration.
+
+Also reject fixed-delay and RTT-paced extra NUT-07 observations: separate
+four-pair real comparisons increased complete-swap medians from 9.289 to 9.782
+seconds and from 9.063 to 9.387 seconds. Their extra polling machinery was removed.
+An unmeasured combined incoming-validation/claim-preparation draft is not retained.
+
+Retain the profiling corrections and regressions for stale signed readbacks,
+conflicting inbox lists and delayed signed cancellation. Final production JS
+matches the previous validated baseline exactly. See
+[relay report, acknowledgements and raw evidence](2026-10-11-relay-waits.md).
+Validation: 458 passing tests, seven skipped; production build/typecheck and
+controlled browser reconnect checks passed.
+
+## Measured trading-speed update — 2026-10-10
+
+Accepted: fresh NUT-07 observation before opening a subscription for an already
+spent leg, and terminal SPENT wakeup hints that delayed PENDING updates cannot
+erase. Financial completion still requires fresh mint evidence and verified
+preimage witnesses. The three private messages, isolated reservation keys,
+metadata preflight freshness and durable recovery operations remain.
+
+Four interleaved real pairs per topology measured median time from Take to both
+wallets Filled: 14.35 → 9.94 seconds with one mint (30.7% reduction), and
+11.64 → 9.45 seconds with distinct public test mints (18.8% reduction). Every
+matched candidate was faster; the samples are small and network-dependent.
+See [report and raw evidence](2026-10-10-trading-speed.md) for attribution,
+directions, subscription outcomes, balance/reload assertions and limitations.
+
+Replace the unreachable configured USD mint with `testnut.cashudevkit.org`,
+paired in HTTPS/WSS CSP origins and the fixed allowlist. It passed actual spent
+witness retrieval and browser subscription notifications. Reject
+`testnut.cashu.exchange`: advertised NUT-07/NUT-14 alone was insufficient;
+its spent witness failed validation. No weaker settlement validation was adopted.
+
+The sections below record earlier consolidation and historical experiments.
+
 Reviewed on 2026-09-17 against `cd439c4` and the September 5–6 task
 **Audit Granola overengineering** (`01a071be-5c39-79b3-a9be-76b101d87157`).
 The task ended with deployment of `e25a4ec`; that commit is already an ancestor

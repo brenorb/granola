@@ -74,7 +74,7 @@ function view(revision = 0): PublicTradeView {
       baseUnit: "sat",
       baseKeyset: "00deadbeefcafeee",
       baseAmount: "1000",
-      quoteMint: "https://nofee.testnut.cashu.space",
+      quoteMint: "https://testnut.cashudevkit.org",
       quoteUnit: "usd",
       quoteKeyset: "00deadbeefcafeff",
       quoteAmount: "20",
@@ -519,6 +519,14 @@ describe("BrowserTradeController", () => {
     expect(second).toBe(first);
     releaseAdvance();
     await Promise.all([first, second]);
+    expect(api.advanceTrade).toHaveBeenCalledOnce();
+  });
+
+  it.each(["released", "frozen"] as const)("stops a mid-swap abort in %s without another settlement action", async phase => {
+    const { controller, api } = setup();
+    api.getTrade.mockResolvedValue({ ...view(), phase: "base_locked" });
+    api.advanceTrade.mockResolvedValueOnce({ ...view(1), phase });
+    await expect(controller.runUntilSettled(sessionId)).rejects.toThrow(`terminal phase ${phase}`);
     expect(api.advanceTrade).toHaveBeenCalledOnce();
   });
 

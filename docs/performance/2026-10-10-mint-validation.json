@@ -1,0 +1,45 @@
+{
+  "measuredAt": "2026-10-11",
+  "method": "Public metadata checks, followed by a real HTLC lock/claim and fresh NUT-07 preimage-witness validation. No bearer data retained.",
+  "candidates": [
+    { "mint": "https://nofee.testnut.cashu.space", "outcome": "DNS failure", "dnsStatus": "NXDOMAIN" },
+    { "mint": "https://nofees.testnut.cashu.space", "outcome": "DNS failure" },
+    { "mint": "https://testnut.dns4sats.xyz", "outcome": "DNS failure" },
+    { "mint": "https://testnut.brownduff.rocks", "outcome": "unreachable" },
+    { "mint": "https://fake.thesimplekid.dev", "outcome": "unreachable" },
+    { "mint": "https://cashu.centurymetadata.org", "outcome": "SAT only; Core Lightning backend, not verified as free auto-funded test tokens" },
+    { "mint": "https://dev-cashu-mint.ducatprotocol.com", "outcome": "No USD method or advertised NUT-14" },
+    {
+      "mint": "https://testnut.cashu.exchange",
+      "version": "Nutshell-CF/0.0.1",
+      "nut07Advertised": true,
+      "nut14Advertised": true,
+      "unit": "usd",
+      "keysetId": "0039ff30789bc776",
+      "failedStage": "spent-witness",
+      "errorClass": "HtlcInvariantError",
+      "errorCode": "spent-witness",
+      "outcome": "Rejected: actual spent preimage witness did not pass validation despite advertised support"
+    },
+    {
+      "mint": "https://testnut.cashudevkit.org",
+      "version": "cdk-mintd/0.18.0",
+      "nut07Advertised": true,
+      "nut14Advertised": true,
+      "nut17Advertised": true,
+      "unit": "usd",
+      "keysetId": "0092cc0169b3555a",
+      "status": "SPENT",
+      "witnessValidated": true,
+      "websocketNotificationsValidatedUnderCsp": true,
+      "outcome": "Accepted: direct witness probe and full distinct-mint browser swaps passed"
+    }
+  ],
+  "discoverySources": [
+    "https://github.com/cashubtc/awesome-cashu/blob/main/README.md",
+    "https://docs.cashu.space/faq",
+    "https://cashu.exchange/",
+    "https://cashudevkit.org/examples/getting-started.html",
+    "https://github.com/OpenTollGate/tollgate-module-basic-go/issues/271"
+  ]
+}

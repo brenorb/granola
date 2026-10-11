@@ -176,6 +176,16 @@ describe("strict NIP-17 inbox transport", () => {
     expect(selected.relays).toEqual(inboxRelays);
   });
 
+  it("reconciles conflicting signed same-time inbox lists independently of arrival order", () => {
+    const a = createInboxList(["wss://a.example"], recipientKey, now);
+    const b = createInboxList(["wss://b.example"], recipientKey, now);
+    const observations = [{ relay: discoveryRelays[0]!, event: a }, { relay: discoveryRelays[1]!, event: b }];
+    const expected = [a.id, b.id].sort()[0];
+    expect(selectInboxList(observations, recipient, now).event.id).toBe(expected);
+    expect(selectInboxList([...observations].reverse(), recipient, now).event.id).toBe(expected);
+    expect(() => selectInboxList(observations, recipient, now, 2)).toThrow("split or missing");
+  });
+
   it("returns immutable validated inbox-list snapshots isolated from relay mutation", () => {
     const candidate = createInboxList(inboxRelays, recipientKey, now);
     const validated = validateInboxList(candidate, recipient, now);
@@ -256,6 +266,26 @@ describe("strict NIP-17 inbox transport", () => {
       releaseSlowRelays();
       await publication;
     }
+  });
+
+  it("does not return on a fast ACK with a stale signed readback before a slow exact readback", async () => {
+    const port = new FakeRelayPort();
+    const list = createInboxList(inboxRelays, recipientKey, now);
+    port.readbackOverride.set(discoveryRelays[0]!, [createInboxList(inboxRelays, recipientKey, now - 1)]);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    port.publicationGates.set(discoveryRelays[1]!, gate);
+    port.failPublishOnce.add(discoveryRelays[2]!);
+    let result: Awaited<ReturnType<typeof publishInboxList>> | undefined;
+    const publication = publishInboxList(list, discoveryRelays, recipientKey, port, now)
+      .then(value => { result = value; return value; });
+    try {
+      await vi.waitFor(() => expect(port.queried).toHaveLength(1));
+      expect(result).toBeUndefined();
+      release();
+      expect((await publication).confirmed).toEqual([discoveryRelays[1]]);
+      expect(result!.readback.find(value => value.found)?.event).toEqual(structuredClone(list));
+    } finally { release(); await publication; }
   });
 
   it("does not count a malformed relay substitution as exact readback", async () => {

@@ -440,9 +440,16 @@ export class CashuTradeClient {
       "token-commitment"
     );
     const opened = await this.openToken(token);
-    await this.dependencies.waitForSpent?.(opened.wallet, opened.proofs);
-    const live = await this.dependencies.snapshot(opened.wallet, opened.proofs);
+    let live = await this.dependencies.snapshot(opened.wallet, opened.proofs);
     this.validateStaticLock(opened, live, expected);
+    const current = observeHtlcStates(opened.proofs, live.states, expected.hash);
+    // An already-spent proof has no future transition to wait for. Fresh NUT-07
+    // evidence (including its verified witness) can finish immediately.
+    if (current.status === "SPENT" || !this.dependencies.waitForSpent) return current;
+    await this.dependencies.waitForSpent(opened.wallet, opened.proofs);
+    live = await this.dependencies.snapshot(opened.wallet, opened.proofs);
+    this.validateStaticLock(opened, live, expected);
+    // A WebSocket notification is only a wakeup; always validate fresh mint state.
     return observeHtlcStates(opened.proofs, live.states, expected.hash);
   }
 

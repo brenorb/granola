@@ -4,7 +4,8 @@ Granola’s browser wallet is a test harness, not a production wallet.
 
 - `https://testnut.cashu.space` is the configured default fake mint. Granola
   checks supported issuance methods and units at runtime.
-- `https://nofee.testnut.cashu.space` is the no-fee test alternative.
+- `https://testnut.cashudevkit.org` is the configured USD test mint. Its current
+  fees and capabilities are checked at runtime.
 - The public build rejects every other mint before network access; this fixed
   allowlist matches its Content Security Policy.
 - Tokens are unbacked and have no monetary value.

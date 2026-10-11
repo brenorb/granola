@@ -114,14 +114,14 @@ For fresh workspaces funded exactly as above, expect approximately:
 
 | Wallet | Before | Expected after |
 | --- | --- | --- |
-| Maker | 10,000 SAT | approximately 9,980 SAT + USD 0.01 |
-| Taker | USD 100.00 | 20 SAT + USD 99.99 |
+| Maker | 10,000 SAT | 9,980 SAT minus SAT mint fees + USD 0.01 |
+| Taker | USD 100.00 | 20 SAT + USD 99.99 minus USD mint fees |
 
-The SAT total can differ if the test mint changes its input fee or proof
+The SAT and USD totals can differ if the respective mints change their input fees or proof
 selection. Verify the value movement rather than assuming an absolute total:
 
 - maker gained one USD minor unit and spent 20 SAT plus the SAT mint fee;
-- taker spent one USD minor unit and gained 20 SAT;
+- taker spent one USD minor unit plus the USD mint fee and gained 20 SAT;
 - both session cards say **Filled**; and
 - the exercised 20 SAT order disappears from the refreshed order book.
 

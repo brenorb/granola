@@ -403,7 +403,63 @@ describe("incoming lock validation and settlement", () => {
     await expect(client.observeSpentInternal(
       "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
     )).resolves.toEqual({ status: "SPENT", proofCount: locked.length, preimage: material.preimage });
-    expect(dependencies.waitForSpent).toHaveBeenCalledTimes(2);
+    expect(dependencies.waitForSpent).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes an already-spent leg from verified NUT-07 evidence without waiting for another transition", async () => {
+    const material = createHtlcMaterial();
+    const { client, locked, setSnapshot, dependencies } = harness(material.hash);
+    dependencies.waitForSpent = vi.fn(async () => undefined);
+    setSnapshot(snapshot(locked, snapshot(locked).states.map(state => ({
+      ...state, state: CheckStateEnum.SPENT,
+      witness: JSON.stringify({ preimage: material.preimage, signatures: [] })
+    }))));
+    await expect(client.observeSpentInternal(
+      "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
+    )).resolves.toMatchObject({ status: "SPENT", proofCount: locked.length });
+    expect(dependencies.snapshot).toHaveBeenCalledTimes(1);
+    expect(dependencies.waitForSpent).not.toHaveBeenCalled();
+  });
+
+  it("rechecks mint evidence after a subscription hint instead of trusting the notification", async () => {
+    const material = createHtlcMaterial();
+    const { client, dependencies } = harness(material.hash);
+    dependencies.waitForSpent = vi.fn(async () => undefined);
+    await expect(client.observeSpentInternal(
+      "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
+    )).resolves.toMatchObject({ status: "UNSPENT" });
+    expect(dependencies.snapshot).toHaveBeenCalledTimes(2);
+    expect(dependencies.waitForSpent).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects already-spent proofs with missing or incorrect witnesses before waiting", async () => {
+    const material = createHtlcMaterial();
+    const { client, locked, setSnapshot, dependencies } = harness(material.hash);
+    dependencies.waitForSpent = vi.fn(async () => undefined);
+    for (const witness of [null, JSON.stringify({ preimage: "00".repeat(32), signatures: [] })]) {
+      setSnapshot(snapshot(locked, snapshot(locked).states.map(state => ({
+        ...state, state: CheckStateEnum.SPENT, witness
+      }))));
+      await expect(client.observeSpentInternal(
+        "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
+      )).rejects.toThrow(/spent-witness/);
+    }
+    expect(dependencies.waitForSpent).not.toHaveBeenCalled();
+  });
+
+  it("propagates a mint outage before or after a wakeup without accepting settlement evidence", async () => {
+    const material = createHtlcMaterial();
+    for (const afterWakeup of [false, true]) {
+      const { client, locked, dependencies } = harness(material.hash);
+      dependencies.waitForSpent = vi.fn(async () => undefined);
+      const live = vi.mocked(dependencies.snapshot);
+      if (afterWakeup) live.mockResolvedValueOnce(snapshot(locked));
+      live.mockRejectedValueOnce(new Error("synthetic mint outage"));
+      await expect(client.observeSpentInternal(
+        "synthetic-encoded-lock", expected(material.hash), "cd".repeat(32)
+      )).rejects.toThrow("synthetic mint outage");
+      expect(dependencies.waitForSpent).toHaveBeenCalledTimes(afterWakeup ? 1 : 0);
+    }
   });
 
   it("enforces NUT-12 DLEQ before exposing a spent witness", async () => {

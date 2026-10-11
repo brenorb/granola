@@ -37,7 +37,7 @@ function session(): TradeSession {
       baseUnit: "sat",
       baseKeyset: "base-keyset",
       baseAmount: "20",
-      quoteMint: "https://nofee.testnut.cashu.space",
+      quoteMint: "https://testnut.cashudevkit.org",
       quoteUnit: "usd",
       quoteKeyset: "quote-keyset",
       quoteAmount: "1",

@@ -41,7 +41,7 @@ const terms: GranolaTradeTerms = {
   base_mint: "https://testnut.cashu.space",
   base_keyset: "0184237e63ce3423",
   quote_unit: "usd",
-  quote_mint: "https://nofee.testnut.cashu.space",
+  quote_mint: "https://testnut.cashudevkit.org",
   quote_keyset: "00ba2e3e5779e035",
   base_amount: "1000",
   quote_amount: "20",

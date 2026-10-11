@@ -105,7 +105,7 @@ assumption, not a claim that the protocol removes mint risk.
   "base_mint": "https://testnut.cashu.space",
   "base_keyset": "<keyset-id>",
   "quote_unit": "usd",
-  "quote_mint": "https://nofee.testnut.cashu.space",
+  "quote_mint": "https://testnut.cashudevkit.org",
   "quote_keyset": "<keyset-id>",
   "base_amount": "2000",
   "quote_amount": "100",

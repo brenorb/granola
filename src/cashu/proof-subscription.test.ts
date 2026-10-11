@@ -32,7 +32,7 @@ describe("proof-state subscription wakeup", () => {
     const shell = new DOMParser().parseFromString(html, "text/html");
     const policy = shell.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute("content")!;
     const connect = policy.split(";").find(part => part.trim().startsWith("connect-src "))!.trim().split(/\s+/);
-    for (const mint of ["testnut.cashu.space", "nofee.testnut.cashu.space"]) {
+    for (const mint of ["testnut.cashu.space", "testnut.cashudevkit.org"]) {
       expect(connect).toContain(`https://${mint}`);
       expect(connect).toContain(`wss://${mint}`);
     }
@@ -69,6 +69,19 @@ describe("proof-state subscription wakeup", () => {
     expect(h.disconnect).toHaveBeenCalled();
     h.subscribe.mockRejectedValueOnce(new Error("connection refused"));
     await waitForProofsSpent(h.wallet, h.proofs);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not let a delayed pending update erase a spent wakeup", async () => {
+    const h = harness();
+    const wait = waitForProofsSpent(h.wallet, h.proofs);
+    h.emit(h.ys[0]!);
+    h.emit(h.ys[0]!, CheckStateEnum.PENDING);
+    h.emit(h.ys[0]!, CheckStateEnum.UNSPENT);
+    h.emit(h.ys[1]!);
+    await wait;
+    expect(h.cancel).toHaveBeenCalledOnce();
+    expect(h.disconnect).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
 

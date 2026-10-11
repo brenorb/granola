@@ -5,7 +5,7 @@ import { buildOrderBook, createOrderState, type OrderRecord } from "../order/mod
 import { renderOrderBook } from "./orderbook.js";
 
 const baseMint = "https://testnut.cashu.space";
-const quoteMint = "https://nofee.testnut.cashu.space";
+const quoteMint = "https://testnut.cashudevkit.org";
 const market = {
   baseUnit: "sat",
   baseMint,

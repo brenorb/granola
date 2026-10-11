@@ -414,7 +414,7 @@ describe("Nostr trade transport", () => {
       base_mint: "https://testnut.cashu.space",
       base_keyset: "00ba2e3e5779e035",
       quote_unit: "usd",
-      quote_mint: "https://nofee.testnut.cashu.space",
+      quote_mint: "https://testnut.cashudevkit.org",
       quote_keyset: "00ca2e3e5779e035",
       base_amount: "20",
       quote_amount: "1",

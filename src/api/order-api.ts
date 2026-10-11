@@ -41,7 +41,7 @@ export const TEST_MARKET: ExactMarket = {
   baseUnit: "sat",
   baseMint: "https://testnut.cashu.space",
   quoteUnit: "usd",
-  quoteMint: "https://nofee.testnut.cashu.space"
+  quoteMint: "https://testnut.cashudevkit.org"
 };
 
 export interface MakerIdentityPort {

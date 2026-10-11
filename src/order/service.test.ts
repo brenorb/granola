@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools/pure";
 
 import type { RelayReceipt } from "../nostr/relay.js";
 import type { OrderOutboxEntry } from "../storage/order-outbox.js";
-import type { NostrEvent, UnsignedNostrEvent } from "./events.js";
+import { orderAddress, type NostrEvent, type UnsignedNostrEvent } from "./events.js";
 import {
   createOrderState,
   cancelOrder,
@@ -106,6 +107,31 @@ function entry(
 }
 
 describe("NostrOrderService", () => {
+  it("waits for a delayed cancellation rather than accepting a fast stale book or current-order response", async () => {
+    const relay = new FakeRelay();
+    const testKey = generateSecretKey();
+    const author = getPublicKey(testKey);
+    const signer: OrderSigner = { publicKey: async () => author,
+      sign: async template => structuredClone(finalizeEvent(template, testKey)) };
+    const service = new NostrOrderService(signer, relay);
+    const initial = await service.stage(open());
+    const canceled = await service.stage(cancelOrder(open()));
+    testKey.fill(0);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const responses = async () => [...[initial.projection], ...await gate.then(() => [canceled.projection])];
+    relay.queryOrder = responses; relay.queryProjections = responses;
+    const exact = service.loadCurrentProjection(orderAddress(author, ORDER_ID), initial.projection.id, "0");
+    const book = service.loadBook({ baseUnit: "sat", quoteUnit: "usd",
+      baseMint: "https://mint.example", quoteMint: "https://quote.example" }, 1_700_000_100);
+    let finished = false;
+    void book.then(() => { finished = true; });
+    await Promise.resolve(); expect(finished).toBe(false);
+    release();
+    await expect(exact).rejects.toThrow("not current");
+    expect((await book).book.asks).toHaveLength(0);
+  });
+
   it("signs and stages only one complete kind 30078 projection", async () => {
     const signer = new FakeSigner();
     const service = new NostrOrderService(signer, new FakeRelay(), () => true);

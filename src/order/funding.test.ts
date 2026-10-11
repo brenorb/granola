@@ -19,7 +19,7 @@ const wallet: WalletView = {
       keysetIds: ["sat-keyset"]
     },
     {
-      mintUrl: "https://nofee.testnut.cashu.space",
+      mintUrl: "https://testnut.cashudevkit.org",
       unit: "usd",
       amount: "20",
       proofCount: 1,
@@ -33,7 +33,7 @@ const market = {
   baseUnit: "sat",
   baseMint: "https://testnut.cashu.space",
   quoteUnit: "usd",
-  quoteMint: "https://nofee.testnut.cashu.space"
+  quoteMint: "https://testnut.cashudevkit.org"
 };
 
 describe("order funding guard", () => {

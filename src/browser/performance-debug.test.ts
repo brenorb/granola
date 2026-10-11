@@ -29,12 +29,15 @@ describe("performance debug timeline", () => {
   it("records proof subscription outcomes without witness or proof identifiers", () => {
     const timeline = createPerformanceDebugTimeline(document, clock(), false);
     timeline.recordProofWait({ name: "granola:proof-wait", startTime: 1, duration: 2,
-      detail: { outcome: "spent", updates: 3, proofCount: 1, witness: "synthetic-private", Y: "hidden" }
+      detail: { outcome: "spent", updates: 3, proofCount: 1, witness: "synthetic-private", Y: "hidden",
+        states: { UNSPENT: 1, PENDING: 1, SPENT: 1, private: "must-not-appear" } }
     } as PerformanceMeasure);
     const output = document.querySelector("#granola-performance")!.textContent!;
-    expect(JSON.parse(output).entries[0].detail).toEqual({ outcome: "spent", updates: 3, proofCount: 1 });
+    expect(JSON.parse(output).entries[0].detail).toEqual({ outcome: "spent", updates: 3, proofCount: 1,
+      states: { UNSPENT: 1, PENDING: 1, SPENT: 1 } });
     expect(output).not.toContain("synthetic-private");
     expect(output).not.toContain("hidden");
+    expect(output).not.toContain("must-not-appear");
     document.querySelector("#granola-performance")!.remove();
   });
   it("identifies metadata requests without exposing keyset IDs or query strings", () => {

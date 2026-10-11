@@ -41,7 +41,7 @@ import {
 
 const now = 1_800_000_000;
 const baseMint = "https://testnut.cashu.space";
-const quoteMint = "https://nofee.testnut.cashu.space";
+const quoteMint = "https://testnut.cashudevkit.org";
 const baseKeyset = "00deadbeefcafeee";
 const quoteKeyset = "00deadbeefcafeff";
 const orderId = "11111111-1111-4111-8111-111111111111";

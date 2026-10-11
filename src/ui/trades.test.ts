@@ -37,7 +37,7 @@ const trade: PublicTradeView = {
     baseUnit: "sat",
     baseKeyset: "base-keyset",
     baseAmount: "20",
-    quoteMint: "https://nofee.testnut.cashu.space",
+    quoteMint: "https://testnut.cashudevkit.org",
     quoteUnit: "usd",
     quoteKeyset: "quote-keyset",
     quoteAmount: "1",
@@ -109,7 +109,7 @@ describe("trade session presentation", () => {
     expect(root.textContent).toContain("Quote locked");
     expect(root.textContent).toContain("20 SAT");
     expect(root.textContent).toContain("1 USD");
-    expect(root.textContent).toContain("nofee.testnut.cashu.space");
+    expect(root.textContent).toContain("testnut.cashudevkit.org");
     expect(root.querySelector("[data-advance-trade]")).toBeNull();
     expect(root.innerHTML).not.toContain("privateState");
     expect(root.innerHTML).not.toContain("cashu-private-token");

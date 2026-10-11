@@ -457,7 +457,7 @@ function startMakerInbox(): Promise<void> {
 
 function defaultMintForUnit(unit: QuickMintRequest["unit"]): string {
   return unit === "usd"
-    ? "https://nofee.testnut.cashu.space"
+    ? "https://testnut.cashudevkit.org"
     : "https://testnut.cashu.space";
 }
 

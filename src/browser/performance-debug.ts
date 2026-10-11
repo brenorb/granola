@@ -77,8 +77,14 @@ export function createPerformanceDebugTimeline(
     const { outcome, updates, proofCount } = entry.detail ?? {};
     if (!["spent", "timeout", "unavailable"].includes(outcome) ||
       !Number.isSafeInteger(updates) || !Number.isSafeInteger(proofCount)) return;
+    const states = entry.detail?.states;
+    const stateCounts = states && ["UNSPENT", "PENDING", "SPENT"].every(state =>
+      Number.isSafeInteger(states[state]) && states[state] >= 0)
+      ? { UNSPENT: states.UNSPENT, PENDING: states.PENDING, SPENT: states.SPENT } : undefined;
     append({ name: entry.name, startTime: entry.startTime, duration: entry.duration,
-      detail: { outcome, updates, proofCount } });
+      detail: { outcome, updates, proofCount, ...(stateCounts ? { states: stateCounts } : {}),
+        ...(Number.isSafeInteger(entry.detail?.regressiveUpdates) && entry.detail.regressiveUpdates >= 0
+          ? { regressiveUpdates: entry.detail.regressiveUpdates } : {}) } });
   };
 
   const recordRelayConnect = (entry: PerformanceMeasure): void => {

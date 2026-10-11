@@ -162,7 +162,7 @@ recovery action.
 
 The prototype market is issuer-specific: SAT from
 `https://testnut.cashu.space` against USD cents from
-`https://nofee.testnut.cashu.space`. `amount` is always base SAT. For a buy,
+`https://testnut.cashudevkit.org`. `amount` is always base SAT. For a buy,
 the offered asset is USD; for a sell, it is SAT. The human form accepts USD/BTC
 and converts it to integer `priceCentsPerBtc` for the agent API. Settlement uses
 `quote_cents = (base_sats * price_cents_per_btc) / 100_000_000`, truncating the
@@ -177,7 +177,7 @@ wallet balance.
 
 The public app has a fixed network allowlist matching its Content Security
 Policy: `https://testnut.cashu.space` and
-`https://nofee.testnut.cashu.space`. `inspectMint`, `requestMint`, and
+`https://testnut.cashudevkit.org`. `inspectMint`, `requestMint`, and
 `receiveToken` reject every other issuer before making a network request.
 Nostr connections are limited to `wss://nos.lol`,
 `wss://relay.primal.net`, `wss://offchain.pub`, the local mesh relay

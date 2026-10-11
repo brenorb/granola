@@ -18,7 +18,7 @@ import type {
 const QUOTE_KEY = "granola.quotes.v1";
 const ALLOWED_TEST_MINTS = new Set([
   "https://testnut.cashu.space",
-  "https://nofee.testnut.cashu.space"
+  "https://testnut.cashudevkit.org"
 ]);
 
 function allowedTestMint(mintUrl: string): string {
