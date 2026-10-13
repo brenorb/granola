@@ -109,3 +109,14 @@ assumptions and failure boundaries.
 - [SDK boundary](docs/guides/sdk.md)
 - [Protocol specification v0.1](docs/protocol%20spec%20v0.1.md)
 - [Full documentation index](docs/README.md)
+
+## Verification
+
+```sh
+npm ci
+npm run check
+```
+
+The same tests and type-checked production build run on pull requests and main.
+Pages deployment waits for verification and runs only for main pushes or manual
+dispatch, never for a pull request.
