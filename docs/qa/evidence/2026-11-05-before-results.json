@@ -1,0 +1,201 @@
+[
+  {
+    "id": "R1",
+    "name": "Default route loads under CSP without violations",
+    "pass": false,
+    "ms": 5186,
+    "detail": "CSP violations: [error] Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-GUCqaE+6ctl7bh+hVqWf0DsedIR2J2h6EaEm49U6vp0='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked."
+  },
+  {
+    "id": "R2",
+    "name": "Invalid ?wallet= shows a visible error",
+    "pass": false,
+    "ms": 31627,
+    "detail": "no visible error for Maker"
+  },
+  {
+    "id": "R2b",
+    "name": "Valid ?wallet= opens labeled workspace",
+    "pass": true,
+    "ms": 1713
+  },
+  {
+    "id": "R3",
+    "name": "HTTPS redirect script ships as an allowed external file",
+    "pass": false,
+    "ms": 0,
+    "detail": "redirect script tag missing"
+  },
+  {
+    "id": "R5",
+    "name": "runUntilSettled parameter reports errors",
+    "pass": true,
+    "ms": 1370
+  },
+  {
+    "id": "R4",
+    "name": "debug=performance loads",
+    "pass": true,
+    "ms": 3170
+  },
+  {
+    "id": "R6",
+    "name": "Unknown path is a 404",
+    "pass": true,
+    "ms": 180
+  },
+  {
+    "id": "F2-scale",
+    "name": "1,200-order book shows every open order and true best prices",
+    "pass": false,
+    "ms": 2895,
+    "detail": "asks=71 bids=75"
+  },
+  {
+    "id": "F2-toggle",
+    "name": "See more / See less toggles and survives refresh",
+    "pass": true,
+    "ms": 5448,
+    "detail": "expanded rows=71"
+  },
+  {
+    "id": "F2-take-validation",
+    "name": "Take amount validates AON and integers",
+    "pass": true,
+    "ms": 1470
+  },
+  {
+    "id": "F2-refresh-outage",
+    "name": "Refresh with all relays down reports failure, keeps book",
+    "pass": false,
+    "ms": 1917,
+    "detail": "Order book refreshed from public relays"
+  },
+  {
+    "id": "F3-fund",
+    "name": "Fund SAT and USD",
+    "pass": true,
+    "ms": 4028,
+    "detail": "SAT BALANCE 10,000 sat USD BALANCE 100.00 USD"
+  },
+  {
+    "id": "F3-mint-down",
+    "name": "Funding with mint down names the mint",
+    "pass": false,
+    "ms": 1481,
+    "detail": "Failed to fetch"
+  },
+  {
+    "id": "F4-validation",
+    "name": "Order form blocks bad input with specific messages",
+    "pass": false,
+    "ms": 3072,
+    "detail": "amount=abc: Please match the requested format."
+  },
+  {
+    "id": "F4-funding",
+    "name": "Insufficient funds and sub-cent orders are refused",
+    "pass": true,
+    "ms": 7051
+  },
+  {
+    "id": "F4-hint",
+    "name": "Settlement hint explains truncation",
+    "pass": true,
+    "ms": 1177
+  },
+  {
+    "id": "F4-publish",
+    "name": "Publish shows own row, cancel removes it, double submit posts once",
+    "pass": false,
+    "ms": 7801,
+    "detail": "[\"Maker listener is authenticated and listening\",\"Order published with 3 relay acknowledgements\"]"
+  },
+  {
+    "id": "F4-relays-down",
+    "name": "Publishing with relays down is not reported as published; retry works",
+    "pass": false,
+    "ms": 8831,
+    "detail": "[\"Maker listener is authenticated and listening\",\"Order published with 0 relay acknowledgements\",\"ERR Inbox-list ACK and readback quorum was not reached\"]"
+  },
+  {
+    "id": "W3",
+    "name": "Two users settle a swap; cards show units and plain-language state",
+    "pass": false,
+    "ms": 14138,
+    "detail": "card units: MAKER SESSION · 00D33154…"
+  },
+  {
+    "id": "F2-self-take",
+    "name": "Own order cannot be taken (UI and API)",
+    "pass": false,
+    "ms": 7822,
+    "detail": "button enabled"
+  },
+  {
+    "id": "B13-race",
+    "name": "Race loser gets a plain explanation and a refreshed book",
+    "pass": false,
+    "ms": 44681,
+    "detail": "[\"Order taken; settling automatically\",\"ERR Trade stopped in terminal phase frozen\",\"ERR Trade stopped in terminal phase frozen\"]"
+  },
+  {
+    "id": "B14-mint-outage",
+    "name": "Mint outage mid-swap resumes automatically",
+    "pass": false,
+    "ms": 168558,
+    "detail": "phases [\"Base locked\"] did not match /Filled/"
+  },
+  {
+    "id": "W5-reload",
+    "name": "Taker reload mid-swap resumes to Filled",
+    "pass": true,
+    "ms": 30536
+  },
+  {
+    "id": "B08-offline-maker",
+    "name": "Offline maker: user is told nobody answered and no funds are locked",
+    "pass": false,
+    "ms": 63379,
+    "detail": "[\"Order taken; settling automatically\",\"Swap filled after 19 verified actions\"]"
+  },
+  {
+    "id": "B12-inbox-recovery",
+    "name": "Maker listener recovers after the inbox relay returns",
+    "pass": false,
+    "ms": 72377,
+    "detail": "page.waitForFunction: Timeout 60000ms exceeded."
+  },
+  {
+    "id": "F7-backup",
+    "name": "Backup downloads bearer tokens with warning",
+    "pass": true,
+    "ms": 2794
+  },
+  {
+    "id": "F7-erase",
+    "name": "Erase wallet and erase everything work in one click (product decision)",
+    "pass": true,
+    "ms": 2990
+  },
+  {
+    "id": "F12-tabs",
+    "name": "Two tabs of one workspace serialize funding",
+    "pass": true,
+    "ms": 12076
+  },
+  {
+    "id": "F10-mobile",
+    "name": "375 px layout has no horizontal scroll; notes readable",
+    "pass": false,
+    "ms": 4367,
+    "detail": "scrollWidth 425 > 375"
+  },
+  {
+    "id": "F9-closed-denial",
+    "name": "Listener works on a relay that denies with CLOSED restricted",
+    "pass": false,
+    "ms": 39669,
+    "detail": "page.waitForFunction: Timeout 30000ms exceeded."
+  }
+]

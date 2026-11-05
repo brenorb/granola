@@ -18,6 +18,13 @@
 - [Consolidated performance decisions and experiment disposition](performance/consolidation.md)
 - [Asynchronous settlement and durable announcements](protocol/async-settlement.md)
 
+## Quality assurance
+
+- [User-facing inventory and acceptance criteria](qa/inventory.md)
+- [Bug log with causes and fix status](qa/bug-log.md)
+- [2026-11-05 full-inventory run (before/after)](qa/2026-11-05-run.md)
+- [Local production-like QA stack](../scripts/qa/README.md)
+
 ## Architecture decisions
 
 The ADRs are background rationale; the normative implementation contract is the
