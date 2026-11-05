@@ -2,7 +2,7 @@ import { nip19 } from "nostr-tools";
 import { describe, expect, it } from "vitest";
 
 import type { PublicTradeView } from "../trade/session.js";
-import { phaseExplanation, renderTrades } from "./trades.js";
+import { phaseExplanation, renderTrades, tradeFailureMessage } from "./trades.js";
 
 const trade: PublicTradeView = {
   revision: 0,
@@ -122,6 +122,14 @@ describe("trade session presentation", () => {
 
     expect(root.textContent).toContain("100 sat");
     expect(root.textContent).toContain("0.05 USD");
+  });
+
+  it("never shows internal phase jargon for a lost race or expired request", () => {
+    expect(tradeFailureMessage("Trade stopped in terminal phase frozen"))
+      .toMatch(/No funds moved from this wallet\.$/);
+    expect(tradeFailureMessage("Trade stopped in terminal phase released"))
+      .not.toMatch(/terminal phase/);
+    expect(tradeFailureMessage("Encrypted message has expired")).toBe("Encrypted message has expired");
   });
 
   it("explains each phase instead of waiting on mint state forever", () => {

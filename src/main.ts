@@ -31,7 +31,7 @@ import { formatUnitAmount } from "./ui/format.js";
 import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
-import { renderTrades } from "./ui/trades.js";
+import { renderTrades, tradeFailureMessage } from "./ui/trades.js";
 import { withButtonFeedback } from "./ui/button-feedback.js";
 import {
   priceValidationMessage,
@@ -265,7 +265,7 @@ const tradeController = singleFlightUntilSuccess((): Promise<BrowserTradeControl
       tradeTrace(trade);
       report("Incoming order accepted automatically");
     },
-    onError: (message) => report(message, true),
+    onError: (message) => report(tradeFailureMessage(message), true),
     onMakerError: (message) => {
       trace("Nostr", "Maker inbox error", [
         { label: "error", value: message }
@@ -329,20 +329,12 @@ function takeOrderFromBook(
   const request = button
     ? withButtonFeedback(button, "Settling…", task)
     : task();
-  void request.catch((error: unknown) => report(takeFailureMessage(error), true))
+  void request.catch((error: unknown) => report(tradeFailureMessage(messageOf(error)), true))
     .finally(() => takeRequestIds.delete(retryKey));
 }
 
 const MAKER_RESPONSE_NOTICE_MS = 20_000;
 
-function takeFailureMessage(error: unknown): string {
-  const message = messageOf(error);
-  if (/terminal phase (?:frozen|released)/.test(message)) {
-    return "This order could not be completed: another trader took it, it changed, " +
-      "or the maker did not answer in time. No funds moved from this wallet.";
-  }
-  return message;
-}
 
 function retryPendingPublication(orderId: string, button?: HTMLButtonElement): void {
   const task = () => granola.retryOrderPublication(orderId);

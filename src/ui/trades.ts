@@ -31,6 +31,15 @@ function noEcashLocked(trade: PublicTradeView): boolean {
     trade.evidence.legs.quote.tokenCommitment === null;
 }
 
+/** Turns a terminal settlement error into words people can act on. */
+export function tradeFailureMessage(message: string): string {
+  if (/terminal phase (?:frozen|released)/.test(message)) {
+    return "This order could not be completed: another trader took it, it changed, " +
+      "or the maker did not answer in time. No funds moved from this wallet.";
+  }
+  return message;
+}
+
 /** Plain-language state for people; mint evidence where it exists. */
 export function phaseExplanation(trade: PublicTradeView): string {
   const mintStates = trade.evidence.mintStates.length > 0
