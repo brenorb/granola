@@ -31,3 +31,9 @@ use the consolidated performance decisions for their current disposition.
 - [ADR 0003: Nostr private swap messages](adr/0003-nostr-private-swap-messages.md)
 - [ADR 0004: One- or two-mint settlement with staggered Cashu HTLCs](adr/0004-cashu-htlc-settlement.md)
 - [ADR 0005: Integer cents-per-BTC pricing and truncated settlement](adr/0005-quote-minor-unit-settlement.md)
+
+## Research proposals
+
+These notes support maintainer decisions and do not amend the protocol specification.
+
+- [Atomic Signature Swaps evaluation](research/atomic-signature-swaps-evaluation.md): a proposed separate experiment; NUT-14 remains the default. Prototype and recovery evidence are still required.
