@@ -198,6 +198,15 @@ misleads; **L** cosmetic, copy or docs.
 
 ## Observations (not defects)
 
+- Book refresh cost at scale (local stand-ins, 1,615 projections over 3
+  relays): ~6.7 s per **Refresh orders** in Chromium, of which ~3 s is
+  khatru/Badger answering four 500-event pages per relay and ~3.7 s (Node
+  measurement) is re-verifying every signature. The old single-page query was
+  faster only because it dropped most orders. The previous book stays visible
+  and the button shows its busy state meanwhile. A per-event-ID signature
+  cache would remove most of the verify cost; not done here because it needs
+  its own measurement on real relays (see `docs/performance/consolidation.md`).
+
 - A second tab of the same workspace shows a stale balance until **Refresh
   balances**; writes are serialized correctly (concurrent funding → 20,000 sat).
 - Backing up an empty wallet downloads a file with zero tokens.
