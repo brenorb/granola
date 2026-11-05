@@ -296,8 +296,7 @@ async function swapPair(prefix, { amount = "100", price = "49980.00" } = {}) {
   const s = await postOrder(maker.page, { amount, price });
   assert(/Order published/.test(s), s);
   const orderId = await maker.page.locator("tr[data-can-cancel=true]").first().getAttribute("data-order-id");
-  await taker.page.getByRole("button", { name: "Refresh orders" }).click();
-  await taker.page.waitForTimeout(3000);
+  await act(taker.page, () => taker.page.getByRole("button", { name: "Refresh orders" }).click(), /refreshed|answered/, 60000);
   const row = taker.page.locator(`tr[data-order-id="${orderId}"]`);
   assert(await row.count() === 1, "taker cannot see order");
   await reveal(taker.page, row);
@@ -352,8 +351,7 @@ await check("B13-race", "Race loser gets a plain explanation and a refreshed boo
   const p = tag();
   const { maker, taker, row, orderId, contexts } = await swapPair(p, { amount: "200", price: "49975.00" });
   const other = await fundedWallet(`tb-${p}`, ["usd"]);
-  await other.page.getByRole("button", { name: "Refresh orders" }).click();
-  await other.page.waitForTimeout(3000);
+  await act(other.page, () => other.page.getByRole("button", { name: "Refresh orders" }).click(), /refreshed|answered/, 60000);
   const rowB = other.page.locator(`tr[data-order-id="${orderId}"]`);
   await reveal(other.page, rowB);
   await recordStatuses(taker); await recordStatuses(other.page);
@@ -412,8 +410,12 @@ await check("B08-offline-maker", "Offline maker: user is told nobody answered an
   await recordStatuses(page);
   const ask = page.locator("tbody.orderbook-asks tr").first();
   await ask.locator("[data-take-order]").click();
-  await page.waitForTimeout(26000);
-  const s = await statuses(page);
+  const s = [];
+  const end = Date.now() + 60000;
+  while (Date.now() < end && !s.some((x) => /Waiting for the maker/.test(x))) {
+    await page.waitForTimeout(2000);
+    s.push(...await statuses(page));
+  }
   assert(s.some((x) => /Waiting for the maker to accept\. No funds are locked yet; the request expires at \d/.test(x)), JSON.stringify(s));
   const card = await page.locator("[data-trade-session]").first().innerText();
   assert(/Waiting for the maker to accept/.test(card), card.slice(0, 160));
