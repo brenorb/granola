@@ -291,6 +291,7 @@ code { font-family: "Courier New", monospace; }
   .order-entry__heading .hint { text-align: left; }
   .section-heading { gap: 1rem; }
   .section-actions { flex-direction: column; align-items: stretch; }
+  .protocol-notes, .protocol-notes__grid, .protocol-messages__list { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
