@@ -87,6 +87,10 @@ function validateRelays(relays: readonly string[]): string[] {
   return normalized;
 }
 
+const PROJECTION_PAGE_LIMIT = 500;
+/** Bounds one refresh to 10,000 projections per relay. */
+const MAX_PROJECTION_PAGES = 20;
+
 const ORDER_ADDRESS = /^30078:[0-9a-f]{64}:granola:order:v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class RelayClient {
@@ -114,6 +118,12 @@ export class RelayClient {
     }));
   }
 
+  /**
+   * Reads every current projection in the market. Relays cap each REQ (often at
+   * 500 events), so each relay is paged backwards with `until` until it runs
+   * dry. Throws when no relay could be reached, so callers never mistake an
+   * outage for an empty or fresh book.
+   */
   async queryProjections(market: string, since: number): Promise<NostrEvent[]> {
     if (!/^[0-9a-f]{64}$/.test(market)) throw new Error("Market ID must be lowercase hex");
     if (!Number.isSafeInteger(since) || since < 0) throw new Error("Query start must be a Unix timestamp");
@@ -122,14 +132,57 @@ export class RelayClient {
       "#t": ["granola-order"],
       "#m": [market],
       since,
-      limit: 500
+      limit: PROJECTION_PAGE_LIMIT
     };
-    const events = await this.pool.querySync(
-      this.relays,
-      filter as Record<string, unknown>,
-      { maxWait: this.maxWait }
+    const perRelay = await Promise.all(
+      this.relays.map((relay) => this.queryRelayPages(relay, filter))
     );
-    return uniqueEvents(events);
+    const answered = perRelay.filter((events): events is NostrEvent[] => events !== null);
+    if (answered.length === 0) throw new Error("No order relay answered");
+    return uniqueEvents(answered.flat());
+  }
+
+  private async queryRelayPages(relay: string, base: Filter): Promise<NostrEvent[] | null> {
+    try {
+      await this.pool.ensureRelay(relay, { connectionTimeout: this.maxWait });
+    } catch {
+      return null;
+    }
+    const seen = new Map<string, NostrEvent>();
+    let until: number | undefined;
+    for (let page = 0; page < MAX_PROJECTION_PAGES; page += 1) {
+      let events: NostrEvent[];
+      try {
+        events = await this.pool.querySync(
+          [relay],
+          { ...base, ...(until === undefined ? {} : { until }) } as Record<string, unknown>,
+          { maxWait: this.maxWait }
+        );
+      } catch {
+        return page === 0 ? null : [...seen.values()];
+      }
+      if (events.length === 0) break;
+      let added = 0;
+      let oldest = Number.POSITIVE_INFINITY;
+      for (const event of events) {
+        if (!seen.has(event.id)) {
+          seen.set(event.id, event);
+          added += 1;
+        }
+        if (Number.isSafeInteger(event.created_at)) oldest = Math.min(oldest, event.created_at);
+      }
+      if (!Number.isFinite(oldest)) break;
+      if (added === 0) {
+        // A full page from one second: step past it once; otherwise we are done.
+        if (until !== undefined && oldest === until && until > 0) {
+          until -= 1;
+          continue;
+        }
+        break;
+      }
+      until = oldest;
+    }
+    return [...seen.values()];
   }
 
   async queryOrder(address: string): Promise<NostrEvent[]> {

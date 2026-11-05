@@ -518,6 +518,13 @@ export async function queryGiftWraps(
   }
 }
 
+const ACCESS_DENIAL = /\bclosed query: (?:restricted|auth-required):/;
+
+/** True when a relay explicitly refused a read (NIP-01 machine-readable CLOSED prefix). */
+export function isRelayAccessDenial(error: unknown): boolean {
+  return error instanceof Error && ACCESS_DENIAL.test(error.message);
+}
+
 export async function probeInboxRelayLive(input: {
   relay: string;
   inboxList: NostrEvent;
@@ -566,11 +573,19 @@ export async function probeInboxRelayLive(input: {
       filter,
       authHandler(relay, recipientKey, now)
     );
-    const otherEvents = await port.query(
-      relay,
-      filter,
-      authHandler(relay, otherKey, now)
-    );
+    // NIP-01/NIP-42 relays may refuse the non-recipient read outright with
+    // CLOSED "restricted:" or "auth-required:". A refusal is exclusion.
+    let otherEvents: NostrEvent[];
+    try {
+      otherEvents = await port.query(
+        relay,
+        filter,
+        authHandler(relay, otherKey, now)
+      );
+    } catch (error) {
+      if (!isRelayAccessDenial(error)) throw error;
+      otherEvents = [];
+    }
     const listReadback = lists.some((event) => {
       try {
         return validateInboxList(event, recipient, now).event.id === inboxList.id;

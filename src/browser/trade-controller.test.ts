@@ -478,6 +478,20 @@ describe("BrowserTradeController", () => {
     expect(onMakerError).not.toHaveBeenCalled();
   });
 
+  it("refuses to take an order signed by one of this wallet's own order keys", async () => {
+    const { controller, api } = setup();
+    const ownAddress = `30078:${getPublicKey(makerKey)}:granola:order:v1:77777777-7777-4777-8777-777777777777`;
+
+    await expect(controller.takeOrder({
+      requestId: "99999999-9999-4999-8999-999999999999",
+      address: ownAddress,
+      expectedProjectionId: view().offeredProjectionId,
+      expectedRevision: "0",
+      fillBaseAmount: "1000"
+    })).rejects.toThrow(/your own order/);
+    expect(api.takeOrder).not.toHaveBeenCalled();
+  });
+
   it("uses an incoming DM to resume the full settlement loop", async () => {
     const { controller, api, subscriptions } = setup();
     api.advanceTrade
@@ -557,6 +571,38 @@ describe("BrowserTradeController", () => {
     expect(JSON.stringify(result)).not.toMatch(
       /token|proof|preimage|private|secret|nostr|cashu/i
     );
+  });
+
+  it("retries a mint outage mid-settlement instead of abandoning the swap", async () => {
+    const wait = vi.fn(async () => undefined);
+    const errors: string[] = [];
+    const { controller, api } = setup({ wait });
+    const outage = new Error("Failed to fetch");
+    outage.name = "NetworkError";
+    api.getTrade.mockResolvedValue({ ...view(3), phase: "base_locked" });
+    api.advanceTrade
+      .mockRejectedValueOnce(outage)
+      .mockRejectedValueOnce(outage)
+      .mockResolvedValueOnce({ ...view(4), phase: "quote_locked" })
+      .mockResolvedValueOnce({ ...view(5), phase: "filled" });
+
+    const result = await controller.runUntilSettled(sessionId, (message) => errors.push(message));
+
+    expect(result.finalPhase).toBe("filled");
+    expect(api.advanceTrade).toHaveBeenCalledTimes(4);
+    expect(wait).toHaveBeenNthCalledWith(1, 1_000);
+    expect(wait).toHaveBeenNthCalledWith(2, 2_000);
+    expect(errors.some((message) => /retrying automatically/.test(message))).toBe(true);
+  });
+
+  it("still stops at once on a non-network settlement error", async () => {
+    const wait = vi.fn(async () => undefined);
+    const { controller, api } = setup({ wait });
+    api.getTrade.mockResolvedValue(view());
+    api.advanceTrade.mockRejectedValueOnce(new Error("Encrypted message has expired"));
+
+    await expect(controller.runUntilSettled(sessionId)).rejects.toThrow("Encrypted message has expired");
+    expect(wait).not.toHaveBeenCalled();
   });
 
   it("keeps settling while a live inbox subscription is still connecting", async () => {

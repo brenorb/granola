@@ -2,6 +2,7 @@ import { nip19 } from "nostr-tools";
 
 import type { TradeMessageType } from "../trade/messages.js";
 import type { PublicTradeView } from "../trade/session.js";
+import { formatUnitAmount } from "./format.js";
 
 function element<K extends keyof HTMLElementTagNameMap>(
   name: K,
@@ -18,10 +19,50 @@ function phaseLabel(phase: PublicTradeView["phase"]): string {
   ).join(" ");
 }
 
+function clockTime(unixSeconds: number): string {
+  return new Date(unixSeconds * 1_000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function noEcashLocked(trade: PublicTradeView): boolean {
+  return trade.evidence.legs.base.tokenCommitment === null &&
+    trade.evidence.legs.quote.tokenCommitment === null;
+}
+
+/** Plain-language state for people; mint evidence where it exists. */
+export function phaseExplanation(trade: PublicTradeView): string {
+  const mintStates = trade.evidence.mintStates.length > 0
+    ? ` · ${trade.evidence.mintStates.join(" · ")}`
+    : "";
+  switch (trade.phase) {
+    case "negotiating":
+      return trade.role === "taker"
+        ? `Waiting for the maker to accept. No funds are locked yet; the request expires at ${clockTime(trade.plan.reservationExpiresAt)}.`
+        : "Accepting the taker's request.";
+    case "filled":
+      return `Settled. Both legs were claimed at the mints${mintStates}.`;
+    case "released":
+      return "Released. The swap did not happen and the order was reopened.";
+    case "frozen":
+      return noEcashLocked(trade)
+        ? "Stopped before any ecash was locked. No funds moved."
+        : "Stopped for safety. Any ecash you locked returns to you after its refund time.";
+    case "waiting_base_refund":
+    case "waiting_quote_refund":
+      return `Waiting for the refund time to recover your locked ecash${mintStates}.`;
+    default:
+      return trade.evidence.mintStates.length > 0
+        ? trade.evidence.mintStates.join(" · ")
+        : "Settling; waiting for verified mint state.";
+  }
+}
+
 function liability(label: string, amount: string, unit: string, mint: string): HTMLElement {
   const item = element("li");
   item.append(element("span", label));
-  item.append(element("strong", `${amount} ${unit.toUpperCase()}`));
+  item.append(element("strong", formatUnitAmount(amount, unit)));
   item.append(element("small", new URL(mint).host));
   return item;
 }
@@ -285,9 +326,7 @@ export function renderTrades(
     liabilities.append(liability("Quote", trade.terms.quoteAmount, trade.terms.quoteUnit, trade.terms.quoteMint));
     card.append(liabilities);
 
-    const progress = element("p", trade.evidence.mintStates.length > 0
-      ? trade.evidence.mintStates.join(" · ")
-      : "Waiting for verified mint state");
+    const progress = element("p", phaseExplanation(trade));
     progress.className = "trade-card__state";
     card.append(progress);
 

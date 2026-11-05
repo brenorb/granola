@@ -30,16 +30,16 @@ key, preimage, or witness.
 
 On the maker wallet tab, press **Fund SAT**. Granola requests the fake invoice
 and polls the mint automatically. Wait for the success notice, then confirm
-**Balances & liabilities** shows 10,000 SAT. This can take up to one minute.
+**SAT balance** (and **Your Cashu balance**) shows 10,000 sat. This can take up to one minute.
 
 ## 2. Fund the taker with USD
 
 On the taker wallet tab, press **Fund USD**. Wait for the success notice and
-confirm **Balances & liabilities** shows 100.00 USD.
+confirm **USD balance** shows 100.00 USD.
 
 ## 3. Publish the 20 SAT ask
 
-On the maker wallet tab, expand **Publish a test limit order** and enter:
+On the maker wallet tab, scroll to **Post an order** and enter:
 
 | Control | Value |
 | --- | --- |
@@ -47,9 +47,8 @@ On the maker wallet tab, expand **Publish a test limit order** and enter:
 | Size (SAT) | `20` |
 | Limit price (USD / BTC) | `50000.00` |
 | Good for (days) | `30` |
-| Execution | `AON` (all or none) |
 
-The browser form publishes all-or-none orders. Press **Send order**.
+The browser form publishes all-or-none (AON) orders. Press **Sign & post order**.
 
 Publication is deliberately durable and staged. If **Pending relay publication**
 appears:
@@ -60,12 +59,11 @@ appears:
    automatically after acknowledgement; other staged updates may need a commit retry.
 
 Do not submit a second order. Continue only when the pending entry disappears.
-Press **Refresh book** and find the row with all of these values:
+Press **Refresh orders** and find the row with all of these values:
 
 - `20 SAT`;
 - `50,000.00 USD/BTC`;
-- `AON`; and
-- an expiry about 30 days from now.
+- in the row's **i** details: `AON` and an expiry about 30 days from now.
 
 It will normally be at the top ask price, although other public test orders can
 tie it.
@@ -79,15 +77,15 @@ the page retries with bounded backoff until the relay is available.
 
 ## 5. Take the ask
 
-On the taker wallet tab, press **Refresh book**. In the matching row, leave the action
-amount at `20` and press **Take ask**. Granola now runs the verified coordinator
+On the taker wallet tab, press **Refresh orders**. In the matching row, leave the
+amount at `20` and press **Buy**. Granola now runs the verified coordinator
 actions automatically; do not click the button again.
 
 Wait for:
 
 
 - the status `Order taken; settling automatically`;
-- the status `Swap filled after … verified checkpoints`; and
+- the status `Swap filled after … verified actions`; and
 - both session cards eventually showing **Filled**.
 
 Every coordinator checkpoint still runs and is recorded in the protocol trace.
@@ -108,7 +106,7 @@ Under the signed settlement plan, the quote HTLC uses a 10-minute short lock,
 the base HTLC uses a 20-minute long lock, and the reservation recovery horizon
 is 30 minutes.
 
-Press **Refresh** in both wallets and **Refresh book** on the taker.
+Press **Refresh balances** in both wallets and **Refresh orders** on the taker.
 
 For fresh workspaces funded exactly as above, expect approximately:
 

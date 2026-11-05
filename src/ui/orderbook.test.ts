@@ -159,6 +159,50 @@ describe("order-book presentation", () => {
       .toBeNull();
   });
 
+  it("does not let a user take their own order", async () => {
+    const ask = record(askLow, "sell", "5000000", "20");
+    const book = await buildOrderBook([ask], market, 1_700_000_100);
+    const root = document.createElement("section");
+    const take = vi.fn();
+
+    renderOrderBook(root, { status: "ready", book }, {
+      onTake: take,
+      onCancel: vi.fn(),
+      canCancel: () => true
+    });
+
+    const button = root.querySelector<HTMLButtonElement>(`[data-order-id="${askLow}"] [data-take-order]`);
+    expect(button?.disabled).toBe(true);
+    expect(button?.dataset.ownOrder).toBe("true");
+    button?.click();
+    expect(take).not.toHaveBeenCalled();
+    expect(root.querySelector(`[data-order-id="${askLow}"] [data-cancel-order]`)).not.toBeNull();
+  });
+
+  it("keeps the user's own orders visible when the side is collapsed", async () => {
+    const own = "55555555-5555-4555-8555-555555555555";
+    const orders = [
+      record("11111111-1111-4111-8111-111111111111", "sell", "5000000"),
+      record("22222222-2222-4222-8222-222222222222", "sell", "5100000"),
+      record("33333333-3333-4333-8333-333333333333", "sell", "5200000"),
+      record("44444444-4444-4444-8444-444444444444", "sell", "5300000"),
+      record(own, "sell", "5400000")
+    ];
+    const book = await buildOrderBook(orders, market, 1_700_000_100);
+    const root = document.createElement("section");
+
+    renderOrderBook(root, { status: "ready", book }, {
+      onTake: vi.fn(),
+      onCancel: vi.fn(),
+      canCancel: (order) => order.state.order_id === own
+    });
+
+    const ownRow = root.querySelector<HTMLTableRowElement>(`[data-order-id="${own}"]`);
+    expect(ownRow?.hidden).toBe(false);
+    expect(root.querySelector(`[data-order-id="44444444-4444-4444-8444-444444444444"]`)?.hasAttribute("hidden")).toBe(true);
+    expect(root.querySelector(".orderbook-side__footer small")?.textContent).toBe("4 / 5 shown");
+  });
+
   it("shows the best three orders per side and toggles the rest", async () => {
     const orders = [
       record("11111111-1111-4111-8111-111111111111", "sell", "5000000"),

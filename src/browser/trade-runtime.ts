@@ -135,14 +135,23 @@ export async function createBrowserTradeRuntime(
     inboxPort.warmConnections([inboxRelay]);
     window.addEventListener("pagehide", () => inboxPort.dispose(), { once: true });
   }
-  const probe = await probeTradeInboxRelay({
-    relay: inboxRelay,
-    port: inboxPort,
-    now: currentTime,
-    ...(input.generateSecretKey
-      ? { generateSecretKey: input.generateSecretKey }
-      : {})
-  });
+  let probe: Awaited<ReturnType<typeof probeTradeInboxRelay>>;
+  try {
+    probe = await probeTradeInboxRelay({
+      relay: inboxRelay,
+      port: inboxPort,
+      now: currentTime,
+      ...(input.generateSecretKey
+        ? { generateSecretKey: input.generateSecretKey }
+        : {})
+    });
+  } catch (error) {
+    // The caller retries with a new runtime; close this one's warm sockets.
+    if (input.inboxPort === undefined && inboxPort instanceof NostrToolsInboxRelayPort) {
+      inboxPort.dispose();
+    }
+    throw error;
+  }
   // Let the order-book sockets connect before adding spare sockets to those hosts.
   if (inboxPort instanceof NostrToolsInboxRelayPort) inboxPort.warmConnections(discoveryRelays);
   const transport = new NostrTradeTransport(

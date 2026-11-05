@@ -9,7 +9,8 @@ import {
   withWalletLock
 } from "./browser/lock.js";
 import { createPerformanceDebugTimeline } from "./browser/performance-debug.js";
-import { coalesceRefresh } from "./browser/refresh.js";
+import { coalesceRefresh, singleFlightUntilSuccess } from "./browser/refresh.js";
+import { describeNetworkFailure } from "./browser/transient-error.js";
 import { profileFromLocation, storageNameForProfile } from "./browser/profile.js";
 import { BrowserTradeController } from "./browser/trade-controller.js";
 import { createBrowserTradeRuntime, TRADE_INBOX_RELAY } from "./browser/trade-runtime.js";
@@ -31,7 +32,12 @@ import { renderMintActions, type QuickMintRequest } from "./ui/mint-actions.js";
 import { renderOrderBook } from "./ui/orderbook.js";
 import { renderPendingPublications } from "./ui/order-outbox.js";
 import { renderTrades } from "./ui/trades.js";
-import { endButtonFeedback, withButtonFeedback } from "./ui/button-feedback.js";
+import { withButtonFeedback } from "./ui/button-feedback.js";
+import {
+  priceValidationMessage,
+  renderBootError,
+  sizeValidationMessage
+} from "./ui/guards.js";
 import {
   renderActivityLog,
   type ActivityDetail,
@@ -49,7 +55,14 @@ function byId<T extends HTMLElement>(id: string): T {
   return node as T;
 }
 
-const profile = profileFromLocation(window.location.href);
+let profile: string;
+try {
+  profile = profileFromLocation(window.location.href);
+} catch (error) {
+  // Without a valid workspace nothing below can start; say so on the page.
+  renderBootError(document, messageOf(error));
+  throw error;
+}
 const debugPerformance = new URL(window.location.href).searchParams.get("debug") === "performance";
 const debugTimeline = debugPerformance
   ? createPerformanceDebugTimeline(document, performance)
@@ -101,7 +114,7 @@ const trades = byId("trades");
 const status = byId("status");
 const orderSettlementHint = byId("order-settlement-hint");
 const activity = byId<HTMLOListElement>("activity-log");
-let tradeControllerPromise: Promise<BrowserTradeController> | undefined;
+let startedTradeController: BrowserTradeController | undefined;
 const activityEntries: ActivityEntry[] = [];
 const tracedTradeMessages = new Set<string>();
 const tracedTradeCheckpoints = new Set<string>();
@@ -215,8 +228,10 @@ const refreshOrderBook = coalesceRefresh(async () => {
   }
 });
 
-function tradeController(): Promise<BrowserTradeController> {
-  tradeControllerPromise ??= createBrowserTradeRuntime({
+// A failed start (e.g. the inbox relay was down) is forgotten, so the next
+// listener retry, swap refresh or take starts a fresh runtime.
+const tradeController = singleFlightUntilSuccess((): Promise<BrowserTradeController> =>
+  createBrowserTradeRuntime({
     profile,
     driver,
     wallet: walletRepository,
@@ -260,9 +275,10 @@ function tradeController(): Promise<BrowserTradeController> {
     ...(debugPerformance ? {
       profileInboxWait: (wait) => debugTimeline!.inboxWait(wait)
     } : {})
+  })).then((controller) => {
+    startedTradeController = controller;
+    return controller;
   }));
-  return tradeControllerPromise;
-}
 
 const refreshTrades = coalesceRefresh(async () => {
   const controller = await tradeController();
@@ -292,18 +308,40 @@ function takeOrderFromBook(
     });
     tradeTrace(trade);
     report("Order taken; settling automatically");
-    const result = await granola.runUntilSettled(trade.sessionId);
-    await Promise.all([refreshTrades(), refresh()]);
-    report(`Swap filled after ${result.checkpoints.length} verified actions`);
-    void refreshOrderBook().catch(() => {
-      report("Swap filled; order book refresh will retry automatically");
-    });
+    // If the maker does not answer quickly, say what is happening.
+    const waitingNotice = window.setTimeout(() => {
+      void granola.getTrade(trade.sessionId).then((current) => {
+        if (current?.phase !== "negotiating") return;
+        const expires = new Date(current.plan.reservationExpiresAt * 1_000)
+          .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        report(`Waiting for the maker to accept. No funds are locked yet; the request expires at ${expires}.`);
+      }).catch(() => undefined);
+    }, MAKER_RESPONSE_NOTICE_MS);
+    try {
+      const result = await granola.runUntilSettled(trade.sessionId);
+      await Promise.all([refreshTrades(), refresh()]);
+      report(`Swap filled after ${result.checkpoints.length} verified actions`);
+    } finally {
+      window.clearTimeout(waitingNotice);
+      void refreshOrderBook().catch(() => undefined);
+    }
   };
   const request = button
     ? withButtonFeedback(button, "Settling…", task)
     : task();
-  void request.catch((error: unknown) => report(messageOf(error), true))
+  void request.catch((error: unknown) => report(takeFailureMessage(error), true))
     .finally(() => takeRequestIds.delete(retryKey));
+}
+
+const MAKER_RESPONSE_NOTICE_MS = 20_000;
+
+function takeFailureMessage(error: unknown): string {
+  const message = messageOf(error);
+  if (/terminal phase (?:frozen|released)/.test(message)) {
+    return "This order could not be completed: another trader took it, it changed, " +
+      "or the maker did not answer in time. No funds moved from this wallet.";
+  }
+  return message;
 }
 
 function retryPendingPublication(orderId: string, button?: HTMLButtonElement): void {
@@ -490,10 +528,9 @@ async function requestAndClaimMint(input: {
 }
 
 renderMintActions(byId("mint-actions"), (request, button) => {
-  void requestAndClaimMint({
-    ...request,
-    mintUrl: defaultMintForUnit(request.unit)
-  }, button).catch((error: unknown) => report(messageOf(error), true));
+  const mintUrl = defaultMintForUnit(request.unit);
+  void requestAndClaimMint({ ...request, mintUrl }, button)
+    .catch((error: unknown) => report(describeNetworkFailure(error, mintUrl), true));
 });
 
 function runAgentSettlement(sessionId: string): void {
@@ -540,7 +577,12 @@ const refreshOrderbookButton = byId<HTMLButtonElement>("refresh-orderbook");
 refreshOrderbookButton.addEventListener("click", () => {
   void withButtonFeedback(refreshOrderbookButton, "Refreshing…", () => refreshOrderBook())
     .then(() => report("Order book refreshed from public relays"))
-    .catch((error: unknown) => report(messageOf(error), true));
+    .catch((error: unknown) => report(
+      hasOrderBook
+        ? `${messageOf(error)}. Showing the last loaded order book.`
+        : messageOf(error),
+      true
+    ));
 });
 const refreshTradesButton = byId<HTMLButtonElement>("refresh-trades");
 refreshTradesButton.addEventListener("click", () => {
@@ -580,7 +622,7 @@ function decimalMinorUnits(numerator: string, denominator: string): string {
 }
 
 function updateOrderSettlementHint(): void {
-  orderAmountInput.setCustomValidity("");
+  applyFieldMessages();
   orderSettlementHint.textContent = defaultOrderSettlementHint;
   try {
     const price = fiatPerBtcPrice(orderPriceInput.value);
@@ -601,15 +643,20 @@ function updateOrderSettlementHint(): void {
   }
 }
 
+function applyFieldMessages(): void {
+  orderAmountInput.setCustomValidity(sizeValidationMessage(orderAmountInput.value));
+  orderPriceInput.setCustomValidity(priceValidationMessage(orderPriceInput.value));
+}
+
 orderAmountInput.addEventListener("input", () => updateOrderSettlementHint());
 orderPriceInput.addEventListener("input", () => updateOrderSettlementHint());
 orderAmountInput.addEventListener("change", () => updateOrderSettlementHint());
 orderPriceInput.addEventListener("change", () => updateOrderSettlementHint());
-orderAmountInput.addEventListener("invalid", () => {
-  if (orderAmountInput.validationMessage.length > 0) {
-    report(orderAmountInput.validationMessage, true);
-  }
-});
+for (const input of [orderAmountInput, orderPriceInput]) {
+  input.addEventListener("invalid", () => {
+    if (input.validationMessage.length > 0) report(input.validationMessage, true);
+  });
+}
 updateOrderSettlementHint();
 
 orderForm.addEventListener("submit", (event) => {
@@ -632,7 +679,7 @@ orderForm.addEventListener("submit", (event) => {
     };
     const publication = await granola.publishOrder(input);
     const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;
-    trace("Order", "Public order published", [
+    trace("Order", acknowledgements > 0 ? "Public order published" : "Signed order awaiting relays", [
       { label: "side", value: side },
       shortIdentifier(publication.orderId),
       shortIdentifier(publication.projectionId),
@@ -640,8 +687,16 @@ orderForm.addEventListener("submit", (event) => {
       publicNpub("order npub", publication.makerPubkey),
       { label: "relay acks", value: String(acknowledgements) }
     ]);
-    await Promise.all([refreshOrderBook(), refreshPendingPublications()]);
-    report(`Order published with ${acknowledgements} relay acknowledgements`);
+    await Promise.all([refreshOrderBook().catch(() => undefined), refreshPendingPublications()]);
+    if (acknowledgements === 0) {
+      report(
+        "Order signed, but no relay acknowledged it, so it is not public yet. " +
+          "Use Retry in Pending relay publication when relays are reachable.",
+        true
+      );
+      return;
+    }
+    report(`Order published with ${acknowledgements} of ${publication.receipts.length} relay acknowledgements`);
   }).catch(async (error: unknown) => {
     await refreshPendingPublications();
     report(messageOf(error), true);
@@ -689,6 +744,6 @@ void Promise.all([
   .catch((error: unknown) => report(messageOf(error), true));
 
 window.addEventListener("pagehide", () => {
-  void tradeControllerPromise?.then((controller) => controller.stop()).catch(() => undefined);
+  startedTradeController?.stop();
   relayClient.dispose();
 }, { once: true });

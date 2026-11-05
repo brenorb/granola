@@ -16,8 +16,7 @@ function shortId(value: string): string {
 export function renderPendingPublications(
   root: HTMLElement,
   publications: PublicOrderPublication[],
-  retry: (orderId: string, button: HTMLButtonElement) => void,
-  relayCount = 3
+  retry: (orderId: string, button: HTMLButtonElement) => void
 ): void {
   root.replaceChildren();
   root.hidden = publications.length === 0;
@@ -27,6 +26,7 @@ export function renderPendingPublications(
   const list = element("ul");
   for (const publication of publications) {
     const acknowledgements = publication.receipts.filter((receipt) => receipt.ok).length;
+    const relayCount = publication.receipts.length;
     const item = element("li");
     const description = element(
       "span",

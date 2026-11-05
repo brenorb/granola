@@ -75,7 +75,7 @@ describe("relay client", () => {
     const events = await client.queryProjections("d".repeat(64), 1_699_000_000);
 
     expect(events).toEqual([EVENT]);
-    expect(pool.queries).toEqual([{
+    expect(pool.queries[0]).toEqual({
       relays: ["wss://one.example"],
       filter: {
         kinds: [30078],
@@ -85,7 +85,74 @@ describe("relay client", () => {
         limit: 500
       },
       maxWait: 3210
-    }]);
+    });
+  });
+
+  it("pages each relay past its per-request cap so old best orders are not dropped", async () => {
+    // 1,250 projections, newest first, and a relay that returns at most 500.
+    const all = Array.from({ length: 1_250 }, (_, index) => ({
+      ...EVENT,
+      id: index.toString(16).padStart(64, "0"),
+      created_at: 1_700_000_000 - index
+    }));
+    const queries: Array<Record<string, unknown>> = [];
+    const pool: RelayPoolPort = {
+      ensureRelay: async () => ({ publish: async () => "stored" }),
+      querySync: async (_relays, filter) => {
+        queries.push(filter);
+        const until = typeof filter.until === "number" ? filter.until : Number.POSITIVE_INFINITY;
+        return all.filter((event) => event.created_at <= until).slice(0, 500);
+      },
+      destroy: () => undefined
+    };
+    const client = new RelayClient({ relays: ["wss://one.example"], pool });
+
+    const events = await client.queryProjections("d".repeat(64), 0);
+
+    expect(events).toHaveLength(1_250);
+    expect(new Set(events.map((event) => event.id)).size).toBe(1_250);
+    expect(queries.length).toBeLessThanOrEqual(5);
+  });
+
+  it("does not loop forever on a relay that ignores until", async () => {
+    let calls = 0;
+    const pool: RelayPoolPort = {
+      ensureRelay: async () => ({ publish: async () => "stored" }),
+      querySync: async () => {
+        calls += 1;
+        return [EVENT, { ...EVENT, id: "e".repeat(64), created_at: 1_600_000_000 }];
+      },
+      destroy: () => undefined
+    };
+    const client = new RelayClient({ relays: ["wss://one.example"], pool });
+
+    await expect(client.queryProjections("d".repeat(64), 0)).resolves.toHaveLength(2);
+    expect(calls).toBeLessThanOrEqual(3);
+  });
+
+  it("reports an outage instead of an empty book when no relay answers", async () => {
+    const pool: RelayPoolPort = {
+      ensureRelay: async () => { throw new Error("connection refused"); },
+      querySync: async () => [],
+      destroy: () => undefined
+    };
+    const client = new RelayClient({ relays: ["wss://one.example", "wss://two.example"], pool });
+
+    await expect(client.queryProjections("d".repeat(64), 0)).rejects.toThrow("No order relay answered");
+  });
+
+  it("uses the relays that answered when only some are down", async () => {
+    const pool: RelayPoolPort = {
+      ensureRelay: async (url) => {
+        if (url.includes("two")) throw new Error("connection refused");
+        return { publish: async () => "stored" };
+      },
+      querySync: async () => [EVENT],
+      destroy: () => undefined
+    };
+    const client = new RelayClient({ relays: ["wss://one.example", "wss://two.example"], pool });
+
+    await expect(client.queryProjections("d".repeat(64), 0)).resolves.toEqual([EVENT]);
   });
 
   it("verifies publication readback independently on each relay", async () => {

@@ -14,7 +14,13 @@ describe("manual testnet swap tutorial", () => {
     expect(tutorial).toContain("20 SAT");
     expect(tutorial).toContain("50,000.00");
     expect(tutorial).toContain("Retry same signed projection");
-    expect(tutorial).toContain("Take ask");
+    expect(tutorial).toContain("**Buy**");
+    expect(tutorial).toContain("Sign & post order");
+    expect(tutorial).toContain("Refresh orders");
+    // Controls that no longer exist on the page.
+    for (const stale of ["Take ask", "Refresh book", "Send order", "Publish a test limit order", "Balances & liabilities"]) {
+      expect(tutorial).not.toContain(stale);
+    }
     expect(tutorial).not.toContain("runUntilSettled");
     expect(tutorial).not.toContain("Advance safely");
     expect(tutorial).toContain("filled");

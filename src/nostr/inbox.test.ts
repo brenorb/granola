@@ -470,6 +470,52 @@ describe("strict NIP-17 inbox transport", () => {
       .toEqual([expectedRecipient, expectedRecipient, expectedOther]);
   });
 
+  it("accepts a relay that refuses the non-recipient read with CLOSED restricted", async () => {
+    const list = createInboxList(inboxRelays, recipientKey, now);
+    const gift = wrapper();
+    const other = getPublicKey(wrongKey);
+    const port = new FakeRelayPort();
+    const query = port.query.bind(port);
+    port.query = async (relay, filter, auth) => {
+      const event = await auth("challenge");
+      if (event.pubkey === other) {
+        throw new Error("Inbox relay closed query: restricted: gift wraps can only be read by their recipient");
+      }
+      return query(relay, filter, auth);
+    };
+    await expect(probeInboxRelayLive({
+      relay: inboxRelays[0]!,
+      inboxList: list,
+      wrapper: gift,
+      recipientProtocolSecretKey: recipientKey,
+      senderProtocolSecretKey: senderKey,
+      otherProtocolSecretKey: wrongKey,
+      port,
+      now
+    })).resolves.toMatchObject({ otherKeyExcluded: true });
+  });
+
+  it("still fails the live probe when the non-recipient read fails for another reason", async () => {
+    const port = new FakeRelayPort();
+    const other = getPublicKey(wrongKey);
+    const query = port.query.bind(port);
+    port.query = async (relay, filter, auth) => {
+      const event = await auth("challenge");
+      if (event.pubkey === other) throw new Error("Inbox relay query timed out");
+      return query(relay, filter, auth);
+    };
+    await expect(probeInboxRelayLive({
+      relay: inboxRelays[0]!,
+      inboxList: createInboxList(inboxRelays, recipientKey, now),
+      wrapper: wrapper(),
+      recipientProtocolSecretKey: recipientKey,
+      senderProtocolSecretKey: senderKey,
+      otherProtocolSecretKey: wrongKey,
+      port,
+      now
+    })).rejects.toThrow(/timed out/);
+  });
+
   it("rejects malformed same-ID substitutions in live-probe readback", async () => {
     const list = createInboxList(inboxRelays, recipientKey, now);
     const gift = wrapper();

@@ -22,7 +22,7 @@ describe("pending order publications", () => {
     renderPendingPublications(root, [pending], retry);
 
     expect(root.hidden).toBe(false);
-    expect(root.textContent).toContain("1/3 relay acknowledgements · sufficient");
+    expect(root.textContent).toContain("1/2 relay acknowledgements · sufficient");
     expect(root.textContent).toContain("11111111…11111111");
     expect(root.textContent).not.toContain(pending.makerPubkey);
     root.querySelector("button")?.click();

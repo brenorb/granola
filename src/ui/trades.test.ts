@@ -2,7 +2,7 @@ import { nip19 } from "nostr-tools";
 import { describe, expect, it } from "vitest";
 
 import type { PublicTradeView } from "../trade/session.js";
-import { renderTrades } from "./trades.js";
+import { phaseExplanation, renderTrades } from "./trades.js";
 
 const trade: PublicTradeView = {
   revision: 0,
@@ -107,12 +107,43 @@ describe("trade session presentation", () => {
     renderTrades(root, [trade]);
 
     expect(root.textContent).toContain("Quote locked");
-    expect(root.textContent).toContain("20 SAT");
-    expect(root.textContent).toContain("1 USD");
+    expect(root.textContent).toContain("20 sat");
+    expect(root.textContent).toContain("0.01 USD");
+    expect(root.textContent).not.toMatch(/\b1 USD\b/);
     expect(root.textContent).toContain("testnut.cashudevkit.org");
     expect(root.querySelector("[data-advance-trade]")).toBeNull();
     expect(root.innerHTML).not.toContain("privateState");
     expect(root.innerHTML).not.toContain("cashu-private-token");
+  });
+
+  it("formats quote minor units as currency, not as whole dollars", () => {
+    const root = document.createElement("section");
+    renderTrades(root, [{ ...trade, terms: { ...trade.terms, baseAmount: "100", quoteAmount: "5" } }]);
+
+    expect(root.textContent).toContain("100 sat");
+    expect(root.textContent).toContain("0.05 USD");
+  });
+
+  it("explains each phase instead of waiting on mint state forever", () => {
+    const unlocked = {
+      ...trade.evidence,
+      mintStates: [],
+      legs: {
+        base: { ...trade.evidence.legs.base, tokenCommitment: null },
+        quote: { ...trade.evidence.legs.quote, tokenCommitment: null }
+      }
+    };
+    expect(phaseExplanation({ ...trade, phase: "filled" })).toMatch(/^Settled/);
+    expect(phaseExplanation({ ...trade, phase: "negotiating", evidence: unlocked }))
+      .toMatch(/Waiting for the maker to accept\. No funds are locked yet/);
+    expect(phaseExplanation({ ...trade, phase: "frozen", evidence: unlocked }))
+      .toBe("Stopped before any ecash was locked. No funds moved.");
+    expect(phaseExplanation({ ...trade, phase: "frozen" }))
+      .toMatch(/returns to you after its refund time/);
+    for (const phase of ["filled", "frozen", "released", "negotiating"] as const) {
+      expect(phaseExplanation({ ...trade, phase, evidence: unlocked }))
+        .not.toContain("Waiting for verified mint state");
+    }
   });
 
   it("keeps maker and taker sessions visibly distinct on the shared page", () => {

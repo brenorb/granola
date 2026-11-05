@@ -40,7 +40,7 @@ export function renderDashboard(root: HTMLElement, state: GranolaState): void {
     const empty = element("div");
     empty.className = "empty-state";
     empty.append(element("h2", "No ecash yet"));
-    empty.append(element("p", "Mint fake test tokens or receive a Cashu token to start."));
+    empty.append(element("p", "Use Fund SAT or Fund USD above to mint test ecash. Agents can also receive a Cashu token with window.granola.receiveToken."));
     root.append(empty);
     return;
   }

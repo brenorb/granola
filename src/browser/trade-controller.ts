@@ -22,6 +22,7 @@ import type {
   TradeSession
 } from "../trade/session.js";
 import { nextCoordinatorAction } from "../trade/coordinator-plan.js";
+import { isTransientNetworkError } from "./transient-error.js";
 
 const GIFT_WRAP_LOOKBACK = 172_800;
 const INBOX_BACKFILL_WATCHDOG_MS = 5_000;
@@ -110,6 +111,13 @@ const PEER_WAIT_MESSAGES = new Set([
   "No next private trade message is available"
 ]);
 
+/** About one hour at the 30 s cap: longer than every settlement deadline. */
+const MAX_TRANSIENT_SETTLEMENT_RETRIES = 125;
+
+function transientRetryDelay(attempt: number): number {
+  return Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5));
+}
+
 const MAKER_PHASE_PROGRESS: Record<PublicTradeView["phase"], number> = {
   negotiating: 0,
   reserved: 10,
@@ -196,6 +204,15 @@ export class BrowserTradeController {
   }
 
   async takeOrder(input: TakeOrderInput): Promise<PublicTradeView> {
+    const author = input.address.split(":")[1];
+    const ownKeys = await Promise.all(
+      (await this.makerIdentity.listOrderIds()).map((orderId) =>
+        this.makerIdentity.publicKey(orderId)
+      )
+    );
+    if (author !== undefined && ownKeys.includes(author)) {
+      throw new Error("This is your own order; it cannot be taken from this wallet");
+    }
     const trade = await this.api.takeOrder(input);
     try {
       await this.ensureSessionSubscription(trade.sessionId);
@@ -270,6 +287,7 @@ export class BrowserTradeController {
     record(current);
     let actions = 0;
     let idlePolls = 0;
+    let transientFailures = 0;
     while (current.phase !== "filled") {
       if (current.phase === "frozen" || current.phase === "released") {
         throw new Error(`Trade stopped in terminal phase ${current.phase}`);
@@ -286,7 +304,26 @@ export class BrowserTradeController {
         record(current);
         actions += 1;
         idlePolls = 0;
+        transientFailures = 0;
       } catch (error) {
+        if (isTransientNetworkError(error)) {
+          // A mint or relay did not answer. Durable state is unchanged, so the
+          // same action is retried with capped backoff instead of abandoning
+          // a swap whose legs may already be locked.
+          transientFailures += 1;
+          if (transientFailures > MAX_TRANSIENT_SETTLEMENT_RETRIES) throw error;
+          reportError(
+            `Connection problem while settling (${messageOf(error)}); retrying automatically`
+          );
+          await this.wait(transientRetryDelay(transientFailures));
+          const observed = await this.api.getTrade(sessionId);
+          if (observed === undefined) {
+            throw new Error("Trade session disappeared while settling");
+          }
+          current = observed;
+          record(current);
+          continue;
+        }
         if (!PEER_WAIT_MESSAGES.has(messageOf(error))) {
           throw error;
         }

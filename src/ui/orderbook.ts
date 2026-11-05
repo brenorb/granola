@@ -182,8 +182,15 @@ function orderRow(
     "aria-label",
     `${order.state.side === "sell" ? "Buy from ask" : "Sell into bid"}`
   );
-  take.disabled = !order.verified || options.onTake === undefined;
-  if (options.onTake) take.addEventListener("click", () => {
+  const own = Boolean(options.canCancel?.(order));
+  take.disabled = own || !order.verified || options.onTake === undefined;
+  if (own) {
+    amount.disabled = true;
+    take.dataset.ownOrder = "true";
+    take.title = "This is your order. Use the details menu to cancel it.";
+    take.setAttribute("aria-label", "Your order; cannot be taken by you");
+  }
+  if (options.onTake && !own) take.addEventListener("click", () => {
     validateTakeAmount(amount, order);
     if (!amount.reportValidity()) return;
     beginButtonFeedback(take, "Settling…");
@@ -288,7 +295,8 @@ function renderSideTable(
     if (isBest) row.dataset.best = label === "Asks" ? "ask" : "bid";
     else delete row.dataset.best;
     row.hidden = false;
-    if (index >= COLLAPSED_ORDER_COUNT) {
+    // Keep the user's own orders visible so they can always be found and canceled.
+    if (index >= COLLAPSED_ORDER_COUNT && !options.canCancel?.(order)) {
       row.hidden = true;
       overflowRows.push(row);
     }
@@ -303,9 +311,10 @@ function renderSideTable(
   if (overflowRows.length > 0) {
     const footer = element("footer");
     footer.className = "orderbook-side__footer";
+    const collapsedCount = orders.length - overflowRows.length;
     const count = element(
       "small",
-      `${COLLAPSED_ORDER_COUNT} / ${orders.length} shown`
+      `${collapsedCount} / ${orders.length} shown`
     );
     const toggle = element(
       "button",
@@ -323,7 +332,7 @@ function renderSideTable(
         ? "See more"
         : "See less";
       count.textContent = expanded
-        ? `${COLLAPSED_ORDER_COUNT} / ${orders.length} shown`
+        ? `${collapsedCount} / ${orders.length} shown`
         : `${orders.length} / ${orders.length} shown`;
     });
     footer.append(count, toggle);
