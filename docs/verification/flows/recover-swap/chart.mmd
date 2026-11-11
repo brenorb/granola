@@ -1,0 +1,22 @@
+---
+title: "Resume or recover an interrupted swap"
+---
+stateDiagram-v2
+  s0: Swap interrupted
+  s1: Resume from saved checkpoint
+  s2: Swap frozen
+  s3: Wait for refund window
+  s4: Swap filled
+  s5: Refund eligible
+  s6: Offer returned to maker
+  s7: Payment returned to taker
+  s8: Order released
+  [*] --> s0
+  s0 --> s1: Reopen the profile
+  s1 --> s2: Recovery finds no local lock to refund
+  s1 --> s3: Safe claim window ends
+  s1 --> s4: Both spends are verified
+  s3 --> s5: Mint confirms unspent after the refund guard
+  s5 --> s6: Refund reaches the wallet
+  s5 --> s7: Refund reaches the wallet
+  s6 --> s8: Reservation expires and release is acknowledged

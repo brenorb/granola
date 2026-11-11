@@ -1,0 +1,22 @@
+---
+title: "Post and cancel an order"
+---
+stateDiagram-v2
+  s0: Order ticket
+  s1: Posting order
+  s2: Pending publication
+  s3: Order acknowledged
+  s4: Canceling order
+  s5: Order disappears at expiry
+  s6: Cancellation acknowledged
+  s7: Pending cancellation
+  [*] --> s0
+  s0 --> s1: Post a funded order
+  s1 --> s2: No relay acknowledges
+  s1 --> s3: A relay acknowledges the order
+  s2 --> s1: Retry pending publication
+  s3 --> s4: Cancel the order
+  s3 --> s5: Order lifetime ends
+  s4 --> s6: A relay acknowledges cancellation
+  s4 --> s7: No relay acknowledges cancellation
+  s7 --> s4: Retry pending cancellation

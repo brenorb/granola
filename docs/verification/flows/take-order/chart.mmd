@@ -1,0 +1,30 @@
+---
+title: "Take an order and settle"
+---
+stateDiagram-v2
+  s0: Choose a bid or ask
+  s1: Waiting for maker
+  s2: Maker offer verified
+  s3: Order busy or changed
+  s4: Swap needs recovery
+  s5: Both sides locked
+  s6: Maker claimed payment
+  s7: Both mint spends verified
+  s8: Taker shows filled
+  s9: Maker shows filled
+  s10: Both browsers show filled
+  [*] --> s0
+  s0 --> s1: Take the order
+  s1 --> s2: Maker accepts with the locked offer
+  s1 --> s3: Maker replies that order changed or is busy
+  s1 --> s4: Peer wait or settlement window runs out
+  s2 --> s4: Peer wait or settlement window runs out
+  s2 --> s5: Taker sends the locked payment
+  s5 --> s4: Peer wait or settlement window runs out
+  s5 --> s6: Payment mint exposes the spend witness
+  s6 --> s4: Peer wait or settlement window runs out
+  s6 --> s7: Taker claims the offer and both spends are verified
+  s7 --> s8: Taker finishes
+  s7 --> s9: Maker finishes after staging the fill
+  s9 --> s10: Taker finishes
+  s8 --> s10: Maker finishes after staging the fill
