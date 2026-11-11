@@ -105,7 +105,7 @@ stateDiagram-v2
 
 ## Fund the test wallet
 
-The marked state can be reached with or without wallet credit. The failure path requires interruption after mint issuance and before the local wallet save, then an explicit retry through the agent API. The chart hides terminal stuttering. The model covers one quote and one interruption.
+Granola saves the exact issuance outputs before asking the mint for tokens. After an interruption, retrying a paid quote uses the saved outputs. Retrying an issued quote restores the signatures for those outputs. The wallet balance and quote credit marker update together. The chart hides terminal stuttering and models one quote with repeatable interruptions.
 
 [Mermaid source](fund-wallet/chart.mmd) · [TLC report](fund-wallet/report.md) · [TLA+ model](fund-wallet/FundWallet.tla)
 
@@ -114,34 +114,26 @@ The marked state can be reached with or without wallet credit. The failure path 
 title: "Fund the test wallet"
 ---
 stateDiagram-v2
-  state "Legend" as legend {
-    lg0: Breaks IssuedQuoteHasWalletCredit in some cases
-    lg1: Path to the IssuedQuoteHasWalletCredit bug
-  }
-  class lg0 mayBreak
-  class lg1 bugPath
   s0: Wallet ready to fund
   s1: Waiting for mint payment
   s2: Funding wait timed out
-  s3: Mint issued tokens
-  s4: Browser closed before balance update
-  s5: Wallet balance updated
-  s6: Quote marked issued
+  s3: Funding attempt saved
+  s4: Saved funding attempt can resume
+  s5: Mint issued tokens
+  s6: Tokens ready to save
+  s7: Wallet credited
   [*] --> s0
   s0 --> s1: Request test tokens
   s1 --> s2: Polling limit is reached
-  s1 --> s3: Payment clears and the mint issues tokens
-  s3 --> s4: Browser closes before the wallet write
-  s3 --> s5: Browser saves the tokens
-  s4 --> s6: Retry the saved quote through the agent API
-  s5 --> s6: Funding reports success
-  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
-  class s0 bugPath
-  class s1 bugPath
-  class s3 bugPath
-  class s4 bugPath
-  class s6 mayBreak
-  class s6 bugPath
+  s1 --> s3: Payment clears and the wallet saves the attempt
+  s3 --> s4: Browser closes or local save fails
+  s3 --> s5: Mint issues tokens
+  s4 --> s3: Retry the paid quote with the same outputs
+  s5 --> s4: Browser closes or local save fails
+  s5 --> s6: Wallet receives the tokens
+  s4 --> s6: Recover the issued tokens from the mint
+  s6 --> s4: Browser closes or local save fails
+  s6 --> s7: Save the tokens and mark the quote credited together
 ```
 
 ## Regenerate
@@ -155,4 +147,4 @@ node "$PSTACK_STATECHART" "$scratch/TakeOrder.tla" \
   --view "$scratch/view.mjs" --out "$scratch/result"
 ```
 
-Use the matching module and folder for each flow. The command writes `chart.mmd` and `report.md`. The current funding run exits with a counterexample and still writes both files.
+Use the matching module and folder for each flow. The command writes `chart.mmd` and `report.md`.

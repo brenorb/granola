@@ -1,13 +1,14 @@
 ---- MODULE Cashu ----
 EXTENDS Integers
-CONSTANT Broken
+CONSTANTS Broken, BreakFunding
 VARIABLE s
 
 Init ==
   \E kind \in {"lock", "claim", "refund", "fund"} :
     s = [kind |-> kind, journal |-> "empty", owner |-> "none",
          mintIssued |-> FALSE, walletSaved |-> FALSE, quote |-> "none",
-         interrupted |-> FALSE,
+         prepared |-> FALSE, inFlight |-> FALSE, fundingResult |-> FALSE,
+         credited |-> FALSE,
          proof |-> "UNKNOWN", wake |-> "idle", writes |-> 0]
 
 Prepare ==
@@ -54,21 +55,37 @@ MarkPaid ==
   /\ s.quote = "UNPAID"
   /\ s' = [s EXCEPT !.quote = "PAID"]
 
+PrepareFunding ==
+  /\ s.quote = "PAID" /\ ~s.prepared
+  /\ s' = [s EXCEPT !.prepared = TRUE]
+
+SubmitFunding ==
+  /\ s.quote = "PAID" /\ s.prepared /\ ~s.inFlight /\ ~s.mintIssued
+  /\ s' = [s EXCEPT !.inFlight = TRUE]
+
 IssueQuote ==
-  /\ s.quote = "PAID" /\ ~s.mintIssued
+  /\ s.inFlight /\ ~s.mintIssued
   /\ s' = [s EXCEPT !.mintIssued = TRUE]
 
-SaveFundingWallet ==
-  /\ s.quote = "PAID" /\ s.mintIssued /\ ~s.walletSaved /\ ~s.interrupted
-  /\ s' = [s EXCEPT !.walletSaved = TRUE, !.writes = @ + 1]
+ReceiveFunding ==
+  /\ s.inFlight /\ s.mintIssued
+  /\ s' = [s EXCEPT !.inFlight = FALSE, !.fundingResult = TRUE]
 
 InterruptFunding ==
-  /\ s.quote = "PAID" /\ s.mintIssued /\ ~s.walletSaved /\ ~s.interrupted
-  /\ s' = [s EXCEPT !.interrupted = TRUE]
+  /\ s.inFlight \/ s.fundingResult
+  /\ s' = [s EXCEPT !.inFlight = FALSE, !.fundingResult = FALSE]
 
-SaveIssuedQuote ==
-  /\ s.quote = "PAID" /\ s.mintIssued /\ (s.walletSaved \/ s.interrupted)
-  /\ s' = [s EXCEPT !.quote = "ISSUED"]
+RestoreFunding ==
+  /\ s.quote = "PAID" /\ s.prepared /\ s.mintIssued
+  /\ ~s.inFlight /\ ~s.fundingResult
+  /\ s' = [s EXCEPT !.fundingResult = TRUE]
+
+\* The proof batch, credit marker, and removal of prepared outputs share one commit.
+CommitFunding ==
+  /\ s.fundingResult /\ ~s.credited
+  /\ s' = [s EXCEPT !.walletSaved = ~BreakFunding,
+           !.credited = TRUE, !.quote = "ISSUED", !.prepared = FALSE,
+           !.fundingResult = FALSE, !.writes = IF BreakFunding THEN @ ELSE @ + 1]
 
 \* The initial read may already be SPENT. A notification only ends the wait.
 Observe ==
@@ -88,8 +105,14 @@ Wake ==
 
 Next == Prepare \/ ReserveInputs \/ SaveReservationCheckpoint \/ MintCompletes
         \/ SaveMintResult \/ SaveWallet \/ ReleaseInputs \/ SaveWalletCheckpoint
-        \/ ClearOperation \/ MintQuote \/ MarkPaid \/ IssueQuote \/ SaveFundingWallet
-        \/ InterruptFunding \/ SaveIssuedQuote \/ Observe \/ WaitForProof \/ Wake
+        \/ ClearOperation \/ MintQuote \/ MarkPaid \/ PrepareFunding \/ SubmitFunding
+        \/ IssueQuote \/ ReceiveFunding \/ InterruptFunding \/ RestoreFunding \/ CommitFunding
+        \/ Observe \/ WaitForProof \/ Wake
 
 WalletResultAppliedOnce == s.writes <= 1
+FundingCommitIsAtomic ==
+  s.kind = "fund" =>
+    /\ s.credited = s.walletSaved
+    /\ (s.quote = "ISSUED") = s.credited
+    /\ s.credited => s.mintIssued /\ ~s.prepared
 ====
