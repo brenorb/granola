@@ -4,6 +4,9 @@ import {
   getEncodedToken,
   getTokenMetadata,
   MintQuoteState,
+  OutputData,
+  type MintPreview,
+  type SerializedOutputData,
   type Wallet,
   type GetInfoResponse,
   type MintQuoteBolt11Response,
@@ -64,6 +67,16 @@ export interface CashuQuote {
   expiry: number | null;
 }
 
+export interface PreparedMintIssuance {
+  keysetId: string;
+  outputs: SerializedOutputData[];
+}
+
+export interface MintIssuanceCheckpoint {
+  prepared?: PreparedMintIssuance;
+  savePrepared(quote: CashuQuote, prepared: PreparedMintIssuance): Promise<void>;
+}
+
 export interface TokenSummary {
   mintUrl: string;
   unit: string;
@@ -106,6 +119,29 @@ function quoteFromResponse(
     state: response.state,
     expiry: response.expiry
   };
+}
+
+async function restoreMintProofs(wallet: Wallet, preview: MintPreview): Promise<Proof[]> {
+  const expected = preview.payload.outputs;
+  const { outputs, signatures } = await wallet.mint.restore({ outputs: expected });
+  if (outputs.length !== expected.length || signatures.length !== expected.length) {
+    throw new Error("Mint did not restore the complete funding issuance");
+  }
+  const indexByPoint = new Map(outputs.map((output, index) => [output.B_, index]));
+  const keyset = wallet.getKeyset(preview.keysetId);
+  return preview.outputData.map((data) => {
+    const output = data.blindedMessage;
+    const index = indexByPoint.get(output.B_);
+    const restored = index === undefined ? undefined : outputs[index];
+    const signature = index === undefined ? undefined : signatures[index];
+    if (
+      restored?.id !== output.id || restored.amount.toString() !== output.amount.toString() ||
+      signature?.id !== output.id || signature.amount.toString() !== output.amount.toString()
+    ) {
+      throw new Error("Mint restored signatures for different funding outputs");
+    }
+    return data.toProof(signature, keyset);
+  });
 }
 
 function capabilitiesFromInfo(
@@ -246,16 +282,23 @@ export class CashuClient {
     return quoteFromResponse(mintUrl, response);
   }
 
-  async checkAndMint(quote: CashuQuote): Promise<{
+  async checkAndMint(quote: CashuQuote, checkpoint?: MintIssuanceCheckpoint): Promise<{
     quote: CashuQuote;
     batch?: WalletPocket;
   }> {
     const wallet = await this.wallet(quote.mintUrl, quote.unit);
     const checked = await wallet.checkMintQuoteBolt11(quote.quoteId);
     const current = quoteFromResponse(quote.mintUrl, checked);
-    if (checked.state !== MintQuoteState.PAID) return { quote: current };
+    if (current.quoteId !== quote.quoteId || current.unit !== quote.unit || current.amount !== quote.amount) {
+      throw new Error("Mint returned a different funding quote");
+    }
+    const paid = checked.state === MintQuoteState.PAID;
+    const restoring = checked.state === MintQuoteState.ISSUED && checkpoint?.prepared !== undefined;
+    if (!paid && !restoring) return { quote: current };
 
-    const proofs = await wallet.mintProofsBolt11(checked.amount, checked);
+    const proofs = checkpoint
+      ? await this.completeFundingIssuance(wallet, checked, current, checkpoint)
+      : await wallet.mintProofsBolt11(checked.amount, checked);
     return {
       quote: { ...current, state: MintQuoteState.ISSUED },
       batch: {
@@ -264,6 +307,43 @@ export class CashuClient {
         proofs: proofs.map(toStoredProof)
       }
     };
+  }
+
+  private async completeFundingIssuance(
+    wallet: Wallet,
+    checked: MintQuoteBolt11Response,
+    quote: CashuQuote,
+    checkpoint: MintIssuanceCheckpoint
+  ): Promise<Proof[]> {
+    const prepared = checkpoint.prepared;
+    if (!prepared) {
+      const preview = await wallet.prepareMint("bolt11", checked.amount, checked);
+      await checkpoint.savePrepared(quote, {
+        keysetId: preview.keysetId,
+        outputs: preview.outputData.map((output) => OutputData.serialize(output))
+      });
+      return wallet.completeMint(preview);
+    }
+
+    const outputData = prepared.outputs.map((output) => OutputData.deserialize(output));
+    const outputs = outputData.map(({ blindedMessage }) => blindedMessage);
+    if (
+      new Set(outputs.map(({ B_ }) => B_)).size !== outputs.length ||
+      outputs.some(({ id }) => id !== prepared.keysetId) ||
+      OutputData.sumOutputAmounts(outputData).toString() !== quote.amount
+    ) {
+      throw new Error("Prepared funding outputs do not match the quote");
+    }
+    const preview = {
+      method: "bolt11",
+      quote: checked,
+      keysetId: prepared.keysetId,
+      payload: { quote: quote.quoteId, outputs },
+      outputData
+    };
+    return checked.state === MintQuoteState.ISSUED
+      ? restoreMintProofs(wallet, preview)
+      : wallet.completeMint(preview);
   }
 
   inspectToken(token: string): TokenSummary {

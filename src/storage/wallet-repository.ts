@@ -9,6 +9,12 @@ export interface StorageDriver {
   delete(key: string): Promise<void>;
 }
 
+type StorageEntry = readonly [key: string, value: unknown];
+
+export interface AtomicStorageDriver extends StorageDriver {
+  setMany(entries: readonly StorageEntry[]): Promise<void>;
+}
+
 function assertWalletState(value: unknown): asserts value is WalletState {
   if (!value || typeof value !== "object") {
     throw new Error("Wallet storage is corrupt");
@@ -62,12 +68,22 @@ export class WalletRepository {
     await this.driver.set(WALLET_KEY, structuredClone(state));
   }
 
+  async saveAlongside(
+    state: WalletState,
+    driver: AtomicStorageDriver,
+    entry: StorageEntry
+  ): Promise<void> {
+    if (driver !== this.driver) throw new Error("Wallet and funding quotes must share storage");
+    assertWalletState(state);
+    await driver.setMany([[WALLET_KEY, state], entry]);
+  }
+
   async clear(): Promise<void> {
     await this.driver.delete(WALLET_KEY);
   }
 }
 
-export class MemoryStorageDriver implements StorageDriver {
+export class MemoryStorageDriver implements AtomicStorageDriver {
   private readonly values = new Map<string, unknown>();
 
   async get(key: string): Promise<unknown> {
@@ -79,12 +95,16 @@ export class MemoryStorageDriver implements StorageDriver {
     this.values.set(key, structuredClone(value));
   }
 
+  async setMany(entries: readonly StorageEntry[]): Promise<void> {
+    for (const [key, value] of structuredClone(entries)) this.values.set(key, value);
+  }
+
   async delete(key: string): Promise<void> {
     this.values.delete(key);
   }
 }
 
-export class IndexedDbStorageDriver implements StorageDriver {
+export class IndexedDbStorageDriver implements AtomicStorageDriver {
   private database: Promise<IDBDatabase> | undefined;
   private readonly invalidation = new AbortController();
   readonly invalidationSignal = this.invalidation.signal;
@@ -133,19 +153,35 @@ export class IndexedDbStorageDriver implements StorageDriver {
     });
   }
 
-  private async request<T>(
+  private async transact<T>(
     mode: IDBTransactionMode,
-    operation: (store: IDBObjectStore) => IDBRequest<T>
+    operation: (store: IDBObjectStore) => () => T,
+    options?: IDBTransactionOptions
   ): Promise<T> {
     const database = await this.open();
     this.invalidationSignal.throwIfAborted();
     return await new Promise<T>((resolve, reject) => {
-      const transaction = database.transaction(this.storeName, mode);
-      const request = operation(transaction.objectStore(this.storeName));
+      const transaction = database.transaction(this.storeName, mode, options);
+      let result: () => T;
       // Resolve only after commit: an IDB request can succeed before its transaction aborts.
-      transaction.oncomplete = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+      transaction.oncomplete = () => resolve(result());
       transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB aborted"));
+      try {
+        result = operation(transaction.objectStore(this.storeName));
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    });
+  }
+
+  private request<T>(
+    mode: IDBTransactionMode,
+    operation: (store: IDBObjectStore) => IDBRequest<T>
+  ): Promise<T> {
+    return this.transact(mode, (store) => {
+      const request = operation(store);
+      return () => request.result;
     });
   }
 
@@ -155,6 +191,13 @@ export class IndexedDbStorageDriver implements StorageDriver {
 
   async set(key: string, value: unknown): Promise<void> {
     await this.request("readwrite", (store) => store.put(value, key));
+  }
+
+  async setMany(entries: readonly StorageEntry[]): Promise<void> {
+    await this.transact("readwrite", (store) => {
+      for (const [key, value] of entries) store.put(value, key);
+      return () => undefined;
+    }, { durability: "strict" });
   }
 
   async delete(key: string): Promise<void> {

@@ -171,9 +171,11 @@ remainder and rejecting a zero-cent result.
 ## Fake mint behavior
 
 The default Testnut mints automatically mark fake BOLT11 quotes paid. Call
-`claimMint(ref)` until the public quote state is `ISSUED`; one-second polling
-with a bounded timeout is sufficient for tests. An unpaid result changes no
-wallet balance.
+`claimMint(ref)` until the public quote's `walletCredit` is `credited`.
+One-second polling with a bounded timeout is sufficient for tests. After an
+interruption, retry the same local reference. A `recoverable` quote has a
+saved issuance attempt, and `unknown` means the mint reported `ISSUED`
+without a local credit record or saved recovery data.
 
 The public app has a fixed network allowlist matching its Content Security
 Policy: `https://testnut.cashu.space` and

@@ -1,7 +1,8 @@
+import { Amount, OutputData, type MintPreview } from "@cashu/cashu-ts";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CashuQuote, TokenSummary } from "../cashu/client.js";
-import { createEmptyWallet, type WalletPocket } from "../core/wallet.js";
+import { CashuClient, type CashuQuote, type TokenSummary } from "../cashu/client.js";
+import { createEmptyWallet, replaceProofs, type WalletPocket } from "../core/wallet.js";
 import {
   MemoryStorageDriver,
   WalletRepository
@@ -73,6 +74,7 @@ describe("Granola agent API", () => {
       unit: "usd",
       amount: "500",
       state: "UNPAID",
+      walletCredit: "pending",
       expiry: 1234
     });
     expect(JSON.stringify(await reloaded.getState())).not.toContain(
@@ -84,9 +86,14 @@ describe("Granola agent API", () => {
     const driver = new MemoryStorageDriver();
     const cashu = fakeCashu();
     cashu.createMintQuote.mockResolvedValue(quote);
-    cashu.checkAndMint.mockResolvedValue({
-      quote: { ...quote, state: "ISSUED" },
-      batch
+    cashu.checkAndMint.mockImplementation(async (_quote, checkpoint) => {
+      const keysetId = "00deadbeefcafeee";
+      const output = OutputData.createSingleRandomData(quote.amount, keysetId);
+      await checkpoint.savePrepared({ ...quote, state: "PAID" }, {
+        keysetId,
+        outputs: [OutputData.serialize(output)]
+      });
+      return { quote: { ...quote, state: "ISSUED" }, batch };
     });
     const api = new GranolaApi(
       new WalletRepository(driver),
@@ -106,8 +113,124 @@ describe("Granola agent API", () => {
     expect(state.wallet.balances).toEqual([
       { unit: "usd", amount: "500", mintCount: 1, proofCount: 1 }
     ]);
-    expect(state.quotes[0]?.state).toBe("ISSUED");
+    expect(state.quotes[0]).toMatchObject({ state: "ISSUED", walletCredit: "credited" });
     expect(JSON.stringify(state)).not.toContain("bearer-secret");
+  });
+
+  it.each(["before issuance", "after issuance", "during local commit"] as const)(
+    "credits a saved funding quote once after an interruption %s",
+    async (interruption) => {
+      const driver = new MemoryStorageDriver();
+      const quotes = new QuoteRepository(driver);
+      const wallets = new WalletRepository(driver);
+      const crash = new Error("Simulated funding interruption");
+      const setMany = driver.setMany.bind(driver);
+      let interrupted = false;
+      vi.spyOn(driver, "setMany").mockImplementation(async (entries) => {
+        if (interruption === "during local commit" && entries.length === 2 && !interrupted) {
+          interrupted = true;
+          throw crash;
+        }
+        await setMany(entries);
+      });
+
+      const keysetId = "00deadbeefcafeee";
+      // Synthetic signing key for a fake mint. The compressed generator lets
+      // the test exercise the SDK's real output serialization and unblinding.
+      const keyset = {
+        id: keysetId,
+        keys: { [quote.amount]: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798" }
+      };
+      const amount = Amount.from(quote.amount);
+      const mintQuote = { quote: quote.quoteId, request: quote.request, unit: quote.unit, amount, expiry: quote.expiry };
+      let issued: MintPreview["payload"]["outputs"] | undefined;
+      const signature = (output: MintPreview["payload"]["outputs"][number]) => ({
+        amount: output.amount, id: output.id, C_: output.B_
+      });
+      const wallet = {
+        getMintInfo: () => ({ cache: { nuts: { "4": { methods: [{ method: "bolt11", unit: quote.unit }] } } } }),
+        createMintQuoteBolt11: async () => ({ ...mintQuote, state: "UNPAID" }),
+        checkMintQuoteBolt11: vi.fn(async () => ({ ...mintQuote, state: issued ? "ISSUED" : "PAID" })),
+        prepareMint: vi.fn(async () => {
+          const output = OutputData.createSingleRandomData(amount, keysetId);
+          return {
+            method: "bolt11",
+            quote: mintQuote,
+            keysetId,
+            outputData: [output],
+            payload: { quote: quote.quoteId, outputs: [output.blindedMessage] }
+          };
+        }),
+        completeMint: vi.fn(async (preview: MintPreview) => {
+          const saved = (await quotes.load())[0]?.prepared;
+          expect(saved?.outputs.map((output) => output.blindedMessage.B_))
+            .toEqual(preview.payload.outputs.map((output) => output.B_));
+          if (!interrupted && interruption !== "during local commit") {
+            interrupted = true;
+            if (interruption === "after issuance") issued = preview.payload.outputs;
+            throw crash;
+          }
+          issued = preview.payload.outputs;
+          return preview.outputData.map((output) => output.toProof(signature(output.blindedMessage), keyset));
+        }),
+        getKeyset: () => keyset,
+        mint: {
+          restore: vi.fn(async ({ outputs }: { outputs: MintPreview["payload"]["outputs"] }) => {
+            expect(outputs.map(({ B_ }) => B_)).toEqual(issued?.map(({ B_ }) => B_));
+            return { outputs, signatures: outputs.map(signature) };
+          })
+        }
+      };
+      const api = () => new GranolaApi(
+        new WalletRepository(driver),
+        new QuoteRepository(driver),
+        Object.assign(new CashuClient(), { wallet: async () => wallet }),
+        () => "local-ref"
+      );
+      const first = api();
+      const { ref } = await first.requestMint({ mintUrl: quote.mintUrl, unit: quote.unit, amount: quote.amount });
+      await expect(first.claimMint(ref)).rejects.toBe(crash);
+
+      const reopened = api();
+      const pending = await reopened.getState();
+      expect(pending.quotes[0]).toMatchObject({ state: "PAID", walletCredit: "recoverable" });
+      expect(pending.wallet.balances).toEqual([]);
+
+      const credited = await reopened.claimMint(ref);
+      expect(credited.quotes[0]).toMatchObject({ state: "ISSUED", walletCredit: "credited" });
+      expect(credited.wallet.balances).toEqual([
+        { unit: quote.unit, amount: quote.amount, mintCount: 1, proofCount: 1 }
+      ]);
+      expect((await quotes.load())[0]?.prepared).toBeUndefined();
+      expect(wallet.prepareMint).toHaveBeenCalledOnce();
+      expect(wallet.completeMint).toHaveBeenCalledTimes(interruption === "before issuance" ? 2 : 1);
+      expect(wallet.mint.restore).toHaveBeenCalledTimes(interruption === "before issuance" ? 0 : 1);
+      expect(await reopened.claimMint(ref)).toEqual(credited);
+
+      const funded = await wallets.load();
+      const pocket = funded.pockets[0]!;
+      await wallets.save(replaceProofs(funded, {
+        ...pocket, spentSecrets: pocket.proofs.map(({ secret }) => secret), proofs: []
+      }));
+      const afterSpend = await api().claimMint(ref);
+      expect(afterSpend.wallet.balances).toEqual([]);
+      expect(afterSpend.quotes[0]?.walletCredit).toBe("credited");
+      expect(wallet.checkMintQuoteBolt11).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("keeps legacy issued quotes readable without assuming they were credited", async () => {
+    const driver = new MemoryStorageDriver();
+    const quotes = new QuoteRepository(driver);
+    const issued = { ...quote, state: "ISSUED" } as const;
+    await quotes.save([{ ref: "legacy-ref", quote: issued }]);
+    const cashu = fakeCashu();
+    cashu.checkAndMint.mockResolvedValue({ quote: issued });
+    const api = new GranolaApi(new WalletRepository(driver), quotes, cashu);
+
+    const state = await api.claimMint("legacy-ref");
+    expect(state.quotes[0]).toMatchObject({ state: "ISSUED", walletCredit: "unknown" });
+    expect(state.wallet.balances).toEqual([]);
   });
 
   it("rejects mints outside the browser CSP allowlist before network access", async () => {

@@ -467,19 +467,30 @@ async function requestAndClaimMint(input: {
   amount: string;
 }, button?: HTMLButtonElement): Promise<void> {
   const task = async (): Promise<void> => {
-    const quote = await granola.requestMint(input);
-    log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
-    report("Quote created; waiting for the Testnut mint to mark it paid");
+    const pending = (await granola.getState()).quotes.find((quote) =>
+      quote.walletCredit === "recoverable" &&
+      quote.mintUrl === input.mintUrl && quote.unit === input.unit && quote.amount === input.amount
+    );
+    const quote = pending ?? await granola.requestMint(input);
+    if (pending) {
+      report("Resuming the saved funding attempt");
+    } else {
+      log(`Mint quote requested for ${formatUnitAmount(quote.amount, quote.unit)} from ${new URL(quote.mintUrl).host}`);
+      report("Quote created; waiting for the Testnut mint to mark it paid");
+    }
 
     for (let attempt = 0; attempt < 60; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
       const state = await granola.claimMint(quote.ref);
       await refresh(state);
       const current = state.quotes.find((item) => item.ref === quote.ref);
-      if (current?.state === "ISSUED") {
+      if (current?.walletCredit === "credited") {
         log(`Received ${formatUnitAmount(current.amount, current.unit)} of Testnut ecash`);
         report("Testnut tokens added to this browser wallet");
         return;
+      }
+      if (current?.walletCredit === "unknown") {
+        throw new Error("Mint issued the quote, but the wallet has no saved funding result");
       }
     }
     throw new Error("The quote did not become paid within 60 seconds");

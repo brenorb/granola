@@ -1,6 +1,8 @@
 import type {
   CashuQuote,
+  MintIssuanceCheckpoint,
   MintCapabilities,
+  PreparedMintIssuance,
   TokenSummary
 } from "../cashu/client.js";
 import {
@@ -8,12 +10,14 @@ import {
   getWalletView,
   normalizeMintUrl,
   type WalletPocket,
+  type WalletState,
   type WalletView
 } from "../core/wallet.js";
 import type {
-  StorageDriver,
+  AtomicStorageDriver,
   WalletRepository
 } from "../storage/wallet-repository.js";
+import { reconcileExactProofOutputs } from "../trade/wallet-reconcile.js";
 
 const QUOTE_KEY = "granola.quotes.v1";
 const ALLOWED_TEST_MINTS = new Set([
@@ -32,6 +36,8 @@ function allowedTestMint(mintUrl: string): string {
 interface StoredQuote {
   ref: string;
   quote: CashuQuote;
+  prepared?: PreparedMintIssuance;
+  credited?: true;
 }
 
 export interface PublicQuote {
@@ -41,6 +47,7 @@ export interface PublicQuote {
   unit: string;
   amount: string;
   state: CashuQuote["state"];
+  walletCredit: "pending" | "recoverable" | "credited" | "unknown";
   expiry: number | null;
 }
 
@@ -56,7 +63,7 @@ export interface CashuPort {
     unit: string;
     amount: string;
   }): Promise<CashuQuote>;
-  checkAndMint(quote: CashuQuote): Promise<{
+  checkAndMint(quote: CashuQuote, checkpoint: MintIssuanceCheckpoint): Promise<{
     quote: CashuQuote;
     batch?: WalletPocket;
   }>;
@@ -67,6 +74,9 @@ export interface CashuPort {
 
 function toPublicQuote(stored: StoredQuote): PublicQuote {
   const { quote } = stored;
+  const walletCredit = stored.credited ? "credited"
+    : stored.prepared ? "recoverable"
+    : quote.state === "ISSUED" ? "unknown" : "pending";
   return {
     ref: stored.ref,
     request: quote.request,
@@ -74,6 +84,7 @@ function toPublicQuote(stored: StoredQuote): PublicQuote {
     unit: quote.unit,
     amount: quote.amount,
     state: quote.state,
+    walletCredit,
     expiry: quote.expiry
   };
 }
@@ -90,7 +101,15 @@ function assertStoredQuotes(value: unknown): asserts value is StoredQuote[] {
       typeof item.quote.mintUrl !== "string" ||
       typeof item.quote.unit !== "string" ||
       typeof item.quote.amount !== "string" ||
-      !["UNPAID", "PAID", "ISSUED"].includes(item.quote.state)
+      !["UNPAID", "PAID", "ISSUED"].includes(item.quote.state) ||
+      (item.credited !== undefined &&
+        (item.credited !== true || item.quote.state !== "ISSUED" || item.prepared !== undefined)) ||
+      (item.prepared !== undefined && (
+        !item.prepared ||
+        typeof item.prepared.keysetId !== "string" ||
+        !Array.isArray(item.prepared.outputs) ||
+        item.prepared.outputs.length === 0
+      ))
     ) {
       throw new Error("Quote storage is corrupt");
     }
@@ -98,7 +117,7 @@ function assertStoredQuotes(value: unknown): asserts value is StoredQuote[] {
 }
 
 export class QuoteRepository {
-  constructor(private readonly driver: StorageDriver) {}
+  constructor(private readonly driver: AtomicStorageDriver) {}
 
   async load(): Promise<StoredQuote[]> {
     const value = await this.driver.get(QUOTE_KEY);
@@ -109,7 +128,16 @@ export class QuoteRepository {
 
   async save(quotes: StoredQuote[]): Promise<void> {
     assertStoredQuotes(quotes);
-    await this.driver.set(QUOTE_KEY, structuredClone(quotes));
+    await this.driver.setMany([[QUOTE_KEY, quotes]]);
+  }
+
+  async saveWithWallet(
+    quotes: StoredQuote[],
+    wallet: WalletRepository,
+    state: WalletState
+  ): Promise<void> {
+    assertStoredQuotes(quotes);
+    await wallet.saveAlongside(state, this.driver, [QUOTE_KEY, quotes]);
   }
 
   async clear(): Promise<void> {
@@ -167,14 +195,31 @@ export class GranolaApi {
     const index = quotes.findIndex((item) => item.ref === ref);
     const stored = quotes[index];
     if (!stored) throw new Error("Unknown local quote reference");
+    if (stored.credited) return this.getState();
 
-    const result = await this.cashu.checkAndMint(stored.quote);
-    if (result.batch) {
-      const wallet = addProofs(await this.wallets.load(), result.batch);
-      await this.wallets.save(wallet);
+    const result = await this.cashu.checkAndMint(stored.quote, {
+      ...(stored.prepared ? { prepared: stored.prepared } : {}),
+      savePrepared: async (quote, prepared) => {
+        quotes[index] = { ref, quote, prepared };
+        await this.quotes.save(quotes);
+      }
+    });
+    if (!result.batch) {
+      quotes[index] = { ...quotes[index]!, quote: result.quote };
+      await this.quotes.save(quotes);
+      return this.getState();
     }
-    quotes[index] = { ref: stored.ref, quote: result.quote };
-    await this.quotes.save(quotes);
+
+    const { batch } = result;
+    const amount = batch.proofs.reduce((sum, proof) => sum + BigInt(proof.amount), 0n);
+    if (
+      !quotes[index]?.prepared || result.quote.state !== "ISSUED" ||
+      batch.mintUrl !== stored.quote.mintUrl || batch.unit !== stored.quote.unit ||
+      amount.toString() !== stored.quote.amount
+    ) throw new Error("Mint result does not match the prepared funding quote");
+    const wallet = reconcileExactProofOutputs(await this.wallets.load(), batch);
+    quotes[index] = { ref, quote: result.quote, credited: true };
+    await this.quotes.saveWithWallet(quotes, this.wallets, wallet);
     return this.getState();
   }
 

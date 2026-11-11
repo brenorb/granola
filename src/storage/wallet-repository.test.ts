@@ -8,6 +8,45 @@ import {
 } from "./wallet-repository.js";
 
 describe("wallet repository", () => {
+  it("commits wallet and quote writes together and aborts if either put throws", async () => {
+    const put = vi.fn();
+    const transactions: Array<{ oncomplete?: () => void; onabort?: () => void; abort: () => void }> = [];
+    const database = {
+      transaction: vi.fn(() => {
+        const transaction = {
+          objectStore: () => ({ put }),
+          abort: vi.fn(() => queueMicrotask(() => transactions.at(-1)?.onabort?.()))
+        };
+        transactions.push(transaction);
+        return transaction;
+      })
+    };
+    const request: { result: typeof database; onsuccess?: () => void } = { result: database };
+    vi.stubGlobal("indexedDB", { open: () => {
+      queueMicrotask(() => request.onsuccess?.());
+      return request;
+    } });
+    try {
+      const driver = new IndexedDbStorageDriver("funding-profile");
+      const entries = [["wallet", "proofs"], ["quotes", "credited"]] as const;
+      let committed = false;
+      const commit = driver.setMany(entries).then(() => { committed = true; });
+      await vi.waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+      expect(put.mock.calls).toEqual([["proofs", "wallet"], ["credited", "quotes"]]);
+      expect(database.transaction).toHaveBeenCalledExactlyOnceWith(
+        "private-wallet", "readwrite", { durability: "strict" }
+      );
+      expect(committed).toBe(false);
+      transactions[0]!.oncomplete?.();
+      await commit;
+
+      const rejected = new Error("Quote could not be written");
+      put.mockImplementationOnce(() => undefined).mockImplementationOnce(() => { throw rejected; });
+      await expect(driver.setMany(entries)).rejects.toBe(rejected);
+      expect(transactions[1]!.abort).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it("shares an open connection, waits for commit and closes on cross-tab invalidation", async () => {
     const transactions: Array<{ oncomplete?: (() => void) | undefined; onabort?: () => void; error?: Error }> = [];
     const database = {
